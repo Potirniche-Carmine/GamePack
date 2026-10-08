@@ -1,0 +1,27 @@
+# MVP integration contract
+
+React Native desktop UI; Rust owns SQLite, media identity, profile, drafts, immutable comments. macOS uses AVPlayer and a native vector overlay. No web wrapper. MVP ZIP controls disabled.
+
+All application state uses GAMEPACK_HOME or ~/.gamepack: gamepack.sqlite3 (WAL/full synchronous), media/, cache/, tmp/, config. Managed video copies are deduplicated by BLAKE3 + size; originals untouched. UI imports a managed copy to meet single-folder requirement.
+
+Rust crate gamepack-core (rlib/staticlib), CXX bridge namespace gamepack with `dispatch(root: &str, request: &str) -> String`. Requests JSON `{command, ...fields}`; responses `{ok:true,data:...}` or `{ok:false,error:string}`. Native `GamePack.command(requestJson): Promise<string>` serializes Rust access off main thread. `GamePack.chooseVideo(): Promise<string|null>` returns a file path. `GamePack.dataDirectory(): Promise<string>`. Use explicit root on every Rust request. Native may supply `GAMEPACK_HOME` override.
+
+Commands:
+- bootstrap -> {profile:{author_id,name},projects:Project[],videos:Video[],comments:Comment[],drafts:Draft[],storage:{root,managed_bytes,database_bytes}}
+- set_profile {name} -> Profile
+- create_project {title} -> Project
+- import_video {path,project_id,duration_us,width,height} -> Video (metadata optional; can update later)
+- update_video_metadata {video_id,duration_us,width,height} -> Video
+- save_draft {draft:Draft} -> Draft
+- discard_draft {draft_id} -> null
+- post_draft {draft_id} -> Comment (stable comment_id = draft_id, idempotent retry)
+- verify_video {video_id} -> {valid:bool,path:string}
+
+Project {id,title,created_at}; Video {id,project_id,media_id,title,path,byte_size,duration_us,width,height}. Profile initially name empty; UI asks before posting. Default project `Review library` is created by bootstrap.
+Draft {id,project_id,video_id,text,anchor,parent_comment_id?:string|null,drawings:Drawing[]}; Comment extends Draft with {comment_id,media_id,author_id,name_at_posting,created_at_reported,digest,schema_version:1} (id may equal comment_id). Drafts store no author snapshot until atomic post. Times are integer microseconds (safe JS integer for ordinary clips), geometry fixed-point 0..1000000. No edit/delete posted API; DB triggers enforce immutable rows. Reject invalid references, bounds, samples, text. Drafts can be blank. Posts require text or drawing and named profile.
+Anchor {kind:'point',at_us:number} | {kind:'interval',start_us:number,end_us:number}.
+Drawing {id,tool:'pen'|'arrow'|'ellipse',color:'#RRGGBB',width:number,visible_from_us:number,visible_until_us:number,samples:{x:number,y:number,t_us:number}[]}. Times are offsets relative to anchor (point uses 0). width is normalized 0..1000000. Point drawing visibility fields 0; interval visible_until_us <= duration, end-exclusive. Samples nondecreasing (paused samples same timestamp). Pure Rust evaluate_drawings(anchor,drawings,source_us) returns visible prefix; native equivalents follow same rules. One selected comment overlay only.
+
+Native RN view `GamePackPlayer` props: source:string, paused:boolean, rate:number, seekUs:number, seekToken:number, reviewEndUs:number (-1 unset), sceneJson:string, tool:string ('none'|'pen'|'arrow'|'ellipse'), strokeColor:string, onTime({nativeEvent:{time_us,duration_us,width,height,playing,ended?,error?}}), onDrawing({nativeEvent:{drawingJson:string}}). sceneJson `{anchor,drawings}` or empty string clears. Native draws live gesture and emits completed Drawing; UI appends to draft. Native clock drives progressive replay; JS events only update visible UI. Paused point overlay cleared by UI on play. Native content rect respects aspect fit, normalized geometry, resize. Pointer gestures only when tool != none; input captures dragging. Drawing paused semantics equal-time samples. Native seek finishes stroke.
+
+UI path packages/app/src/App.tsx default export. Own UI styles/components in same directory. UI command wrapper packages/app/src/native.ts and types.ts. macOS host registers AppRegistry component GamePack. No hidden mock data/fake persistence. UI errors actionable. Use actual RN elements, native player requireNativeComponent. Clean dark-neutral video workspace, light graphite sidebar/comment panel or cohesive charcoal, restrained orange/coral accent, system fonts, no eyebrow/subheaders. Disabled Import ZIP/Export ZIP visible with explanation. Autosave draft, point/interval, preview, undo/redo, replies, profile setting, persisted selected project/video as appropriate. Root owns native macOS shell/build integration.
