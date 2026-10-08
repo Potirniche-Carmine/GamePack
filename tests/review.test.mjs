@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {beginLiveDraft, commentThreads, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings, visibleThreads} from '../packages/app/src/review.ts';
+import {beginLiveDraft, capturedDraft, commentThreads, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings, visibleThreads} from '../packages/app/src/review.ts';
 
 const second = 1_000_000;
 const stroke = (id, times, tool = 'pen') => ({id, tool, color: '#79BFFD', width: 3500,
@@ -54,6 +54,37 @@ test('a persisted live snapshot restores the first-stroke origin and complete vi
   const saved = finalizeCapturedClip(continued, 10 * second, 30 * second);
   assert.equal(saved.anchor.start_us, 4 * second);
   assert.equal(saved.anchor.end_us, 10 * second);
+});
+
+test('closing a live draft normalizes the outgoing in-memory draft before a later autosave can overwrite recovery', () => {
+  const outgoing = {...draft([stroke('first', [3 * second, 3.5 * second])]), anchor: {kind: 'interval', start_us: second, end_us: 9 * second}};
+  // The native close acknowledgment replaces the provisional render draft;
+  // future timers now save this same normalized value even after live mode ends.
+  const closed = capturedDraft(outgoing, undefined, 9 * second, 30 * second, 9 * second, true);
+  const reopened = JSON.parse(JSON.stringify(closed));
+  assert.deepEqual(reopened.anchor, {kind: 'interval', start_us: 4 * second, end_us: 9 * second});
+  assert.equal(reopened.drawings[0].visible_until_us, 5 * second);
+  assert.deepEqual(reopened.drawings[0].samples.map(sample => sample.t_us), [0, second / 2]);
+  assert.equal(outgoing.anchor.start_us, second);
+});
+
+test('navigation keeps a held first stroke delivered only in the capture acknowledgment', () => {
+  const pending = stroke('held', [3 * second, 7 * second]);
+  const outgoing = {...draft(), anchor: {kind: 'interval', start_us: second, end_us: second + 1}};
+  const closed = capturedDraft(outgoing, pending, 8 * second, 30 * second, 8 * second, true);
+  assert.deepEqual(closed.anchor, {kind: 'interval', start_us: 4 * second, end_us: 8 * second + 1});
+  assert.deepEqual(closed.drawings[0].samples.map(sample => sample.t_us), [0, 4 * second]);
+  assert.equal(closed.drawings[0].visible_until_us, 4 * second + 1);
+  assert.equal(outgoing.drawings.length, 0);
+});
+
+test('a navigation acknowledgment merges once and retains a paused moment anchor', () => {
+  const pending = stroke('held', [0, 0], 'ellipse');
+  const point = {...draft([pending]), anchor: {kind: 'point', at_us: 5 * second}};
+  const closed = capturedDraft(point, pending, 5 * second, 30 * second, 5 * second, false);
+  assert.equal(closed.drawings.length, 1);
+  assert.deepEqual(closed.anchor, point.anchor);
+  assert.deepEqual(closed.drawings[0].samples, point.drawings[0].samples);
 });
 
 test('autosave bounds completed strokes while the rendering scene can continue to the video end', () => {

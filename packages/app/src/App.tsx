@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions} from 'react-native';
 import {anchorLabel, anchorStart, Button, Dialog, Empty, parseTime, Timeline, timeLabel} from './components';
 import {chooseVideo, command, dataDirectory, GamePackPlayer, setAppearance} from './native';
-import {beginLiveDraft, commentThreads, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings, visibleThreads} from './review';
+import {beginLiveDraft, capturedDraft, commentThreads, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings, visibleThreads} from './review';
 import {activeCommentIds, annotationScene, coloredReview, commentColorMap} from './playback';
 import {ThemeContext, useTheme, useThemeChoice} from './theme';
 import type {Anchor, Bootstrap, CaptureFinished, Comment, Draft, Drawing, DrawingTool, PlayerTime, Profile, Project, Settings, ThemeChoice, Video} from './types';
@@ -13,7 +13,7 @@ const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, value
   return (value === 'x' ? random : (random & 3) | 8).toString(16);
 });
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-type CaptureRequest = {token: number; draftId: string; purpose: 'save' | 'preview'; live: boolean};
+type CaptureRequest = {token: number; draftId: string; purpose: 'save' | 'preview' | 'leave'; live: boolean; after?: () => void | Promise<void>};
 
 export default function App() {
   const {width} = useWindowDimensions();
@@ -204,7 +204,12 @@ export default function App() {
   const clearEditing = () => {
     setDraftId(null); activeDraftRef.current = null; setLive(null); setPreview(false); setReviewing(false); setTool('none'); setRedo([]); setIsolatedReview(false);
   };
-  const openVideo = async (item: Video) => {
+  const leaveDraft = (after: () => void | Promise<void>) => {
+    if (busy || captureRequest.current) return;
+    if (draftsRef.current.some(item => item.id === activeDraftRef.current)) requestCapture('leave', after);
+    else void after();
+  };
+  const openVideoNow = async (item: Video) => {
     const generation = ++sourceGeneration.current;
     setPaused(true); clearEditing(); setShowScene(true); setVideoId(item.id); setProjectId(item.project_id);
     setCommentId(null); setDuration(item.duration_us); seek(0);
@@ -214,7 +219,8 @@ export default function App() {
         setError('This managed video failed its integrity check. Re-add the original video.');
     } catch (cause) { if (generation === sourceGeneration.current) setError(message(cause)); }
   };
-  const importVideo = async () => {
+  const openVideo = (item: Video) => leaveDraft(() => openVideoNow(item));
+  const importVideoNow = async () => {
     if (!projectId || busy) return;
     setBusy('Adding video…'); setError('');
     try {
@@ -222,16 +228,18 @@ export default function App() {
       await flushAll();
       const imported = await command<Video>(root, 'import_video', {path, project_id: projectId});
       const refreshed = await command<Bootstrap>(root, 'bootstrap');
-      draftsRef.current = refreshed.drafts; setData(refreshed); await openVideo(imported);
+      draftsRef.current = refreshed.drafts; setData(refreshed); await openVideoNow(imported);
     } catch (cause) { setError(`Could not add video: ${message(cause)}`); }
     finally { setBusy(''); }
   };
-  const openDraft = (value: Draft) => {
+  const importVideo = () => leaveDraft(importVideoNow);
+  const openDraftNow = (value: Draft) => {
     activeDraftRef.current = value.id; setDraftId(value.id); setCommentId(null); setLive(null);
     setPreview(false); setReviewing(false); setPaused(true); setShowScene(true); setTool('pen'); setRedo([]);
     seek(anchorStart(value.anchor));
   };
-  const newDraft = (parent?: Comment) => {
+  const openDraft = (value: Draft) => leaveDraft(() => openDraftNow(value));
+  const newDraftNow = (parent?: Comment) => {
     if (!video || busy) return;
     if (draft && !parent) { setTool('pen'); return; }
     try {
@@ -246,11 +254,17 @@ export default function App() {
       else { setPaused(true); seek(anchorStart(value.anchor)); }
     } catch (cause) { setError(message(cause)); }
   };
-  const selectComment = (item: Comment) => {
+  const newDraft = (parent?: Comment) => {
+    if (parent) leaveDraft(() => newDraftNow(parent));
+    else newDraftNow();
+  };
+  const selectCommentNow = (item: Comment) => {
     clearEditing(); setIsolatedReview(true); setCommentId(item.comment_id); setPaused(true); setShowScene(true); seek(anchorStart(item.anchor));
     setExpanded(previous => expandedAncestors(data?.comments ?? [], item.comment_id, previous));
   };
-  const dismissSelection = () => { clearEditing(); setCommentId(null); setShowScene(true); };
+  const selectComment = (item: Comment) => leaveDraft(() => selectCommentNow(item));
+  const dismissSelectionNow = () => { clearEditing(); setCommentId(null); setShowScene(true); };
+  const dismissSelection = () => leaveDraft(dismissSelectionNow);
   const startLive = () => {
     const current = draftsRef.current.find(item => item.id === activeDraftRef.current);
     if (!current || busy || preview) return;
@@ -360,24 +374,24 @@ export default function App() {
         const comments = [...previous.comments.filter(item => item.comment_id !== posted.comment_id), posted];
         return {...previous, drafts: draftsRef.current, comments};
       });
-      selectComment(posted);
+      selectCommentNow(posted);
       setCommentOpen(false);
     } catch (cause) {
       try {
         const refreshed = await command<Bootstrap>(root, 'bootstrap');
         const posted = refreshed.comments.find(item => item.comment_id === id);
-        if (posted) { draftsRef.current = refreshed.drafts; setData(refreshed); selectComment(posted); setCommentOpen(false); return; }
+        if (posted) { draftsRef.current = refreshed.drafts; setData(refreshed); selectCommentNow(posted); setCommentOpen(false); return; }
       } catch { /* Keep the local draft when storage cannot be reached. */ }
       setError(`Could not save comment: ${message(cause)}. Retry Save.`);
       setCommentOpen(true);
     } finally { setBusy(''); savingDraftId.current = null; }
   };
-  const requestCapture = (purpose: CaptureRequest['purpose']) => {
+  const requestCapture = (purpose: CaptureRequest['purpose'], after?: CaptureRequest['after']) => {
     if (!draft || busy || captureRequest.current) return;
     const token = ++captureSequence.current;
-    captureRequest.current = {token, draftId: draft.id, purpose, live: isLive};
+    captureRequest.current = {token, draftId: draft.id, purpose, live: isLive, after};
     savingDraftId.current = draft.id;
-    setBusy(purpose === 'save' ? 'Saving…' : 'Preparing preview…'); setError('');
+    setBusy(purpose === 'preview' ? 'Preparing preview…' : 'Saving…'); setError('');
     // The native acknowledgment pauses and finishes a held stroke atomically.
     setCaptureToken(token);
     captureTimer.current = setTimeout(() => {
@@ -394,12 +408,12 @@ export default function App() {
       const current = draftsRef.current.find(item => item.id === request.draftId);
       if (!current) throw new Error('The draft is no longer available.');
       if (!Number.isSafeInteger(event.time_us) || event.time_us < 0) throw new Error('The player returned an invalid capture time. Retry Save.');
-      let next = {...current, drawings: event.drawingJson ? mergeDrawings(current.drawings, [parseDrawing(event.drawingJson)]) : current.drawings};
-      if (request.live) next = finalizeCapturedClip(next, event.time_us, duration,
-        current.drawings.length ? furthest.current.get(current.id) ?? event.time_us : event.time_us);
+      const next = capturedDraft(current, event.drawingJson ? parseDrawing(event.drawingJson) : undefined,
+        event.time_us, duration, current.drawings.length ? furthest.current.get(current.id) ?? event.time_us : event.time_us, request.live);
       replaceDraft(next); setTime(event.time_us); setPaused(true); setTool('none'); setLive(null); setReviewing(false);
       captureRequest.current = null;
       await flushLatest(next.id);
+      if (request.purpose === 'leave') { setBusy(''); savingDraftId.current = null; await request.after?.(); return; }
       if (request.purpose === 'preview') { setBusy(''); savingDraftId.current = null; playReview(next, true); return; }
       if (next.anchor.kind === 'interval') seek(Math.max(next.anchor.start_us, next.anchor.end_us - 1));
       setBusy(''); savingDraftId.current = null; setCommentOpen(true);
@@ -416,7 +430,7 @@ export default function App() {
       await saveChain.current.catch(() => undefined);
       await command<null>(root, 'discard_draft', {draft_id: draft.id});
       draftsRef.current = draftsRef.current.filter(item => item.id !== draft.id);
-      setData(previous => previous ? {...previous, drafts: draftsRef.current} : previous); dismissSelection();
+      setData(previous => previous ? {...previous, drafts: draftsRef.current} : previous); dismissSelectionNow();
     } catch (cause) { setError(`Could not discard draft: ${message(cause)}`); }
     finally { discarding.current = null; setBusy(''); }
   };
@@ -464,7 +478,7 @@ export default function App() {
     try {
       const created = await command<Project>(root, 'create_project', {title: projectTitle.trim()});
       setData(previous => previous ? {...previous, projects: [...previous.projects, created]} : previous);
-      setProjectId(created.id); setVideoId(null); dismissSelection(); setProjectOpen(false); setProjectTitle('');
+      setProjectId(created.id); setVideoId(null); dismissSelectionNow(); setProjectOpen(false); setProjectTitle('');
     } catch (cause) { setError(message(cause)); }
     finally { setBusy(''); }
   };
@@ -479,9 +493,9 @@ export default function App() {
         <View style={s.sidebarTop}><Text style={s.brand}>GamePack</Text></View>
         <ScrollView style={s.sidebarScroll}>
           <View style={s.sideSection}>
-            <View style={s.sectionRow}><Text style={s.sectionTitle}>Projects</Text><Button compact label="Create project" disabled={!!busy} onPress={() => { setError(''); setProjectOpen(true); }}>+</Button></View>
+            <View style={s.sectionRow}><Text style={s.sectionTitle}>Projects</Text><Button compact label="Create project" disabled={!!busy} onPress={() => leaveDraft(() => { dismissSelectionNow(); setError(''); setProjectOpen(true); })}>+</Button></View>
             {data.projects.map(project => <Pressable key={project.id} disabled={!!busy} accessibilityRole="button" accessibilityState={{selected: project.id === projectId, disabled: !!busy}}
-              onPress={() => { setProjectId(project.id); const first = data.videos.find(item => item.project_id === project.id); if (first) void openVideo(first); else { setVideoId(null); setPaused(true); dismissSelection(); } }}
+              onPress={() => leaveDraft(() => { setProjectId(project.id); const first = data.videos.find(item => item.project_id === project.id); if (first) return openVideoNow(first); setVideoId(null); setPaused(true); dismissSelectionNow(); })}
               style={({pressed}) => [s.navItem, project.id === projectId && s.navSelected, pressed && s.buttonPressed]}>
               <Text style={s.navIcon}>▤</Text><Text numberOfLines={1} style={s.navText}>{project.title}</Text>
             </Pressable>)}
@@ -548,7 +562,7 @@ export default function App() {
               activeColor={annotationsVisible && activeIds.has(node.comment.comment_id) ? commentColors.get(node.comment.comment_id) : undefined}
               branchColor={annotationsVisible && !expanded.has(node.comment.comment_id) && activeBranches.has(node.comment.comment_id) ? commentColors.get(activeBranches.get(node.comment.comment_id)!) : undefined}
               onToggle={() => setExpanded(previous => { const next = new Set(previous); if (next.has(node.comment.comment_id)) next.delete(node.comment.comment_id); else next.add(node.comment.comment_id); return next; })}
-              onSelect={() => selectComment(node.comment)} onPlay={() => { selectComment(node.comment); playReview(node.comment); }} onReply={() => newDraft(node.comment)} disabled={!!busy} />
+              onSelect={() => selectComment(node.comment)} onPlay={() => leaveDraft(() => { selectCommentNow(node.comment); playReview(node.comment); })} onReply={() => newDraft(node.comment)} disabled={!!busy} />
           </View>)}
           {!videoComments.length && <View style={s.emptyComments}><Text style={s.emptyCommentsText}>No comments</Text></View>}
         </ScrollView>

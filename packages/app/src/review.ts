@@ -52,6 +52,13 @@ export function finalizeCapturedClip(draft: Draft, nativeUs: number, durationUs:
   return finalizeLiveDraft(rebased, nativeUs, durationUs, furthestUs);
 }
 
+/** Finish the outgoing scene before its selection or video can change. The
+ * native acknowledgment may own the last stroke rather than onDrawing. */
+export function capturedDraft(draft: Draft, pending: Drawing | undefined, nativeUs: number, durationUs: number, furthestUs: number, live: boolean): Draft {
+  const next = {...draft, drawings: pending ? mergeDrawings(draft.drawings, [pending]) : draft.drawings};
+  return live ? finalizeCapturedClip(next, nativeUs, durationUs, furthestUs) : next;
+}
+
 export function liveScene(draft: Draft, durationUs: number): {id: string; anchor: Draft['anchor']; drawings: Drawing[]} {
   if (draft.anchor.kind === 'point') return {id: draft.id, anchor: draft.anchor, drawings: draft.drawings};
   const length = durationUs - draft.anchor.start_us;
