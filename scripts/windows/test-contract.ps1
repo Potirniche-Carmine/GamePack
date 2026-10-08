@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$CoreExecutable)
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5 may inherit a UTF-8 encoding that emits a BOM on native stdin.
+# The Rust CLI reads JSON Lines, so explicitly emit UTF-8 without a preamble.
+$OutputEncoding = [Text.UTF8Encoding]::new($false)
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('gamepack-windows-contract-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporary | Out-Null
 $library = Join-Path $temporary 'library'
