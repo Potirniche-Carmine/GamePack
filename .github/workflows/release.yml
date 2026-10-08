@@ -67,7 +67,9 @@ jobs:
 
           macOS packages use an ad hoc signature and are not notarized. Windows packages are unsigned; follow the bundled installation instructions for the required Windows settings. SHA-256 checksum files accompany each download.
 
-          The MVP supports local video review, autosaved drafts, immutable posts and replies, and timed vector drawings. ZIP collaboration import/export is not available yet.
+          Draw while a video plays, then choose Save to pause and add a comment to the captured clip. Normal playback shows timed drawings with matching comment highlights; Hide annotations shows the original footage. Replies are nested and collapsible, and light/dark appearance is saved with the library.
+
+          The MVP includes managed local media, autosaved drafts, immutable posts, and timed pen/arrow/ellipse drawings. Application files and library data stay under `~/.gamepack` or the configured `GAMEPACK_HOME`. ZIP collaboration import/export is not available yet.
           NOTES
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-packages/* --clobber
