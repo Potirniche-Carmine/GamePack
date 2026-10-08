@@ -13,7 +13,7 @@ module.exports = mergeConfig(getDefaultConfig(root), {
       }
       return context.resolveRequest(context, moduleName, platform);
     },
-    blockList: [/\/target\/.*/, /\/macos\/Pods\/.*/, /\/build\/.*/, /\/\.gamepack\/.*/],
+    blockList: [/[\\/]target[\\/].*/, /[\\/]macos[\\/]Pods[\\/].*/, /[\\/]build[\\/].*/, /[\\/]\.gamepack[\\/].*/],
   },
   watchFolders: [path.resolve(root, 'packages')],
 });

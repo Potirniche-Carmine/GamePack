@@ -23,7 +23,7 @@
     <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>$(GamePackRoot)target\release\gamepack_core.lib;windowsapp.lib;CoreMessaging.lib;shlwapi.lib;userenv.lib;bcrypt.lib;ntdll.lib;ws2_32.lib;ole32.lib;shell32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
     <Manifest><AdditionalManifestFiles>Application.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="Main.cpp"/><ClCompile Include="GamePackModule.cpp"/><ClCompile Include="GamePackPlayer.cpp"/></ItemGroup>
+  <ItemGroup><ClCompile Include="AutolinkedNativeModules.g.cpp"/><ClCompile Include="Main.cpp"/><ClCompile Include="GamePackModule.cpp"/><ClCompile Include="GamePackPlayer.cpp"/></ItemGroup>
   <ItemGroup><ClInclude Include="pch.h"/><ClInclude Include="GamePackModule.h"/><ClInclude Include="GamePackPlayer.h"/></ItemGroup>
   <ItemGroup><Content Include="Bundle\**\*"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><DeploymentContent>true</DeploymentContent></Content></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>

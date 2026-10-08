@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "GamePackModule.h"
+#include "AutolinkedNativeModules.g.h"
 using namespace winrt;
 using namespace Windows::UI::Xaml;
 using namespace Windows::UI::Xaml::Hosting;
@@ -43,6 +44,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     auto bundle=std::filesystem::path(executable).parent_path()/L"Bundle";
     host.InstanceSettings().BundleRootPath(bundle.wstring());
     host.InstanceSettings().JavaScriptBundleFile(L"index.windows");
+    RegisterAutolinkedNativeModulePackages(host.PackageProviders());
     host.PackageProviders().Append(make<gamepack::windows::PackageProvider>());
     ReactRootView root;
     root.ComponentName(L"GamePack"); root.ReactNativeHost(host);

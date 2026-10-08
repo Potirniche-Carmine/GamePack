@@ -30,6 +30,7 @@ try {
     $bundle = Join-Path $root 'apps\windows\GamePack\Bundle'
     New-Item -ItemType Directory -Path $bundle -Force | Out-Null
     Run 'npx.cmd' @('--no-install', 'react-native', 'bundle', '--entry-file', 'index.js', '--platform', 'windows', '--dev', 'false', '--minify', 'true', '--bundle-output', (Join-Path $bundle 'index.windows.bundle'), '--assets-dest', $bundle)
+    Run 'npx.cmd' @('--no-install', '@react-native-community/cli', 'autolink-windows', '--sln', 'apps\windows\GamePack.sln', '--proj', 'apps\windows\GamePack\GamePack.vcxproj')
     $msbuild = Join-Path $vs 'MSBuild\Current\Bin\MSBuild.exe'
     $packages = Join-Path $root 'artifacts\windows\packages\'
     Run $msbuild @('apps\windows\GamePack.sln', '/restore', '/m', "/p:Configuration=$Configuration", '/p:Platform=x64', '/p:AppxBundle=Never', '/p:AppxBundlePlatforms=x64', '/p:AppxPackageSigningEnabled=false', '/p:GenerateAppxPackageOnBuild=true', '/p:UapAppxPackageBuildMode=SideloadOnly', "/p:AppxPackageDir=$packages", '/verbosity:minimal', "/bl:artifacts\windows\build-$Configuration.binlog")
