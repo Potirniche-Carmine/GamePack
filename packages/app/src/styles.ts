@@ -94,7 +94,7 @@ export const styles = StyleSheet.create({
   emptyIconText: {fontSize: 25, color: '#b7bcc6'},
   emptyTitle: {color: colors.text, fontSize: 20, fontWeight: '600', letterSpacing: -0.4, textAlign: 'center'},
   emptyBody: {color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', maxWidth: 310, marginBottom: 7},
-  modalBackdrop: {flex: 1, backgroundColor: '#00000080', justifyContent: 'center', alignItems: 'center', padding: 30},
+  modalBackdrop: {...StyleSheet.absoluteFillObject, zIndex: 1000, backgroundColor: '#00000080', justifyContent: 'center', alignItems: 'center', padding: 30},
   modal: {width: 390, maxWidth: '100%', backgroundColor: '#2b2e35', borderWidth: 1, borderColor: '#4b4f58', borderRadius: 13, padding: 24},
   modalTitle: {color: colors.text, fontSize: 20, fontWeight: '600', letterSpacing: -0.4, marginBottom: 10},
   modalBody: {color: colors.muted, fontSize: 13, lineHeight: 20, marginBottom: 19},

@@ -1,5 +1,5 @@
 import React, {useState, type ReactNode} from 'react';
-import {Pressable, Text, View, StyleSheet, type StyleProp, type ViewStyle, type GestureResponderEvent} from 'react-native';
+import {Platform, Pressable, Text, View, StyleSheet, type StyleProp, type ViewStyle, type GestureResponderEvent} from 'react-native';
 import type {Anchor, Comment} from './types';
 import {colors, styles as s} from './styles';
 
@@ -18,6 +18,19 @@ export function Button({children, onPress, disabled, active, primary, compact, l
 export function Empty({title, children, action}: {title: string; children: ReactNode; action?: ReactNode}) {
   return <View style={s.empty}><View style={s.emptyIcon}><Text style={s.emptyIconText}>▷</Text></View>
     <Text style={s.emptyTitle}>{title}</Text><Text style={s.emptyBody}>{children}</Text>{action}</View>;
+}
+
+// Core React Native Modal has no macOS host. Keep dialogs in the native view
+// hierarchy so the same content works on both desktop platforms.
+export function Dialog({visible, children, onDismiss}: {visible: boolean; children: ReactNode; onDismiss: () => void}) {
+  if (!visible) return null;
+  const keyboardProps = Platform.OS === 'macos' ? {
+    keyDownEvents: [{key: 'Escape'}],
+    onKeyDown: (event: {nativeEvent: {key: string}}) => { if (event.nativeEvent.key === 'Escape') onDismiss(); },
+  } : {};
+  return <View {...keyboardProps} style={s.modalBackdrop} accessibilityViewIsModal onAccessibilityEscape={onDismiss}>
+    <View style={s.modal}>{children}</View>
+  </View>;
 }
 
 export function timeLabel(us: number, milliseconds = false): string {

@@ -1,6 +1,6 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions} from 'react-native';
-import {anchorLabel, anchorStart, Button, bytesLabel, Empty, parseTime, Timeline, timeLabel} from './components';
+import {ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions} from 'react-native';
+import {anchorLabel, anchorStart, Button, bytesLabel, Dialog, Empty, parseTime, Timeline, timeLabel} from './components';
 import {chooseVideo, command, dataDirectory, GamePackPlayer} from './native';
 import {colors, styles as s} from './styles';
 import type {Anchor, Bootstrap, Comment, Draft, Drawing, DrawingTool, PlayerTime, Profile, Project, Video} from './types';
@@ -60,6 +60,7 @@ export default function App() {
   const sceneJson = activeScene && showScene ? JSON.stringify({anchor: activeScene.anchor, drawings: activeScene.drawings}) : '';
   const reviewEnd = (reviewing || (!!draft && !preview)) && activeScene?.anchor.kind === 'interval' ? activeScene.anchor.end_us : -1;
   const canPost = !!draft && (!!draft.text.trim() || draft.drawings.length > 0);
+  const dialogOpen = profileOpen || projectOpen || discardOpen;
 
   useEffect(() => {
     mounted.current = true;
@@ -209,7 +210,7 @@ export default function App() {
     if (!paused) { setPaused(true); return; }
     if (activeScene?.anchor.kind === 'point') setShowScene(false);
     if (draft?.anchor.kind === 'interval' && (time < draft.anchor.start_us || time >= draft.anchor.end_us)) seek(draft.anchor.start_us);
-    if (duration && time >= duration) seek(0);
+    else if (duration && time >= duration) seek(0);
     setStatus(''); setPaused(false);
   };
   const playReview = (item: Draft | Comment, asPreview = false) => {
@@ -225,7 +226,9 @@ export default function App() {
     if (Number.isFinite(event.time_us)) setTime(Math.max(0, Math.round(event.time_us)));
     if (event.duration_us > 0) setDuration(Math.round(event.duration_us));
     if (event.error) { setError(`Playback failed: ${event.error}`); setPaused(true); }
-    if (event.ended || (reviewEnd >= 0 && event.time_us >= reviewEnd)) {
+    // Native completion is authoritative. Ordinary callbacks may still describe
+    // the old playhead while a newly requested seek is reaching its target.
+    if (event.ended) {
       setPaused(true); setReviewing(false);
       if (reviewing) setStatus('Review complete');
     }
@@ -271,7 +274,7 @@ export default function App() {
   };
   const post = async () => {
     if (!draft || !canPost || busy) return;
-    if (!data?.profile.name.trim()) { setProfileName(''); setProfileOpen(true); return; }
+    if (!data?.profile.name.trim()) { setProfileName(''); setError(''); setProfileOpen(true); return; }
     setBusy('Posting…'); setPaused(true); setTool('none'); setError('');
     try {
       await flushDraft(draft);
@@ -330,13 +333,13 @@ export default function App() {
   if (!data) return <View style={s.root}><Empty title="Your library could not open" action={<Button primary onPress={() => void load()}>Try again</Button>}>{error || 'Check the native app installation and storage folder.'}</Empty></View>;
 
   return <View style={s.root}>
-    {!!error && <View style={s.errorBar} accessibilityRole="alert"><Text selectable style={s.errorText}>{error}</Text><Button compact onPress={() => setError('')}>Dismiss</Button></View>}
-    <View style={s.workspace}>
+    {!!error && <View pointerEvents={dialogOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen} importantForAccessibility={dialogOpen ? 'no-hide-descendants' : 'auto'} style={s.errorBar} accessibilityRole="alert"><Text selectable style={s.errorText}>{error}</Text><Button compact onPress={() => setError('')}>Dismiss</Button></View>}
+    <View pointerEvents={dialogOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen} importantForAccessibility={dialogOpen ? 'no-hide-descendants' : 'auto'} style={s.workspace}>
       <View style={[s.sidebar, width < 1100 && {width: 180}]}>
         <View style={s.sidebarTop}><Text style={s.brand}>GamePack</Text></View>
         <ScrollView style={s.sidebarScroll}>
           <View style={s.sideSection}>
-            <View style={s.sectionRow}><Text style={s.sectionTitle}>Projects</Text><Button compact label="Create project" disabled={!!busy} onPress={() => setProjectOpen(true)}>+</Button></View>
+            <View style={s.sectionRow}><Text style={s.sectionTitle}>Projects</Text><Button compact label="Create project" disabled={!!busy} onPress={() => { setError(''); setProjectOpen(true); }}>+</Button></View>
             {data.projects.map(project => <Pressable key={project.id} accessibilityRole="button" accessibilityState={{selected: project.id === projectId}}
               onPress={() => { setProjectId(project.id); const first = data.videos.find(item => item.project_id === project.id); if (first) void openVideo(first); else { setVideoId(null); dismissSelection(); } }}
               style={({pressed}) => [s.navItem, project.id === projectId && s.navSelected, pressed && s.buttonPressed]}>
@@ -347,7 +350,7 @@ export default function App() {
             <View style={s.sectionRow}><Text style={s.sectionTitle}>Videos</Text></View>
             {projectVideos.map(item => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{selected: item.id === videoId}} onPress={() => void openVideo(item)}
               style={({pressed}) => [s.navItem, item.id === videoId && s.navSelected, pressed && s.buttonPressed]}>
-              <Text style={s.navIcon}>▷</Text><View style={{flex: 1}}><Text numberOfLines={2} style={s.navText}>{item.title}</Text><Text style={s.caption}>{item.duration_us ? timeLabel(item.duration_us) : bytesLabel(item.byte_size)}{data.drafts.some(value => value.video_id === item.id) ? ' · Draft' : ''}</Text></View>
+              <Text style={s.navIcon}>▷</Text><View style={{flex: 1}}><Text numberOfLines={2} style={[s.navText, {flex: 0}]}>{item.title}</Text><Text style={s.caption}>{item.duration_us ? timeLabel(item.duration_us) : bytesLabel(item.byte_size)}{data.drafts.some(value => value.video_id === item.id) ? ' · Draft' : ''}</Text></View>
             </Pressable>)}
             {!projectVideos.length && <Text style={[s.storageText, {padding: 8}]}>Add a video to start reviewing.</Text>}
           </View>
@@ -357,7 +360,7 @@ export default function App() {
           <View style={{flexDirection: 'row', gap: 6}}><Button compact disabled style={{flex: 1}}>Import ZIP</Button><Button compact disabled style={{flex: 1}}>Export ZIP</Button></View>
           <Text style={s.storageText}>ZIP sharing is coming in a later release.</Text>
           <Text style={s.storageText}>{bytesLabel(data.storage.managed_bytes)} media · {bytesLabel(data.storage.database_bytes)} database</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Edit display name" onPress={() => { setProfileName(data.profile.name); setProfileOpen(true); }} style={s.profileButton}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Edit display name" onPress={() => { setProfileName(data.profile.name); setError(''); setProfileOpen(true); }} style={s.profileButton}>
             <View style={s.avatar}><Text style={s.avatarText}>{data.profile.name.trim().slice(0, 1).toUpperCase() || '?'}</Text></View>
             <Text numberOfLines={1} style={s.profileName}>{data.profile.name || 'Set your name'}</Text><Text style={s.mutedText}>›</Text>
           </Pressable>
@@ -395,7 +398,7 @@ export default function App() {
           <View style={s.transportSpacer} /><Button compact disabled={!draft.drawings.length || !!busy} onPress={undoDrawing}>Undo</Button><Button compact disabled={!redo.length || !!busy} onPress={redoDrawing}>Redo</Button>
         </View>}
         <View style={s.statusRow}><Text numberOfLines={2} style={s.status}>{busy || status || (draft && tool !== 'none' ? `${tool === 'pen' ? 'Draw' : `Place an ${tool}`} on the video${draft.anchor.kind === 'interval' ? ' while paused or playing.' : '.'}` : selected ? `${anchorLabel(selected.anchor)} · ${selected.drawings.length} ${selected.drawings.length === 1 ? 'drawing' : 'drawings'}` : video ? 'Your original video stays unchanged.' : '')}</Text>
-          {(selected || preview) && <Button compact onPress={preview ? () => { setPreview(false); setReviewing(false); setPaused(true); setStatus(''); } : dismissSelection}>{preview ? 'Back to draft' : 'Clear review'}</Button>}</View>
+          {(selected || preview) && <Button compact onPress={preview ? () => { setPreview(false); setReviewing(false); setPaused(true); setStatus(''); if (draft) seek(anchorStart(draft.anchor)); } : dismissSelection}>{preview ? 'Back to draft' : 'Clear review'}</Button>}</View>
       </View>
 
       <View style={[s.rail, width < 1100 && {width: 300}]}>
@@ -423,7 +426,7 @@ export default function App() {
             <Button compact disabled={!!busy} onPress={() => setDiscardOpen(true)}>Discard</Button>
             {saveStates[draft.id] === 'Not saved' && <Button compact onPress={() => void flushDraft(draft).catch(() => undefined)}>Save again</Button>}
             <View style={{flex: 1}} />
-            <Button compact disabled={!!busy || !canPost} onPress={() => playReview(draft, true)}>Preview</Button>
+            <Button compact disabled={!!busy || !canPost} onPress={() => playReview(draft, true)}>{preview ? 'Replay' : 'Preview'}</Button>
             <Button primary disabled={!!busy || !canPost} onPress={() => void post()}>{busy === 'Posting…' ? 'Posting…' : 'Post comment'}</Button>
           </View>
           <Text style={s.draftFooter}>{data.profile.name ? `Commenting as ${data.profile.name}` : 'Set your name before posting.'} · Posted comments are permanent.</Text>
@@ -431,26 +434,28 @@ export default function App() {
       </View>
     </View>
 
-    <Modal visible={profileOpen} transparent animationType="fade" onRequestClose={() => setProfileOpen(false)}><View style={s.modalBackdrop}><View style={s.modal}>
+    <Dialog visible={profileOpen} onDismiss={() => { if (!busy) setProfileOpen(false); }}>
       <Text style={s.modalTitle}>Your display name</Text><Text style={s.modalBody}>What name should appear on your comments? Changing it applies to future posts.</Text>
       <TextInput autoFocus accessibilityLabel="Display name" placeholder="Your name" placeholderTextColor={colors.faint} style={s.input} value={profileName} onChangeText={setProfileName} maxLength={100} onSubmitEditing={() => void saveProfile()} />
+      {!!error && <Text accessibilityRole="alert" style={[s.hint, {color: colors.danger}]}>{error}</Text>}
       <View style={s.modalActions}><Button disabled={!!busy} onPress={() => setProfileOpen(false)}>Cancel</Button><Button primary disabled={!profileName.trim() || !!busy} onPress={() => void saveProfile()}>Save name</Button></View>
-    </View></View></Modal>
-    <Modal visible={projectOpen} transparent animationType="fade" onRequestClose={() => setProjectOpen(false)}><View style={s.modalBackdrop}><View style={s.modal}>
+    </Dialog>
+    <Dialog visible={projectOpen} onDismiss={() => { if (!busy) setProjectOpen(false); }}>
       <Text style={s.modalTitle}>New project</Text><Text style={s.modalBody}>Keep related videos and their reviews together.</Text>
       <TextInput autoFocus accessibilityLabel="Project name" placeholder="Project name" placeholderTextColor={colors.faint} style={s.input} value={projectTitle} onChangeText={setProjectTitle} maxLength={200} onSubmitEditing={() => void createProject()} />
+      {!!error && <Text accessibilityRole="alert" style={[s.hint, {color: colors.danger}]}>{error}</Text>}
       <View style={s.modalActions}><Button disabled={!!busy} onPress={() => setProjectOpen(false)}>Cancel</Button><Button primary disabled={!projectTitle.trim() || !!busy} onPress={() => void createProject()}>Create project</Button></View>
-    </View></View></Modal>
-    <Modal visible={discardOpen} transparent animationType="fade" onRequestClose={() => setDiscardOpen(false)}><View style={s.modalBackdrop}><View style={s.modal}>
+    </Dialog>
+    <Dialog visible={discardOpen} onDismiss={() => { if (!busy) setDiscardOpen(false); }}>
       <Text style={s.modalTitle}>Discard this draft?</Text><Text style={s.modalBody}>Its text and drawings will be removed from this device.</Text><View style={s.modalActions}><Button onPress={() => setDiscardOpen(false)}>Keep draft</Button><Button primary onPress={() => void discard()}>Discard draft</Button></View>
-    </View></View></Modal>
+    </Dialog>
   </View>;
 }
 
 function CommentCard({item, selected, parent, onSelect, onPlay, onReply, disabled}: {
   item: Comment; selected: boolean; parent?: Comment; onSelect: () => void; onPlay: () => void; onReply: () => void; disabled: boolean;
 }) {
-  const date = new Date(item.created_at_reported);
+  const date = new Date(item.created_at_reported / 1000);
   return <View style={[s.commentCard, selected && s.commentSelected]}>
     <Pressable accessibilityRole="button" accessibilityLabel={`Review comment by ${item.name_at_posting} at ${anchorLabel(item.anchor)}`} onPress={onSelect} disabled={disabled}>
       <View style={s.commentHeader}><View style={[s.avatar, {width: 23, height: 23}]}><Text style={[s.avatarText, {fontSize: 10}]}>{item.name_at_posting.slice(0, 1).toUpperCase()}</Text></View>
@@ -502,8 +507,8 @@ function VisibilityEditor({draft, disabled, onChange, onError}: {
   const last = draft.drawings[draft.drawings.length - 1];
   return <View style={s.anchorRow}><TimeField label="Last drawing · show until" value={start + last.visible_until_us} disabled={disabled}
     onError={onError} onChange={value => {
-      if (value > end || value <= start + last.visible_from_us || value < start + last.samples[last.samples.length - 1].t_us) {
-        onError('The drawing must remain visible through its final sample and end within the review range.'); return;
+      if (value > end || value <= start + last.visible_from_us || value <= start + last.samples[last.samples.length - 1].t_us) {
+        onError('Choose an end after the drawing’s final sample and within the review range.'); return;
       }
       onChange(draft.drawings.map(item => item.id === last.id ? {...item, visible_until_us: value - start} : item));
     }} /></View>;

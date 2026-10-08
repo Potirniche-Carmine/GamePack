@@ -20,6 +20,6 @@ target.build_configurations.each do |config|
   s['CODE_SIGN_STYLE'] = 'Manual'
   s['HEADER_SEARCH_PATHS'] = ['$(inherited)', '$(SRCROOT)/../target/cxxbridge']
   s['LIBRARY_SEARCH_PATHS'] = ['$(inherited)', '$(SRCROOT)/../target/release']
-  s['OTHER_LDFLAGS'] = ['$(inherited)', '-ObjC', '-lc++', '-lgamepack_core', '-framework', 'AVFoundation', '-framework', 'Security', '-framework', 'SystemConfiguration']
+  s['OTHER_LDFLAGS'] = ['$(inherited)', '-ObjC', '-lc++', '-lgamepack_core', '-framework', 'AVFoundation', '-framework', 'CoreMedia', '-framework', 'Security', '-framework', 'SystemConfiguration']
 end
 project.save

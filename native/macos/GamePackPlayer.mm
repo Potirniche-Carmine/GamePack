@@ -33,6 +33,7 @@
   BOOL _seeking;
   BOOL _finished;
   NSInteger _loadGeneration;
+  NSInteger _seekGeneration;
   double _duration;
   CGSize _videoSize;
 }
@@ -53,7 +54,7 @@
 - (void)dealloc { if (_timeObserver) [_player removeTimeObserver:_timeObserver]; [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 - (void)layout { [super layout]; [CATransaction begin]; [CATransaction setDisableActions:YES]; _videoLayer.frame = self.bounds; _overlay.frame = self.bounds; [CATransaction commit]; [_overlay setNeedsDisplay:YES]; }
 - (void)setSource:(NSString *)source {
-  if ([_source isEqualToString:source]) return; _source = [source copy]; _loadGeneration++; NSInteger generation = _loadGeneration;
+  if ([_source isEqualToString:source]) return; _source = [source copy]; _seekGeneration++; _loadGeneration++; NSInteger generation = _loadGeneration;
   [_player pause]; _samples = nil; _duration = 0; _videoSize = CGSizeZero; _finished = NO;
   if (!source.length) { [_player replaceCurrentItemWithPlayerItem:nil]; [_overlay setNeedsDisplay:YES]; return; }
   NSURL *url = [source hasPrefix:@"file:"] ? [NSURL URLWithString:source] : [NSURL fileURLWithPath:source];
@@ -78,22 +79,23 @@
 - (void)setSeekToken:(NSInteger)seekToken { _seekToken = seekToken; [self performSeek]; }
 - (void)performSeek {
   [self finishStroke]; if (!_player.currentItem) return;
-  _seeking = YES; _finished = NO;
+  _seeking = YES; _finished = NO; NSInteger generation = ++_seekGeneration; [_player pause];
   __weak GPPlayer *weakSelf = self;
   [_player seekToTime:CMTimeMake((int64_t)fmax(0, _seekUs), 1000000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL complete) {
-    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self) return; self->_seeking = NO; if (!self.paused) self->_player.rate = self.rate; [self->_overlay setNeedsDisplay:YES]; [self emitTime:NO]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration || !complete) return; self->_seeking = NO; if (!self.paused) self->_player.rate = self.rate; [self->_overlay setNeedsDisplay:YES]; [self emitTime:NO]; });
   }];
 }
 - (void)setSceneJson:(NSString *)sceneJson { _sceneJson = [sceneJson copy]; _scene = sceneJson.length ? [NSJSONSerialization JSONObjectWithData:[sceneJson dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil; [_overlay setNeedsDisplay:YES]; }
 - (void)setTool:(NSString *)tool { [self finishStroke]; _tool = [tool copy]; }
 - (int64_t)timeUs { double seconds = CMTimeGetSeconds(_player.currentTime); return isfinite(seconds) ? llround(seconds * 1000000) : 0; }
 - (void)tick {
+  if (_seeking) return;
   int64_t us = [self timeUs];
   if (!_paused && !_finished && _reviewEndUs >= 0 && us >= _reviewEndUs) { [self finishStroke]; [_player pause]; _finished = YES; [self emitTime:YES]; }
   [_overlay setNeedsDisplay:YES];
   if (NSDate.timeIntervalSinceReferenceDate - _lastEvent > 0.1) [self emitTime:NO];
 }
-- (void)ended:(NSNotification *)notification { if (notification.object == _player.currentItem) { [self finishStroke]; _finished = YES; [self emitTime:YES]; } }
+- (void)ended:(NSNotification *)notification { if (!_seeking && notification.object == _player.currentItem) { [self finishStroke]; _finished = YES; [self emitTime:YES]; } }
 - (void)emitTime:(BOOL)ended {
   _lastEvent = NSDate.timeIntervalSinceReferenceDate;
   if (self.onTime) self.onTime(@{@"time_us":@([self timeUs]), @"duration_us":@(isfinite(_duration) ? llround(_duration*1000000):0), @"width":@(_videoSize.width), @"height":@(_videoSize.height), @"playing":@(_player.rate > 0), @"ended":@(ended)});
@@ -159,7 +161,7 @@
 - (void)drawOverlay {
   NSRect rect=[self contentRect]; [NSGraphicsContext saveGraphicsState]; NSRectClip(rect);
   NSDictionary *anchor=_scene[@"anchor"]; int64_t time=[self timeUs],offset=[self offsetUs];
-  BOOL visible=![anchor[@"kind"] isEqual:@"interval"] || (time>=[anchor[@"start_us"] longLongValue] && time<[anchor[@"end_us"] longLongValue]);
+  BOOL visible=[anchor[@"kind"] isEqual:@"interval"] ? (time>=[anchor[@"start_us"] longLongValue] && time<[anchor[@"end_us"] longLongValue]) : (llabs(time-[anchor[@"at_us"] longLongValue]) <= 2000);
   if (visible) for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect offset:offset live:NO];
   if (_samples) [self drawDrawing:[self currentDrawing] rect:rect offset:offset live:YES];
   [NSGraphicsContext restoreGraphicsState];

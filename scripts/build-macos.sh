@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 command -v cargo >/dev/null 2>&1 || source "$HOME/.cargo/env"
 [[ -d node_modules ]] || npm ci
 [[ -d macos/Pods ]] || pod install --project-directory=macos
-cargo build --release --locked -p gamepack-core
+MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release --locked -p gamepack-core
 npm run typecheck
 mkdir -p artifacts/local
 xcodebuild -workspace macos/gamepack.xcworkspace -scheme gamepack-macOS -configuration Release \
