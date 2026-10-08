@@ -14,7 +14,7 @@ Install [App Installer](https://apps.microsoft.com/detail/9nblggh4nns1) for `win
 .\scripts\windows\bootstrap.ps1 -EnableDeveloperMode
 ```
 
-This installs Node LTS, Rust/MSVC and Visual Studio 2022 Build Tools with desktop C++, UWP C++ and SDK 10.0.22621.0, including ARM64 cross-compilers. The optional switch enables Windows Developer Mode for source package registration. If Visual Studio installation requests a restart, complete that first. Open a new PowerShell terminal, then:
+This installs Node LTS, Rust/MSVC and Visual Studio 2022 Build Tools with desktop C++, UWP C++ and SDK 10.0.22621.0, including ARM64 cross-compilers. Existing Build Tools installations receive any missing components through an additive Visual Studio Installer modify operation. The optional switch enables Windows Developer Mode for source package registration. If Visual Studio installation requests a restart, complete that first. Open a new PowerShell terminal, then:
 
 ```powershell
 .\scripts\windows\build.ps1
@@ -47,6 +47,7 @@ The Windows implementation is authored on macOS and has not been executed on Win
 
 - [RN Windows 0.81.6 package metadata](https://registry.npmjs.org/react-native-windows/0.81.6) declares React `^19.1.4` and React Native `^0.81.0`; this repository pins RN 0.81.6 and React 19.1.4.
 - [Pinned RN Windows native NuGet](https://www.nuget.org/packages/Microsoft.ReactNative/0.81.6) includes both x64 and ARM64 Paper binaries.
+- [Visual Studio installer CLI](https://learn.microsoft.com/en-us/visualstudio/install/use-command-line-parameters-to-install-visual-studio?view=vs-2022) documents the additive `modify --add` operation.
 - [Visual Studio Build Tools component IDs](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022) lists the bootstrap workloads and C++ UWP/SDK components.
 - [Microsoft architecture documentation](https://microsoft.github.io/react-native-windows/docs/new-architecture/) describes the Paper/UWP renderer and its removal in 0.82. Keep RN Windows pinned to 0.81.6 for this host.
 - [Microsoft XAML Islands host guide](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/xaml-islands/using-the-xaml-hosting-api) documents desktop HWND hosting through WindowsXamlManager and DesktopWindowXamlSource.

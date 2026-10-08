@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/macos-env.sh
+gamepack_has_supported_node || { echo 'Run bash scripts/bootstrap-macos.sh to install a supported Node version.' >&2; exit 1; }
 command -v cargo >/dev/null 2>&1 || source "$HOME/.cargo/env"
 [[ -d node_modules ]] || npm ci
 [[ -d macos/Pods ]] || pod install --project-directory=macos

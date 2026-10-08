@@ -2,9 +2,9 @@ name: Windows native build
 on:
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'LICENSE', 'native/macos/**', 'macos/**', 'scripts/*-macos.sh', 'scripts/configure-macos.rb', 'scripts/make-icon.swift', '.github/workflows/macos.yml']
+    paths-ignore: ['**.md', 'LICENSE', 'native/macos/**', 'macos/**', 'scripts/*-macos.sh', 'scripts/configure-macos.rb', 'scripts/make-icon.swift', 'scripts/macos-env.sh', '.github/workflows/macos.yml']
   pull_request:
-    paths-ignore: ['**.md', 'LICENSE', 'native/macos/**', 'macos/**', 'scripts/*-macos.sh', 'scripts/configure-macos.rb', 'scripts/make-icon.swift', '.github/workflows/macos.yml']
+    paths-ignore: ['**.md', 'LICENSE', 'native/macos/**', 'macos/**', 'scripts/*-macos.sh', 'scripts/configure-macos.rb', 'scripts/make-icon.swift', 'scripts/macos-env.sh', '.github/workflows/macos.yml']
   workflow_dispatch:
   workflow_call:
 concurrency:
