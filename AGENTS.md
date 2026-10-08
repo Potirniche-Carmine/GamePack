@@ -9,7 +9,8 @@ GamePack is an offline desktop video review app for macOS and Windows (ARM64 and
 - Prefer concise control labels and visible interaction states. Show errors and progress only when they help the user act or understand an operation that is still running.
 - Keep profile avatars, names, and disclosure controls vertically centered.
 - Display replies as nested, collapsible children of their parent comment.
-- Let users draw while video playback continues. Save ends the captured clip using native media time; playback and annotations must remain synchronized after seeking or changing speed.
+- Let users draw while video playback continues. The clip starts at the first stroke; Save pauses at native media time and then asks for the comment. Preserve the final stroke before saving.
+- Normal playback shows synchronized comments and drawings with matching active colors. Provide a simple annotation visibility toggle. Keep seeking and playback speed changes synchronized.
 - Preserve the simple review workflow. Do not add unsolicited product explanations, tutorials, promotional copy, or extra sections.
 
 Verify native behavior and inspect screenshots in both themes before calling UI work complete. Keep demo footage and local verification screenshots out of the public repository. ZIP collaboration remains deferred.

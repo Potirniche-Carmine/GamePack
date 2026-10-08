@@ -2,7 +2,7 @@
 
 Offline video review with immutable comments and timed drawings. GamePack uses React Native desktop screens, a shared Rust/SQLite engine, and native media players. No account, upload service, telemetry, or runtime server is required.
 
-The MVP focuses on adding a video, leaving a moment or interval comment, drawing with pen/arrow/ellipse tools, previewing the review, and posting a complete immutable record. Replies are new comments. Drafts autosave; posted comments cannot be edited. ZIP import and export are visible but disabled.
+The MVP supports adding a video, drawing with pen/arrow/ellipse tools while it plays, and saving the captured clip with a comment. Paused-frame comments and manual time ranges are also supported. Replies appear as collapsible children of their parent. Drafts autosave; saved comments cannot be edited. ZIP import and export are visible but disabled.
 
 ## Download
 
@@ -40,12 +40,14 @@ See [Windows installation](docs/windows.md) for the dependency installer, source
 ## Review a video
 
 1. Choose **Add video**. GamePack stores one byte-preserving managed copy in the library, reused for identical footage across projects.
-2. Pause on a frame and choose **Comment**, or choose a **Range** in the draft.
-3. Write feedback. Optionally choose the pen, arrow, or ellipse and draw directly over the footage. For timed drawings, play within the range while drawing.
-4. **Preview** the draft, then **Post comment**. Set your display name when prompted.
-5. Select a posted card and choose **Play review**. Only that card's drawings appear. Use **Reply** to add another review.
+2. Choose **Comment** and draw over the footage while it plays. A captured clip starts at the first stroke. You can also pause to annotate a single frame.
+3. Choose **Save** to pause and finish the clip at the native video playhead, including its final stroke.
+4. Enter the comment in the dialog and save it. Set your display name when prompted. The comment and drawings are saved together.
+5. Play the video normally to see saved drawings and their matching highlighted comments. **Hide annotations** shows the original footage. Use **Reply** to add a child review; expand or collapse the thread beside its parent.
 
-A stroke drawn while paused appears complete at that frame's timestamp. During an interval, samples are revealed by source media time; speed changes, seeks, and pauses do not use a separate annotation timer. The end of a range is exclusive. Resuming an ordinary moment review clears its static overlay.
+A stroke drawn while paused appears complete at that frame's timestamp. During an interval, samples are revealed by source media time; speed changes, seeks, and pauses do not use a separate annotation timer. The end of a range is exclusive. Normal playback shows moment annotations for two seconds, capped at the video end; selecting a moment still displays its exact frame. Rendering uses a stable matching color for each comment and its drawings without changing the saved drawing data.
+
+Open your profile to choose System, Light, or Dark appearance. Both themes use light-blue accents; the preference is saved inside the library database.
 
 ## One library folder
 

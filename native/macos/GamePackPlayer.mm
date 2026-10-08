@@ -83,7 +83,15 @@
 - (void)setSeekToken:(NSInteger)seekToken { _seekToken = seekToken; }
 - (void)didSetProps:(NSArray<NSString *> *)changedProps {
   if ([changedProps containsObject:@"captureToken"] && _captureToken > 0) [self finishCapture];
-  else if ([changedProps containsObject:@"tool"]) [self finishStroke];
+  if ([changedProps containsObject:@"sceneJson"]) {
+    NSDictionary *next = _sceneJson.length ? [NSJSONSerialization JSONObjectWithData:[_sceneJson dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
+    NSDictionary *anchor = _scene[@"anchor"], *nextAnchor = next[@"anchor"];
+    NSString *key = [anchor[@"kind"] isEqual:@"interval"] ? @"start_us" : @"at_us";
+    BOOL sameScene = _scene && next && [(_scene[@"id"] ?: @"") isEqual:(next[@"id"] ?: @"")] && [anchor[@"kind"] isEqual:nextAnchor[@"kind"]] && [anchor[key] isEqual:nextAnchor[key]];
+    if (!sameScene) [self finishStroke];
+    _scene = next; [_overlay setNeedsDisplay:YES];
+  }
+  if ([changedProps containsObject:@"tool"]) [self finishStroke];
   if ([changedProps containsObject:@"seekToken"] || [changedProps containsObject:@"seekUs"]) [self performSeek];
   [self emitCaptureIfReady];
 }
@@ -95,7 +103,7 @@
     dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; if (!self.paused && complete && !self->_pendingCaptureToken) self->_player.rate = self.rate; [self emitCaptureIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:NO]; });
   }];
 }
-- (void)setSceneJson:(NSString *)sceneJson { _sceneJson = [sceneJson copy]; _scene = sceneJson.length ? [NSJSONSerialization JSONObjectWithData:[sceneJson dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil; [_overlay setNeedsDisplay:YES]; }
+- (void)setSceneJson:(NSString *)sceneJson { _sceneJson = [sceneJson copy]; }
 - (void)setTool:(NSString *)tool { _tool = [tool copy]; }
 - (int64_t)timeUs { double seconds = CMTimeGetSeconds(_player.currentTime); return isfinite(seconds) ? llround(seconds * 1000000) : 0; }
 - (void)tick {

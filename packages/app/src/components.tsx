@@ -1,12 +1,13 @@
 import React, {useState, type ReactNode} from 'react';
 import {Platform, Pressable, Text, View, StyleSheet, type StyleProp, type ViewStyle, type GestureResponderEvent} from 'react-native';
 import type {Anchor, Comment} from './types';
-import {colors, styles as s} from './styles';
+import {useTheme} from './theme';
 
 export function Button({children, onPress, disabled, active, primary, compact, label, style}: {
   children: ReactNode; onPress?: () => void; disabled?: boolean; active?: boolean;
   primary?: boolean; compact?: boolean; label?: string; style?: StyleProp<ViewStyle>;
 }) {
+  const {styles: s} = useTheme();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled: !!disabled, selected: !!active}}
     disabled={disabled} onPress={onPress} style={({pressed}) => [s.button, compact && s.buttonCompact,
       primary && s.buttonPrimary, active && s.buttonActive, pressed && !disabled && s.buttonPressed,
@@ -15,14 +16,16 @@ export function Button({children, onPress, disabled, active, primary, compact, l
   </Pressable>;
 }
 
-export function Empty({title, children, action}: {title: string; children: ReactNode; action?: ReactNode}) {
-  return <View style={s.empty}><View style={s.emptyIcon}><Text style={s.emptyIconText}>▷</Text></View>
-    <Text style={s.emptyTitle}>{title}</Text><Text style={s.emptyBody}>{children}</Text>{action}</View>;
+export function Empty({title, children, action}: {title?: string; children?: ReactNode; action?: ReactNode}) {
+  const {styles: s} = useTheme();
+  return <View style={s.empty}>{!!title && <Text style={s.emptyTitle}>{title}</Text>}
+    {!!children && <Text style={s.emptyBody}>{children}</Text>}{action}</View>;
 }
 
 // Core React Native Modal has no macOS host. Keep dialogs in the native view
 // hierarchy so the same content works on both desktop platforms.
 export function Dialog({visible, children, onDismiss}: {visible: boolean; children: ReactNode; onDismiss: () => void}) {
+  const {styles: s} = useTheme();
   if (!visible) return null;
   const keyboardProps = Platform.OS === 'macos' ? {
     keyDownEvents: [{key: 'Escape'}],
@@ -62,6 +65,7 @@ export function bytesLabel(bytes: number): string {
 export function Timeline({time, duration, comments, selectedId, onSeek}: {
   time: number; duration: number; comments: Comment[]; selectedId: string | null; onSeek: (time: number) => void;
 }) {
+  const {colors} = useTheme();
   const [width, setWidth] = useState(1);
   const seek = (event: GestureResponderEvent) => onSeek(Math.round(Math.max(0, Math.min(1, event.nativeEvent.locationX / width)) * duration));
   return <View style={local.timeline} onLayout={event => setWidth(Math.max(1, event.nativeEvent.layout.width))}
@@ -71,18 +75,17 @@ export function Timeline({time, duration, comments, selectedId, onSeek}: {
     onAccessibilityAction={event => onSeek(Math.min(duration, Math.max(0, time + (event.nativeEvent.actionName === 'increment' ? 5000000 : -5000000))))}
     onStartShouldSetResponder={() => duration > 0} onMoveShouldSetResponder={() => duration > 0}
     onResponderGrant={seek} onResponderMove={seek}>
-    <View pointerEvents="none" style={local.track}><View style={[local.progress, {width: `${Math.max(0, Math.min(100, time / (duration || 1) * 100))}%`}]} /></View>
+    <View pointerEvents="none" style={[local.track, {backgroundColor: colors.line}]}><View style={[local.progress, {backgroundColor: colors.accentText, width: `${Math.max(0, Math.min(100, time / (duration || 1) * 100))}%`}]} /></View>
     {comments.map(comment => <View pointerEvents="none" key={comment.comment_id} style={[local.marker,
-      {left: `${Math.min(100, anchorStart(comment.anchor) / (duration || 1) * 100)}%`}, comment.comment_id === selectedId && local.markerSelected]} />)}
-    <View pointerEvents="none" style={[local.thumb, {left: `${Math.max(0, Math.min(100, time / (duration || 1) * 100))}%`}]} />
+      {backgroundColor: colors.faint, left: `${Math.min(100, anchorStart(comment.anchor) / (duration || 1) * 100)}%`}, comment.comment_id === selectedId && {backgroundColor: colors.accentText}]} />)}
+    <View pointerEvents="none" style={[local.thumb, {backgroundColor: colors.text, left: `${Math.max(0, Math.min(100, time / (duration || 1) * 100))}%`}]} />
   </View>;
 }
 
 const local = StyleSheet.create({
   timeline: {height: 30, justifyContent: 'center', marginHorizontal: 8},
-  track: {height: 4, backgroundColor: '#484b52', borderRadius: 2, overflow: 'hidden'},
-  progress: {height: 4, backgroundColor: colors.accent},
-  thumb: {position: 'absolute', width: 10, height: 10, marginLeft: -5, borderRadius: 5, backgroundColor: '#fff'},
-  marker: {position: 'absolute', width: 4, height: 4, top: 24, marginLeft: -2, borderRadius: 2, backgroundColor: '#7e8490'},
-  markerSelected: {backgroundColor: colors.accent, height: 5, width: 5},
+  track: {height: 4, borderRadius: 2, overflow: 'hidden'},
+  progress: {height: 4},
+  thumb: {position: 'absolute', width: 10, height: 10, marginLeft: -5, borderRadius: 5},
+  marker: {position: 'absolute', width: 4, height: 4, top: 24, marginLeft: -2, borderRadius: 2},
 });

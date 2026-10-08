@@ -17,6 +17,8 @@ export type Video = {
   byte_size: number; duration_us: number; width: number; height: number;
 };
 export type Profile = {author_id: string; name: string};
+export type ThemeChoice = 'system' | 'light' | 'dark';
+export type Settings = {theme: ThemeChoice};
 export type Draft = {
   id: string; project_id: string; video_id: string; text: string; anchor: Anchor;
   parent_comment_id?: string | null; drawings: Drawing[];
@@ -26,9 +28,11 @@ export type Comment = Draft & {
   created_at_reported: number; digest: string; schema_version: 1;
 };
 export type Bootstrap = {
+  settings: Settings;
   profile: Profile; projects: Project[]; videos: Video[]; comments: Comment[]; drafts: Draft[];
   storage: {root: string; managed_bytes: number; database_bytes: number};
 };
+export type CaptureFinished = {captureToken: number; time_us: number; drawingJson?: string};
 export type PlayerTime = {
   time_us: number; duration_us: number; width: number; height: number;
   playing: boolean; ended?: boolean; error?: string;

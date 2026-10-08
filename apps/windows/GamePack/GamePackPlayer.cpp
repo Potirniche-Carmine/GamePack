@@ -337,7 +337,7 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
       p->Finish(); p->seekToken=v->second.AsInt64();
       p->ended=false; p->Seek(p->seekUs);
     }
-    if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused) p->player.Pause(); else { p->ended=false; if (!p->seeking) p->player.Play(); } }
+    if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused || p->captureRequest) p->player.Pause(); else { p->ended=false; if (!p->seeking) p->player.Play(); } }
     p->applyingProps=false; p->Capture(); p->Render(); p->Emit(true);
   } catch (hresult_error const& error) { p->applyingProps=false; p->Emit(true,to_string(error.message())); }
   catch (std::exception const& error) { p->applyingProps=false; p->Emit(true,error.what()); }
