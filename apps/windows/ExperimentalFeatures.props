@@ -1,0 +1,3 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup><RnwNewArch>false</RnwNewArch><UseWinUI3>false</UseWinUI3><UseHermes>true</UseHermes><UseExperimentalNuget>true</UseExperimentalNuget><ReactExperimentalFeaturesSet>true</ReactExperimentalFeaturesSet></PropertyGroup>
+</Project>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\ExperimentalFeatures.props"/>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{540855E7-D9A0-445D-AC52-AC9A45C13665}</ProjectGuid><RootNamespace>GamePack</RootNamespace><ProjectName>GamePack</ProjectName>
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion><CppWinRTOptimized>true</CppWinRTOptimized><CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+    <ReactNativeWindowsDir>$(MSBuildThisFileDirectory)..\..\..\node_modules\react-native-windows\</ReactNativeWindowsDir>
+    <GamePackRoot>$(MSBuildThisFileDirectory)..\..\..\</GamePackRoot>
+  </PropertyGroup>
+  <Import Project="$(ReactNativeWindowsDir)PropertySheets\External\Microsoft.ReactNative.WindowsSdk.Default.props"/>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props"/>
+  <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v143</PlatformToolset><CharacterSet>Unicode</CharacterSet><UseDebugLibraries>false</UseDebugLibraries></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
+  <Import Project="$(ReactNativeWindowsDir)PropertySheets\External\Microsoft.ReactNative.Uwp.CppApp.props"/>
+  <PropertyGroup><OutDir>$(GamePackRoot)artifacts\windows\$(Configuration)\</OutDir><IntDir>$(GamePackRoot)artifacts\windows\obj\$(Configuration)\</IntDir><UseBundle>false</UseBundle><GenerateManifest>true</GenerateManifest></PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><LanguageStandard>stdcpp20</LanguageStandard><PrecompiledHeader>NotUsing</PrecompiledHeader><WarningLevel>Level4</WarningLevel><AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(GamePackRoot)target\cxxbridge;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><PreprocessorDefinitions>NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions><RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary></ClCompile>
+    <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>$(GamePackRoot)target\release\gamepack_core.lib;windowsapp.lib;CoreMessaging.lib;shlwapi.lib;userenv.lib;bcrypt.lib;ntdll.lib;ws2_32.lib;ole32.lib;shell32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Manifest><AdditionalManifestFiles>Application.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="Main.cpp"/><ClCompile Include="GamePackModule.cpp"/><ClCompile Include="GamePackPlayer.cpp"/></ItemGroup>
+  <ItemGroup><ClInclude Include="pch.h"/><ClInclude Include="GamePackModule.h"/><ClInclude Include="GamePackPlayer.h"/></ItemGroup>
+  <ItemGroup><Content Include="Bundle\**\*"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
+  <Import Project="$(ReactNativeWindowsDir)PropertySheets\External\Microsoft.ReactNative.Uwp.CppApp.targets"/>
+  <Target Name="CopyEmbeddedBundle" AfterTargets="Build"><ItemGroup><EmbeddedBundle Include="Bundle\**\*"/></ItemGroup><Copy SourceFiles="@(EmbeddedBundle)" DestinationFiles="@(EmbeddedBundle->'$(OutDir)Bundle\%(RecursiveDir)%(Filename)%(Extension)')"/></Target>
+</Project>

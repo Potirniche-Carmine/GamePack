@@ -24,3 +24,4 @@ artifacts/local/
 
 artifacts/*.log
 macos/.xcode.env.local
+artifacts/windows/

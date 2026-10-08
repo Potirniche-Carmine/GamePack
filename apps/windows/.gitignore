@@ -1,0 +1,7 @@
+.vs/
+**/bin/
+**/obj/
+**/Generated Files/
+**/Bundle/
+**/AppPackages/
+**/packages.lock.json
