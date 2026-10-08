@@ -29,6 +29,9 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-${{ matrix.architecture }}
+          cache-on-failure: true
       - name: Build Rust, shared JS, Windows C++ host and MSIX layout
         shell: powershell
         run: ./scripts/windows/build.ps1 -Architecture ${{ matrix.architecture }}

@@ -66,6 +66,10 @@ foreach ($required in @($layout.Package.Dependencies.PackageDependency)) {
     if (-not $matching.Count) { throw "Package declares missing $Architecture runtime framework: $($required.Name) >= $($required.MinVersion)" }
 }
 foreach ($dependency in $dependencies) { Copy-Item $dependency.FullName (Join-Path $stage "Dependencies\$Architecture") -Force }
+$noticeTarget = if ($Architecture -eq 'arm64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
+& node (Join-Path $root 'scripts\collect-notices.mjs') (Join-Path $stage 'Package\Notices') --target $noticeTarget
+if ($LASTEXITCODE -ne 0) { throw 'Could not collect dependency notices for the release package.' }
+Copy-Item (Join-Path $root 'apps\windows\THIRD-PARTY-NOTICES.txt') (Join-Path $stage 'Package\Notices\Windows-template-assets.txt')
 Copy-Item (Join-Path $PSScriptRoot 'install.ps1') (Join-Path $stage 'install.ps1')
 Copy-Item (Join-Path $root 'apps\windows\THIRD-PARTY-NOTICES.txt') $stage
 @"
