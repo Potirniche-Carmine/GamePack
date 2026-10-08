@@ -25,12 +25,13 @@ The demo MP4 from Downloads was imported through the native file picker. It is 1
 | Raw video | Hide annotations removes saved overlays and active comment colors; Show annotations restores them at the current playhead |
 | Appearance | Both light and dark themes inspected; Light survived reinstall and Dark survived restart; profile row vertically centered |
 | Window resize | Layout remains usable at approximately 1100 × 730 points; normalized ellipse remains aligned with footage |
-| Final restart | Video, profile, five posted comments, parent reply relation, theme, and all drawings survive restart |
-| Storage integrity | SQLite `integrity_check` returns `ok`; schema version 2, one video, five comments, zero remaining drafts |
+| Final restart | Video, profile, six posted comments, parent reply relation, theme, and all drawings survive restart |
+| Storage integrity | SQLite `integrity_check` returns `ok`; schema version 2, one video, six comments, zero remaining drafts |
+| Return to drawing | Reply text survived Back to drawing; playback resumed, a second stroke was added, and the saved nested reply contains its arrow and pen |
 | Leaving a live draft | Close captured 8.174–11.299 seconds from the first stroke; reopening and restarting retained those bounds and the drawing, then posting succeeded |
 | Deferred ZIP | Both buttons remain visible and disabled |
 
-Evidence is saved under `artifacts/local/screenshots/`. Screenshots `01`–`10` cover the initial import, drawing tools, isolated review, seeking, restart, and hosted-package installation. The final interface is covered by `11-light-threaded.png`, `12-light-raw-video.png`, `13-dark-overlays.png`, `14-live-capture.png`, `15-comment-prompt.png`, `16-saved-live-clip.png`, `17-normal-playback-later.png`, `18-compact-dark.png`, and `19-restart-live-clip.png`, and `20-draft-navigation-recovery.png`.
+Evidence is saved under `artifacts/local/screenshots/`. Screenshots `01`–`10` cover the initial import, drawing tools, isolated review, seeking, restart, and hosted-package installation. The final interface is covered by `11-light-threaded.png`, `12-light-raw-video.png`, `13-dark-overlays.png`, `14-live-capture.png`, `15-comment-prompt.png`, `16-saved-live-clip.png`, `17-normal-playback-later.png`, `18-compact-dark.png`, and `19-restart-live-clip.png`, and `20-draft-navigation-recovery.png`, and `21-nested-live-reply.png`.
 
 ## Automated verification
 
