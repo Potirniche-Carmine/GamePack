@@ -1,20 +1,7 @@
 [CmdletBinding()]
 param([ValidateSet('Release', 'Debug')][string]$Configuration = 'Release', [ValidateSet('x64', 'arm64')][string]$Architecture = 'x64')
 $ErrorActionPreference = 'Stop'
-function Assert-PeArchitecture([string]$Path, [string]$ExpectedArchitecture) {
-    $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($Path))
-    try {
-        if ($reader.ReadUInt16() -ne 0x5a4d) { throw "Not a Windows executable: $Path" }
-        $reader.BaseStream.Position = 0x3c
-        $peOffset = $reader.ReadUInt32()
-        if ($peOffset -gt $reader.BaseStream.Length - 6) { throw "Invalid PE header: $Path" }
-        $reader.BaseStream.Position = $peOffset
-        if ($reader.ReadUInt32() -ne 0x00004550) { throw "Missing PE signature: $Path" }
-        $expected = if ($ExpectedArchitecture -eq 'arm64') { 0xaa64 } else { 0x8664 }
-        $actual = $reader.ReadUInt16()
-        if ($actual -ne $expected) { throw ("Incorrect CPU architecture for {0}: machine 0x{1:x4}, expected 0x{2:x4}" -f $Path,$actual,$expected) }
-    } finally { $reader.Dispose() }
-}
+. (Join-Path $PSScriptRoot 'package-validation.ps1')
 function Read-PackageIdentity([string]$Path) {
     $archive = [IO.Compression.ZipFile]::OpenRead($Path)
     try {
@@ -93,9 +80,11 @@ This package is intended for development testing. A successful CI build does
 not establish video playback, drawing, or visual correctness on every machine.
 Windows must have a codec installed for the videos you import.
 "@ | Set-Content (Join-Path $stage 'README.txt') -Encoding UTF8
+$nativeCount = Initialize-DevelopmentLayout (Join-Path $stage 'Package') $Architecture
+Write-Host "Validated $nativeCount native PE files and all manifest activation paths for $Architecture."
 $zip = Join-Path $output "GamePack-windows-$Architecture.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
-# npm packages can preserve Unix-epoch notice timestamps. ZIP timestamps support
+# Dependency archives can preserve Unix-epoch notice timestamps. ZIP supports
 # only 1980 through 2107; change the staged copies, never dependency sources.
 $zipMinimum = [datetime]::new(1980, 1, 2)
 $zipMaximum = [datetime]::new(2107, 12, 30)
