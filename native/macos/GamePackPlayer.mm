@@ -76,7 +76,10 @@
 - (void)setPaused:(BOOL)paused { _paused = paused; _finished = NO; if (paused) [_player pause]; else if (!_seeking) _player.rate = _rate; [_overlay setNeedsDisplay:YES]; }
 - (void)setRate:(float)rate { _rate = fmax(0.25, fmin(2.0, rate)); if (!_paused && !_seeking) _player.rate = _rate; }
 - (void)setSeekUs:(double)seekUs { _seekUs = seekUs; }
-- (void)setSeekToken:(NSInteger)seekToken { _seekToken = seekToken; [self performSeek]; }
+- (void)setSeekToken:(NSInteger)seekToken { _seekToken = seekToken; }
+- (void)didSetProps:(NSArray<NSString *> *)changedProps {
+  if ([changedProps containsObject:@"seekToken"] || [changedProps containsObject:@"seekUs"]) [self performSeek];
+}
 - (void)performSeek {
   [self finishStroke]; if (!_player.currentItem) return;
   _seeking = YES; _finished = NO; NSInteger generation = ++_seekGeneration; [_player pause];

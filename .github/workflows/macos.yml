@@ -1,0 +1,79 @@
+name: macOS native builds
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS ${{ matrix.arch }} desktop app
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      GAMEPACK_BUILD_JOBS: '2'
+      GAMEPACK_PACKAGE_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Install JavaScript and CocoaPods dependencies
+        run: |
+          gem install cocoapods -v 1.17.0 --no-document
+          npm ci
+          pod install --deployment --project-directory=macos
+      - name: Verify Rust contracts
+        run: |
+          cargo fmt --all --check
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build the native macOS app
+        run: bash scripts/build-macos.sh
+      - name: Package the app and installer
+        run: bash scripts/package-macos.sh
+      - name: Upload macOS desktop package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: dist/packages/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload compiler diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-macos-${{ matrix.arch }}
+          path: artifacts/local/macos-build.log
+          if-no-files-found: ignore
+          retention-days: 7
