@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -42,6 +42,17 @@ fn no_symlink(path: &Path) -> Result<()> {
             path.display()
         );
     }
+    Ok(())
+}
+
+fn managed_filename(filename: &str) -> Result<()> {
+    let mut components = Path::new(filename).components();
+    ensure!(
+        matches!(components.next(), Some(Component::Normal(_)))
+            && components.next().is_none()
+            && !filename.starts_with('.'),
+        "Invalid managed media filename in database"
+    );
     Ok(())
 }
 
@@ -91,7 +102,7 @@ impl Store {
 
     pub(crate) fn execute(&mut self, request: Request) -> Result<Value> {
         match request {
-            Request::Bootstrap => self.bootstrap(),
+            Request::Bootstrap {} => self.bootstrap(),
             Request::SetProfile { name } => {
                 validation::label(&name, "Display name")?;
                 self.db.execute(
@@ -128,24 +139,24 @@ impl Store {
             } => {
                 validation::metadata(duration_us, width, height)?;
                 self.atomic(|store| {
-                let video = store.video(&video_id)?;
-                // Metadata discovery must not make already-published anchors invalid.
-                let comments = store.load_comments()?;
-                for comment in comments.iter().filter(|c| c.media_id == video.media_id) {
-                    let updated = Video {
-                        duration_us,
-                        width,
-                        height,
-                        ..store.video(&comment.draft.video_id)?
-                    };
-                    validation::draft(&comment.draft, &updated)
-                        .context("Discovered video duration conflicts with a posted anchor")?;
-                }
-                store.db.execute(
-                    "UPDATE media SET duration_us=?1,width=?2,height=?3 WHERE id=?4",
-                    params![duration_us, width, height, video.media_id],
-                )?;
-                value(store.video(&video_id)?)
+                    let video = store.video(&video_id)?;
+                    // Metadata discovery must not make already-published anchors invalid.
+                    let comments = store.load_comments()?;
+                    for comment in comments.iter().filter(|c| c.media_id == video.media_id) {
+                        let updated = Video {
+                            duration_us,
+                            width,
+                            height,
+                            ..store.video(&comment.draft.video_id)?
+                        };
+                        validation::draft(&comment.draft, &updated)
+                            .context("Discovered video duration conflicts with a posted anchor")?;
+                    }
+                    store.db.execute(
+                        "UPDATE media SET duration_us=?1,width=?2,height=?3 WHERE id=?4",
+                        params![duration_us, width, height, video.media_id],
+                    )?;
+                    value(store.video(&video_id)?)
                 })
             }
             Request::SaveDraft { draft } => {
@@ -203,10 +214,7 @@ impl Store {
 
     fn resolve_video_path(&self, mut video: Video) -> Result<Video> {
         // Only a single relative filename is ever accepted from storage.
-        ensure!(
-            Path::new(&video.path).components().count() == 1 && !video.path.starts_with('.'),
-            "Invalid managed media filename in database"
-        );
+        managed_filename(&video.path)?;
         let path = self.root.join("media").join(&video.path);
         no_symlink(&path)?;
         video.path = path
@@ -469,10 +477,7 @@ impl Store {
             )
             .optional()?;
         let filename = existing_filename.unwrap_or(proposed_filename);
-        ensure!(
-            Path::new(&filename).components().count() == 1 && !filename.starts_with('.'),
-            "Invalid managed media filename"
-        );
+        managed_filename(&filename)?;
         let destination = self.root.join("media").join(&filename);
         no_symlink(&destination)?;
         if destination.exists() {
@@ -485,6 +490,10 @@ impl Store {
             // A same-filesystem hard link publishes the fully flushed staging
             // file without overwriting any existing media object.
             fs::hard_link(&staged.0, &destination).context("Cannot publish managed media")?;
+            // POSIX permits syncing directory entries; opening a directory as
+            // a normal File is unsupported on Windows. The media file itself
+            // has already been flushed on every platform.
+            #[cfg(unix)]
             File::open(self.root.join("media"))?.sync_all()?;
         }
         tx.execute("INSERT OR IGNORE INTO media(id,filename,byte_size,duration_us,width,height) VALUES(?1,?2,?3,?4,?5,?6)", params![media_id, filename, bytes, duration_us, width, height])?;

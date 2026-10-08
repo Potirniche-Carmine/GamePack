@@ -38,6 +38,7 @@ The Windows implementation is authored on macOS and has not been executed on Win
 ## Version and architecture references
 
 - [RN Windows 0.81.6 package metadata](https://registry.npmjs.org/react-native-windows/0.81.6) declares React `^19.1.4` and React Native `^0.81.0`; this repository pins RN 0.81.6 and React 19.1.4.
+- [Visual Studio Build Tools component IDs](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022) lists the bootstrap workloads and C++ UWP/SDK components.
 - [Microsoft architecture documentation](https://microsoft.github.io/react-native-windows/docs/new-architecture/) describes the Paper/UWP renderer and its removal in 0.82. Keep RN Windows pinned to 0.81.6 for this host.
 - [Microsoft XAML Islands host guide](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/xaml-islands/using-the-xaml-hosting-api) documents desktop HWND hosting through WindowsXamlManager and DesktopWindowXamlSource.
 - [Microsoft package activation documentation](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-application) describes `Windows.FullTrustApplication`. GamePack uses desktop full trust so Rust filesystem access reaches the real library directory.

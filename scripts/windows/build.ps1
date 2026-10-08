@@ -8,7 +8,7 @@ $vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsof
 if (-not $vs) { throw 'Visual Studio 2022 with C++ tools is required. Run scripts/windows/bootstrap.ps1.' }
 $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
 # Import the x64 compiler/linker environment into this process; no persistent PATH changes.
-& cmd.exe /d /s /c "`"$devcmd`" -no_logo -arch=x64 -host_arch=x64 && set" | ForEach-Object {
+& cmd.exe /d /s /c "call `"$devcmd`" -no_logo -arch=x64 -host_arch=x64 && set" | ForEach-Object {
     if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') }
 }
 if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the Visual Studio environment.' }

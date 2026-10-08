@@ -30,5 +30,10 @@ CREATE TABLE IF NOT EXISTS comments (
 CREATE INDEX IF NOT EXISTS comments_scope ON comments(project_id,video_id,created_at);
 CREATE TRIGGER IF NOT EXISTS comments_no_update BEFORE UPDATE ON comments
 BEGIN SELECT RAISE(ABORT,'Posted comments are immutable'); END;
+-- REPLACE may delete a conflicting row without DELETE triggers when recursive
+-- triggers are disabled, so refuse duplicate IDs before any insert runs.
+CREATE TRIGGER IF NOT EXISTS comments_no_replace BEFORE INSERT ON comments
+WHEN EXISTS(SELECT 1 FROM comments WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'Posted comments are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS comments_no_delete BEFORE DELETE ON comments
 BEGIN SELECT RAISE(ABORT,'Posted comments are immutable'); END;

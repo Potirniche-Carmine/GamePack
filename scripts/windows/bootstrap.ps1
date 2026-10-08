@@ -10,7 +10,7 @@ function Install-Package([string]$Id, [string[]]$Extra = @()) {
 }
 Install-Package 'OpenJS.NodeJS.LTS'
 Install-Package 'Rustlang.Rustup'
-Install-Package 'Microsoft.VisualStudio.2022.BuildTools' @('--override', '--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Workload.UniversalBuildTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.UWP.VC --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --includeRecommended')
+Install-Package 'Microsoft.VisualStudio.2022.BuildTools' @('--override', '--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Workload.UniversalBuildTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --includeRecommended')
 if ($EnableDeveloperMode) {
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'EnableDeveloperMode requires an elevated PowerShell terminal.' }

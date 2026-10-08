@@ -14,6 +14,7 @@ static double Number(JsonObject const& object, wchar_t const* key, double fallba
 static JsonValue N(double value) { return JsonValue::CreateNumberValue(value); }
 static JsonValue S(hstring const& value) { return JsonValue::CreateStringValue(value); }
 static constexpr double scale = 1000000.0;
+static void* ViewKey(FrameworkElement const& view) { return get_abi(view.as<Windows::Foundation::IInspectable>()); }
 struct PlayerState : std::enable_shared_from_this<PlayerState> {
   Grid root;
   MediaPlayerElement element;
@@ -223,14 +224,14 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
 };
 FrameworkElement PlayerManager::CreateView() noexcept {
   auto state=std::make_shared<PlayerState>(context); state->Init();
-  players.emplace(get_abi(state->root),state); return state->root;
+  players.emplace(ViewKey(state->root),state); return state->root;
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
   return single_threaded_map<hstring,T>({{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
-  auto it=players.find(get_abi(view)); if (it==players.end()) return;
+  auto it=players.find(ViewKey(view)); if (it==players.end()) return;
   auto p=it->second;
   try {
     auto props=JSValueObject::ReadFrom(reader);
@@ -262,6 +263,6 @@ ConstantProviderDelegate PlayerManager::ExportedCustomDirectEventTypeConstants()
   };
 }
 void PlayerManager::OnDropViewInstance(FrameworkElement const& view) noexcept {
-  auto it=players.find(get_abi(view)); if (it!=players.end()) { it->second->Dispose(); players.erase(it); }
+  auto it=players.find(ViewKey(view)); if (it!=players.end()) { it->second->Dispose(); players.erase(it); }
 }
 }

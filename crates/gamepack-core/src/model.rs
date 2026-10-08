@@ -93,7 +93,7 @@ pub struct Comment {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Request {
-    Bootstrap,
+    Bootstrap {},
     SetProfile {
         name: String,
     },
