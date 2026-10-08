@@ -13,22 +13,27 @@ The demo MP4 from Downloads was imported through the native file picker. It is 1
 | Profile | In-app display-name dialog saves “Demo reviewer” |
 | Draft recovery | Text and an ellipse survived quitting and reopening before posting |
 | Moment comment | Text plus an ellipse posted successfully at 00:00 |
-| Reply | New immutable reply with range 00:00–00:12 and orange arrow/pen posted |
+| Reply | Immutable reply with range 00:00–00:12 and arrow/pen posted; appears as an indented, collapsible child |
 | Editing a draft | Undo removes the last stroke; redo restores it |
 | Preview and replay | Draft preview at 0.5× and posted review at 2× work; range stops at 00:12 and clears drawings |
 | Timed pen | A separate range review captured positive media-relative sample times near 9.73 seconds |
-| Direct seeking | Selecting that range and seeking to 00:10 reconstructs the blue stroke; returning to 00:05 removes it |
+| Direct seeking | Seeking to 00:10 reconstructs the timed stroke; returning to 00:05 removes it |
 | Review isolation | Selecting the moment displays only its ellipse; overlapping reviews do not mix drawings |
+| Live capture | Started playback, opened Comment, and drew without pausing; Save paused the native player and opened the comment dialog |
+| Captured boundaries | Saved clip starts at the first native stroke sample, 2,585,953 µs, and ends at native Save time, 8,199,413 µs; samples rebased to zero and drawing visibility bounded to the clip |
+| Normal playback | Ordinary Play renders overlapping reviews together with matching comment/drawing colors; the moment disappears after two seconds, the captured clip after its end, and the later pen appears at its sampled time |
+| Raw video | Hide annotations removes saved overlays and active comment colors; Show annotations restores them at the current playhead |
+| Appearance | Both light and dark themes inspected; Light survived reinstall and Dark survived restart; profile row vertically centered |
 | Window resize | Layout remains usable at approximately 1100 × 730 points; normalized ellipse remains aligned with footage |
-| Final restart | Video, profile, three posted comments, parent reply relation, and all drawings survive restart |
-| Storage integrity | SQLite `integrity_check` returns `ok`; one video, three comments, zero remaining drafts |
+| Final restart | Video, profile, four posted comments, parent reply relation, theme, and all drawings survive restart |
+| Storage integrity | SQLite `integrity_check` returns `ok`; schema version 2, one video, four comments, zero remaining drafts |
 | Deferred ZIP | Both buttons remain visible and disabled |
 
-The evidence is saved under `artifacts/local/screenshots/`: `01-imported-video.png`, `02-posted-moment.png`, `03-timed-review-preview.png`, `04-review-complete.png`, `05-direct-seek-timed-drawing.png`, `06-seek-before-drawing.png`, `07-isolated-moment-review.png`, `08-compact-layout.png`, and `09-restart-persistence.png`.
+Evidence is saved under `artifacts/local/screenshots/`. Screenshots `01`–`10` cover the initial import, drawing tools, isolated review, seeking, restart, and hosted-package installation. The final interface is covered by `11-light-threaded.png`, `12-light-raw-video.png`, `13-dark-overlays.png`, `14-live-capture.png`, `15-comment-prompt.png`, `16-saved-live-clip.png`, `17-normal-playback-later.png`, `18-compact-dark.png`, and `19-restart-live-clip.png`.
 
 ## Automated verification
 
-`npm run typecheck`, Rust formatting, and Clippy with warnings denied pass locally. Thirteen Rust integration tests run on macOS; twelve run on Windows because the symlink fixture uses Unix-only APIs. These cover persistence, media deduplication and tamper detection, atomic publication and retry idempotency, concurrent publication, transaction rollback, immutable snapshots, reply boundaries, drawing validation, strict JSON validation, deterministic seek evaluation, metadata updates, and filesystem symlink containment. The macOS native Release build and package script pass locally. Windows CI also runs JSON payload regression fixtures against the compiled Rust CLI, checks the app/runtime PE machine codes, and verifies that declared Microsoft framework dependencies are bundled.
+`npm run typecheck`, Rust formatting, and Clippy with warnings denied pass locally. Fourteen Rust integration tests run on macOS; thirteen run on Windows because the symlink fixture uses Unix-only APIs. These cover persistence and appearance migration, media deduplication and tamper detection, atomic publication and retry idempotency, concurrent publication, transaction rollback, immutable snapshots, reply boundaries, drawing validation, strict JSON validation, deterministic seek evaluation, metadata updates, and filesystem symlink containment. Sixteen UI-domain tests cover aggregate playback, consistent review colors, exclusive ends, EOF moments, native capture boundaries, live draft recovery, final-stroke deduplication, large stroke data, and nested/cyclic/orphaned reply trees. The macOS native Release build and package script pass locally. Windows CI also runs JSON payload regression fixtures against the compiled Rust CLI, checks the app/runtime PE machine codes, and verifies that declared Microsoft framework dependencies are bundled.
 
 Hosted macOS ARM64/x64 and Windows ARM64/x64 builds are tracked in [GitHub Actions](https://github.com/Potirniche-Carmine/GamePack/actions). The release workflow requires all four packages and checksums before publishing. A successful build establishes compilation and packaging; Windows playback, pointer interaction, and visual correctness still require an interactive Windows device check. They are not established by the Mac screenshots.
 
