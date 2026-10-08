@@ -1,16 +1,48 @@
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$CoreExecutable)
 $ErrorActionPreference = 'Stop'
-# Windows PowerShell 5 may inherit a UTF-8 encoding that emits a BOM on native stdin.
-# The Rust CLI reads JSON Lines, so explicitly emit UTF-8 without a preamble.
-$OutputEncoding = [Text.UTF8Encoding]::new($false)
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('gamepack-windows-contract-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporary | Out-Null
 $library = Join-Path $temporary 'library'
 function Request($Value, [bool]$ExpectedSuccess = $true) {
     $request = ConvertTo-Json -InputObject $Value -Depth 20 -Compress
-    $response = $request | & $CoreExecutable $library | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or $response.ok -ne $ExpectedSuccess) { throw "Windows/Rust drawing contract mismatch: $($response | ConvertTo-Json -Compress -Depth 20)" }
+    # Send raw UTF-8 bytes instead of using PowerShell's native pipeline encoder.
+    # Windows PowerShell 5 can otherwise prepend a BOM despite a local encoding override.
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $process.StartInfo.FileName = $CoreExecutable
+    $process.StartInfo.Arguments = '"' + $library + '"'
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardInput = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $output = ''; $errorOutput = ''
+    $previousInputEncoding = [Console]::InputEncoding
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($request + "`n")
+    $prefix = [BitConverter]::ToString($bytes[0..([Math]::Min(31, $bytes.Length-1))])
+    try {
+        # .NET Framework constructs its redirected stdin StreamWriter from Console.InputEncoding
+        # and enables AutoFlush during Start(), which can write a preamble before our raw bytes.
+        [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+        [void]$process.Start()
+        [Console]::InputEncoding = $previousInputEncoding
+        $outputTask = $process.StandardOutput.ReadToEndAsync()
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        $inputStream = $process.StandardInput.BaseStream
+        $inputStream.Write($bytes, 0, $bytes.Length)
+        $inputStream.Flush()
+        $inputStream.Close()
+        if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Rust protocol fixture timed out.' }
+        $output = $outputTask.GetAwaiter().GetResult()
+        $errorOutput = $errorTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) { throw "Rust protocol fixture process failed: $errorOutput" }
+        $response = $output | ConvertFrom-Json
+    } catch {
+        throw "Rust fixture transport failed: $($_.Exception.Message); stdin UTF-8 prefix=$prefix; stdout=$output; stderr=$errorOutput"
+    } finally { [Console]::InputEncoding = $previousInputEncoding; $process.Dispose() }
+    if ($response.ok -ne $ExpectedSuccess) { throw "Windows/Rust drawing contract mismatch: $($response | ConvertTo-Json -Compress -Depth 20); stdin UTF-8 prefix=$prefix; stdout=$output; stderr=$errorOutput" }
     return $response.data
 }
 try {

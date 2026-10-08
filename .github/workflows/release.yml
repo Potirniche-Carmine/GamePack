@@ -13,11 +13,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Verify Windows JSON transport
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/windows.yml
+    with:
+      contract_only: true
+
   macos:
+    needs: preflight
     if: startsWith(github.ref, 'refs/tags/v')
     uses: ./.github/workflows/macos.yml
 
   windows:
+    needs: preflight
     if: startsWith(github.ref, 'refs/tags/v')
     uses: ./.github/workflows/windows.yml
 
