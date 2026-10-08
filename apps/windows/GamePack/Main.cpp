@@ -1,18 +1,35 @@
 #include "pch.h"
 #include "GamePackModule.h"
 #include "AutolinkedNativeModules.g.h"
+#include <dwmapi.h>
 using namespace winrt;
 using namespace Windows::UI::Xaml;
 using namespace Windows::UI::Xaml::Hosting;
 using namespace Microsoft::ReactNative;
 static DesktopWindowXamlSource island{nullptr};
 static HWND islandWindow{};
+static FrameworkElement appearanceRoot{nullptr};
+static hstring appearance{L"system"};
+void gamepack::windows::ApplyAppearance(hstring const& theme) {
+  appearance=theme;
+  if (appearanceRoot) appearanceRoot.RequestedTheme(theme==L"dark" ? ElementTheme::Dark : theme==L"light" ? ElementTheme::Light : ElementTheme::Default);
+  DWORD light=1, size=sizeof(light);
+  RegGetValueW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",L"AppsUseLightTheme",RRF_RT_REG_DWORD,nullptr,&light,&size);
+  BOOL dark=theme==L"dark" || (theme==L"system" && light==0);
+  // Older Windows builds may decline this Windows 11 window-chrome attribute;
+  // the XAML/application theme still applies on every supported version.
+  if (mainWindow) DwmSetWindowAttribute(mainWindow,DWMWA_USE_IMMERSIVE_DARK_MODE,&dark,sizeof(dark));
+}
 static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
   case WM_SIZE:
     if (islandWindow) SetWindowPos(islandWindow,nullptr,0,0,LOWORD(lParam),HIWORD(lParam),SWP_NOZORDER);
     return 0;
   case WM_DESTROY: PostQuitMessage(0); return 0;
+  case WM_SETTINGCHANGE:
+  case WM_THEMECHANGED:
+    gamepack::windows::ApplyAppearance(appearance);
+    break;
   }
   return DefWindowProcW(window,message,wParam,lParam);
 }
@@ -48,6 +65,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     host.PackageProviders().Append(make<gamepack::windows::PackageProvider>());
     ReactRootView root;
     root.ComponentName(L"GamePack"); root.ReactNativeHost(host);
+    appearanceRoot=root;
+    gamepack::windows::ApplyAppearance(appearance);
     island.Content(root);
     host.LoadInstance();
     RECT rect{}; GetClientRect(window,&rect);
@@ -59,7 +78,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
       BOOL handled{}; native2->PreTranslateMessage(&message,&handled);
       if (!handled) { TranslateMessage(&message); DispatchMessageW(&message); }
     }
-    island.Content(nullptr); host.UnloadInstance(); island.Close(); manager.Close();
+    appearanceRoot=nullptr; island.Content(nullptr); host.UnloadInstance(); island.Close(); manager.Close();
     return 0;
   } catch (hresult_error const& error) { MessageBoxW(nullptr,error.message().c_str(),L"GamePack could not start",MB_ICONERROR); }
   catch (std::exception const& error) { MessageBoxW(nullptr,to_hstring(error.what()).c_str(),L"GamePack could not start",MB_ICONERROR); }

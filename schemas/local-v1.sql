@@ -1,4 +1,9 @@
--- Local database schema v1. ZIP exchange is deliberately not implemented.
+-- Local database schema, including additive v2 theme settings migration.
+-- ZIP exchange is deliberately not implemented.
+CREATE TABLE IF NOT EXISTS settings (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    theme TEXT NOT NULL CHECK(theme IN ('system','light','dark'))
+);
 CREATE TABLE IF NOT EXISTS profile (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
     author_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL

@@ -9,12 +9,14 @@
 @property(nonatomic) float rate;
 @property(nonatomic) double seekUs;
 @property(nonatomic) NSInteger seekToken;
+@property(nonatomic) NSInteger captureToken;
 @property(nonatomic) double reviewEndUs;
 @property(nonatomic,copy) NSString *sceneJson;
 @property(nonatomic,copy) NSString *tool;
 @property(nonatomic,copy) NSString *strokeColor;
 @property(nonatomic,copy) RCTDirectEventBlock onTime;
 @property(nonatomic,copy) RCTDirectEventBlock onDrawing;
+@property(nonatomic,copy) RCTDirectEventBlock onCaptureFinished;
 @end
 @interface GPOverlay : NSView
 @property(nonatomic,weak) GPPlayer *owner;
@@ -36,6 +38,8 @@
   NSInteger _seekGeneration;
   double _duration;
   CGSize _videoSize;
+  NSInteger _pendingCaptureToken;
+  NSDictionary *_pendingCaptureDrawing;
 }
 - (BOOL)isFlipped { return YES; }
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -73,23 +77,26 @@
     });
   }];
 }
-- (void)setPaused:(BOOL)paused { _paused = paused; _finished = NO; if (paused) [_player pause]; else if (!_seeking) _player.rate = _rate; [_overlay setNeedsDisplay:YES]; }
-- (void)setRate:(float)rate { _rate = fmax(0.25, fmin(2.0, rate)); if (!_paused && !_seeking) _player.rate = _rate; }
+- (void)setPaused:(BOOL)paused { _paused = paused; _finished = NO; if (paused || _pendingCaptureToken) [_player pause]; else if (!_seeking) _player.rate = _rate; [_overlay setNeedsDisplay:YES]; }
+- (void)setRate:(float)rate { _rate = fmax(0.25, fmin(2.0, rate)); if (!_paused && !_seeking && !_pendingCaptureToken) _player.rate = _rate; }
 - (void)setSeekUs:(double)seekUs { _seekUs = seekUs; }
 - (void)setSeekToken:(NSInteger)seekToken { _seekToken = seekToken; }
 - (void)didSetProps:(NSArray<NSString *> *)changedProps {
+  if ([changedProps containsObject:@"captureToken"] && _captureToken > 0) [self finishCapture];
+  else if ([changedProps containsObject:@"tool"]) [self finishStroke];
   if ([changedProps containsObject:@"seekToken"] || [changedProps containsObject:@"seekUs"]) [self performSeek];
+  [self emitCaptureIfReady];
 }
 - (void)performSeek {
   [self finishStroke]; if (!_player.currentItem) return;
   _seeking = YES; _finished = NO; NSInteger generation = ++_seekGeneration; [_player pause];
   __weak GPPlayer *weakSelf = self;
   [_player seekToTime:CMTimeMake((int64_t)fmax(0, _seekUs), 1000000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL complete) {
-    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration || !complete) return; self->_seeking = NO; if (!self.paused) self->_player.rate = self.rate; [self->_overlay setNeedsDisplay:YES]; [self emitTime:NO]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; if (!self.paused && complete && !self->_pendingCaptureToken) self->_player.rate = self.rate; [self emitCaptureIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:NO]; });
   }];
 }
 - (void)setSceneJson:(NSString *)sceneJson { _sceneJson = [sceneJson copy]; _scene = sceneJson.length ? [NSJSONSerialization JSONObjectWithData:[sceneJson dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil; [_overlay setNeedsDisplay:YES]; }
-- (void)setTool:(NSString *)tool { [self finishStroke]; _tool = [tool copy]; }
+- (void)setTool:(NSString *)tool { _tool = [tool copy]; }
 - (int64_t)timeUs { double seconds = CMTimeGetSeconds(_player.currentTime); return isfinite(seconds) ? llround(seconds * 1000000) : 0; }
 - (void)tick {
   if (_seeking) return;
@@ -136,12 +143,36 @@
   if (![_drawingTool isEqual:@"pen"] && points.count > 1) points = @[points.firstObject,points.lastObject];
   return @{@"id":NSUUID.UUID.UUIDString.lowercaseString,@"tool":_drawingTool ?: @"pen",@"color":_drawingColor ?: @"#FFCC66",@"width":@3500,@"visible_from_us":@(_drawingStart),@"visible_until_us":@(until),@"samples":points ?: @[]};
 }
-- (void)finishStroke {
-  if (!_samples) return;
+- (NSDictionary *)takeStroke {
+  if (!_samples) return nil;
   if (_samples.count == 1) [_samples addObject:_samples.firstObject];
   NSDictionary *drawing = [self currentDrawing]; _samples = nil;
-  if (self.onDrawing) { NSData *json = [NSJSONSerialization dataWithJSONObject:drawing options:0 error:nil]; self.onDrawing(@{@"drawingJson":[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding]}); }
   [_overlay setNeedsDisplay:YES];
+  return drawing;
+}
+- (void)finishStroke {
+  NSDictionary *drawing = [self takeStroke];
+  if (!drawing) return;
+  if (self.onDrawing) { NSData *json = [NSJSONSerialization dataWithJSONObject:drawing options:0 error:nil]; self.onDrawing(@{@"drawingJson":[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding]}); }
+}
+- (void)finishCapture {
+  [_player pause]; _paused = YES;
+  _pendingCaptureToken = _captureToken;
+  _pendingCaptureDrawing = [self takeStroke];
+}
+- (void)emitCaptureIfReady {
+  if (!_pendingCaptureToken || _seeking) return;
+  [_player pause]; _paused = YES;
+  int64_t time = [self timeUs];
+  NSDictionary *drawing = _pendingCaptureDrawing;
+  NSMutableDictionary *event = [@{@"captureToken":@(_pendingCaptureToken), @"time_us":@(time)} mutableCopy];
+  _pendingCaptureToken = 0; _pendingCaptureDrawing = nil;
+  if (drawing) {
+    NSData *json = [NSJSONSerialization dataWithJSONObject:drawing options:0 error:nil];
+    event[@"drawingJson"] = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+  }
+  if (self.onCaptureFinished) self.onCaptureFinished(event);
+  [self emitTime:NO];
 }
 - (NSColor *)color:(NSString *)hex { unsigned int value=0; if (hex.length==7) [[NSScanner scannerWithString:[hex substringFromIndex:1]] scanHexInt:&value]; return [NSColor colorWithRed:((value>>16)&255)/255.0 green:((value>>8)&255)/255.0 blue:(value&255)/255.0 alpha:1]; }
 - (NSPoint)point:(NSDictionary *)sample rect:(NSRect)rect { return NSMakePoint(rect.origin.x+[sample[@"x"] doubleValue]/1000000*rect.size.width,rect.origin.y+[sample[@"y"] doubleValue]/1000000*rect.size.height); }
@@ -187,10 +218,12 @@ RCT_EXPORT_VIEW_PROPERTY(paused, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(rate, float)
 RCT_EXPORT_VIEW_PROPERTY(seekUs, double)
 RCT_EXPORT_VIEW_PROPERTY(seekToken, NSInteger)
+RCT_EXPORT_VIEW_PROPERTY(captureToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(reviewEndUs, double)
 RCT_EXPORT_VIEW_PROPERTY(sceneJson, NSString)
 RCT_EXPORT_VIEW_PROPERTY(tool, NSString)
 RCT_EXPORT_VIEW_PROPERTY(strokeColor, NSString)
 RCT_EXPORT_VIEW_PROPERTY(onTime, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawing, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onCaptureFinished, RCTDirectEventBlock)
 @end

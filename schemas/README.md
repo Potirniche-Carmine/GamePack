@@ -1,6 +1,8 @@
 # Local schema and canonical comments
 
-`local-v1.sql` is the Rust-owned SQLite schema, identified by `PRAGMA user_version=1`.
+`local-v1.sql` is the Rust-owned SQLite schema. `PRAGMA user_version=2` adds a singleton settings table; opening a v1 library adds the table and defaults theme to `system` without replacing existing records. Older binaries reject this newer schema.
+
+Bootstrap includes `settings: {theme: 'system' | 'light' | 'dark'}`. `set_theme {theme}` persists and returns these settings. Preferences belong to the chosen root's database.
 It is local application storage, not an exchange format. ZIP import/export is not
 implemented. SQLite uses WAL, foreign keys, a ten-second busy timeout, and FULL
 synchronous writes. Posting acquires an immediate write transaction, validates the

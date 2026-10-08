@@ -1,4 +1,4 @@
-use crate::model::{Comment, Draft, Profile, Project, Request, Video};
+use crate::model::{Comment, Draft, Profile, Project, Request, Settings, Theme, Video};
 use crate::validation;
 use anyhow::{ensure, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -85,7 +85,7 @@ impl Store {
         )?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         ensure!(
-            version <= 1,
+            version <= 2,
             "This database was created by a newer GamePack version"
         );
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -95,7 +95,7 @@ impl Store {
             [id()],
         )?;
         tx.execute("INSERT INTO projects(id,title,created_at) SELECT ?1,'Review library',?2 WHERE NOT EXISTS(SELECT 1 FROM projects)", params![id(), now()?])?;
-        tx.execute_batch("PRAGMA user_version=1;")?;
+        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); PRAGMA user_version=2;")?;
         tx.commit()?;
         Ok(Self { root, db })
     }
@@ -103,6 +103,13 @@ impl Store {
     pub(crate) fn execute(&mut self, request: Request) -> Result<Value> {
         match request {
             Request::Bootstrap {} => self.bootstrap(),
+            Request::SetTheme { theme } => {
+                self.db.execute(
+                    "UPDATE settings SET theme=?1 WHERE singleton=1",
+                    [theme.as_str()],
+                )?;
+                value(Settings { theme })
+            }
             Request::SetProfile { name } => {
                 validation::label(&name, "Display name")?;
                 self.db.execute(
@@ -206,6 +213,22 @@ impl Store {
         )?)
     }
 
+    fn settings(&self) -> Result<Settings> {
+        let theme: String =
+            self.db
+                .query_row("SELECT theme FROM settings WHERE singleton=1", [], |row| {
+                    row.get(0)
+                })?;
+        Ok(Settings {
+            theme: match theme.as_str() {
+                "system" => Theme::System,
+                "light" => Theme::Light,
+                "dark" => Theme::Dark,
+                _ => anyhow::bail!("Invalid theme preference in database"),
+            },
+        })
+    }
+
     fn video(&self, video_id: &str) -> Result<Video> {
         validation::identifier(video_id)?;
         let video = self.db.query_row("SELECT v.id,v.project_id,v.media_id,v.title,m.filename,m.byte_size,m.duration_us,m.width,m.height FROM videos v JOIN media m ON m.id=v.media_id WHERE v.id=?1", [video_id], video_row).optional()?.context("Video does not exist; import it before creating a review")?;
@@ -278,7 +301,7 @@ impl Store {
         })
         .sum::<u64>();
         Ok(
-            json!({"profile": self.profile()?, "projects": projects, "videos": videos, "comments": self.load_comments()?, "drafts": drafts, "storage": {"root": self.root.to_str().context("Data path is not valid UTF-8")?, "managed_bytes": managed_bytes, "database_bytes": database_bytes}}),
+            json!({"profile": self.profile()?, "settings": self.settings()?, "projects": projects, "videos": videos, "comments": self.load_comments()?, "drafts": drafts, "storage": {"root": self.root.to_str().context("Data path is not valid UTF-8")?, "managed_bytes": managed_bytes, "database_bytes": database_bytes}}),
         )
     }
 

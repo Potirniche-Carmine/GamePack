@@ -7,6 +7,30 @@ pub struct Profile {
     pub name: String,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Settings {
+    pub theme: Theme,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
@@ -96,6 +120,9 @@ pub(crate) enum Request {
     Bootstrap {},
     SetProfile {
         name: String,
+    },
+    SetTheme {
+        theme: Theme,
     },
     CreateProject {
         title: String,

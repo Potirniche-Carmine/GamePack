@@ -23,8 +23,7 @@
   self.window = [[NSWindow alloc] initWithContentRect:root.frame styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskResizable | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
   self.window.title = @"GamePack";
   self.window.minSize = NSMakeSize(1080, 700);
-  self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-  self.window.backgroundColor = [NSColor colorWithCalibratedWhite:0.06 alpha:1];
+  self.window.backgroundColor = NSColor.windowBackgroundColor;
   self.window.titlebarAppearsTransparent = YES;
   NSViewController *controller = [NSViewController new]; controller.view = root;
   self.window.contentViewController = controller;

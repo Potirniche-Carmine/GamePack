@@ -64,6 +64,49 @@ impl Fixture {
 }
 
 #[test]
+fn themes_are_strict_persisted_and_migrate_existing_libraries() {
+    let fixture = Fixture::new();
+    let initial = fixture.boot();
+    assert_eq!(initial["settings"], json!({"theme":"system"}));
+    // Recreate an actual pre-settings library, retaining its existing records.
+    let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
+    db.execute_batch("DROP TABLE settings; PRAGMA user_version=1;")
+        .unwrap();
+    drop(db);
+    let migrated = fixture.boot();
+    assert_eq!(migrated["settings"], json!({"theme":"system"}));
+    assert_eq!(migrated["profile"], initial["profile"]);
+    assert_eq!(migrated["videos"], initial["videos"]);
+    for theme in ["dark", "light", "system"] {
+        let saved = success(fixture.root(), json!({"command":"set_theme","theme":theme}));
+        assert_eq!(saved, json!({"theme":theme}));
+        assert_eq!(fixture.boot()["settings"], saved);
+    }
+    for invalid in [
+        json!("LIGHT"),
+        json!("sepia"),
+        Value::Null,
+        json!(true),
+        json!({"theme":"dark"}),
+    ] {
+        failure(
+            fixture.root(),
+            json!({"command":"set_theme","theme":invalid}),
+        );
+    }
+    failure(
+        fixture.root(),
+        json!({"command":"set_theme","theme":"dark","extra":1}),
+    );
+    assert_eq!(fixture.boot()["settings"], json!({"theme":"system"}));
+    let other = TempDir::new().unwrap();
+    assert_eq!(
+        success(other.path(), json!({"command":"bootstrap"}))["settings"],
+        json!({"theme":"system"})
+    );
+}
+
+#[test]
 fn bootstrap_and_edits_survive_reopened_connections() {
     let fixture = Fixture::new();
     assert_eq!(fixture.boot()["profile"]["name"], "");

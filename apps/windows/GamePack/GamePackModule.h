@@ -2,6 +2,7 @@
 #include "pch.h"
 namespace gamepack::windows {
 extern HWND mainWindow;
+void ApplyAppearance(winrt::hstring const& theme);
 std::string DataDirectory();
 struct PackageProvider : winrt::implements<PackageProvider, winrt::Microsoft::ReactNative::IReactPackageProvider> {
   void CreatePackage(winrt::Microsoft::ReactNative::IReactPackageBuilder const& builder) noexcept;
@@ -17,5 +18,7 @@ struct GamePackModule {
   void ChooseVideo(winrt::Microsoft::ReactNative::ReactPromise<winrt::Microsoft::ReactNative::JSValue> promise) noexcept;
   REACT_METHOD(Directory, L"dataDirectory")
   void Directory(winrt::Microsoft::ReactNative::ReactPromise<std::string> promise) noexcept;
+  REACT_METHOD(SetAppearance, L"setAppearance")
+  void SetAppearance(std::string theme) noexcept;
 };
 }

@@ -18,6 +18,17 @@ RCT_EXPORT_MODULE(GamePack)
   return override.length ? [override stringByExpandingTildeInPath] : [NSHomeDirectory() stringByAppendingPathComponent:@".gamepack"];
 }
 RCT_REMAP_METHOD(dataDirectory, dataDirectoryWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { resolve([self root]); }
+RCT_EXPORT_METHOD(setAppearance:(NSString *)theme) {
+  if (![@[@"system", @"light", @"dark"] containsObject:theme]) return;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSAppearance *appearance = [theme isEqual:@"system"] ? nil : [NSAppearance appearanceNamed:[theme isEqual:@"dark"] ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+    NSApp.appearance = appearance;
+    for (NSWindow *window in NSApp.windows) {
+      window.appearance = appearance;
+      window.backgroundColor = NSColor.windowBackgroundColor;
+    }
+  });
+}
 RCT_REMAP_METHOD(command, command:(NSString *)request resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   try {
     auto response = gamepack::dispatch(rust::Str([[self root] UTF8String]), rust::Str([request UTF8String]));

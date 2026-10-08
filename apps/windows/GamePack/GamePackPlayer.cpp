@@ -25,8 +25,9 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   JsonObject scene{nullptr}, live{nullptr};
   JsonArray samples{nullptr};
   hstring tool{L"none"}, color{L"#FF775E"}, source;
-  int64_t seekToken{-1}, seekUs{}, reviewEnd{-1};
-  bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{};
+  int64_t seekToken{-1}, seekUs{}, reviewEnd{-1}, captureToken{}, captureRequest{};
+  std::string captureDrawing;
+  bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{};
   uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
   int64_t pendingSeekTarget{};
   event_token seekCompletedToken{};
@@ -66,14 +67,15 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     // Serialize native seeks: an older completion cannot release a newer request.
     if (generation!=seekGeneration) { StartSeek(); return; }
     seeking=false;
-    if (!paused) player.Play();
+    if (captureRequest) Capture();
+    else if (!paused) player.Play();
     Render(); Emit(true);
   }
   void StartSeek() {
     if (disposed || seekInFlight || Duration()<=0) return;
     auto target=std::clamp<int64_t>(pendingSeekTarget,0,Duration());
     auto generation=seekGeneration;
-    if (Time()==target) { seeking=false; if (!paused) player.Play(); Render(); Emit(true); return; }
+    if (Time()==target) { seeking=false; if (captureRequest) Capture(); else if (!paused) player.Play(); Render(); Emit(true); return; }
     seekInFlight=true; activeSeekGeneration=generation;
     auto weak=weak_from_this();
     seekCompletedToken=player.PlaybackSession().SeekCompleted([weak,generation](auto const&,auto const&) {
@@ -190,8 +192,8 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     sample.SetNamedValue(L"t_us", N(static_cast<double>(timestamp)));
     samples.Append(sample);
   }
-  void Finish() {
-    if (!capturing) return;
+  std::string Finish(bool notify=true) {
+    if (!capturing) return {};
     capturing=false;
     overlay.ReleasePointerCaptures();
     if (live && samples && samples.Size()) {
@@ -201,9 +203,26 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
         endpoints.Append(samples.GetAt(samples.Size()-1));
         live.SetNamedValue(L"samples", endpoints);
       }
-      context.DispatchEvent(root, L"topDrawing", JSValueObject{{"drawingJson",to_string(live.Stringify())}});
+      auto json=to_string(live.Stringify());
+      if (captureRequest) captureDrawing=json;
+      else if (notify) context.DispatchEvent(root, L"topDrawing", JSValueObject{{"drawingJson",json}});
+      live=nullptr; samples=nullptr; Render();
+      return json;
     }
     live=nullptr; samples=nullptr; Render();
+    return {};
+  }
+  void Capture() {
+    if (!captureRequest || disposed || seeking || applyingProps) return;
+    paused=true; player.Pause();
+    // Finish uses the pending request to put this stroke exclusively in the ACK.
+    Finish(false);
+    auto token=captureRequest;
+    captureRequest=0;
+    JSValueObject result{{"captureToken",token},{"time_us",Time()}};
+    if (!captureDrawing.empty()) result["drawingJson"]=std::move(captureDrawing);
+    captureDrawing.clear();
+    context.DispatchEvent(root,L"topCaptureFinished",std::move(result));
   }
   void Dispose() {
     if (disposed) return;
@@ -278,20 +297,37 @@ FrameworkElement PlayerManager::CreateView() noexcept {
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
-  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String}}).GetView();
+  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String},{L"captureToken",T::Number}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
   auto it=players.find(ViewKey(view)); if (it==players.end()) return;
   auto p=it->second;
   try {
     auto props=JSValueObject::ReadFrom(reader);
+    p->applyingProps=true;
+    if (auto v=props.find("captureToken");v!=props.end() && v->second.AsInt64()>0 && v->second.AsInt64()!=p->captureToken) {
+      p->captureToken=v->second.AsInt64(); p->captureRequest=p->captureToken; p->captureDrawing.clear();
+      p->paused=true; p->player.Pause();
+    }
     if (auto v=props.find("source");v!=props.end()) {
       auto path=to_hstring(v->second.AsString());
       if (p->source!=path) { p->Finish(); p->ResetSeek(); p->seeking=!path.empty(); p->player.Pause(); p->player.Source(nullptr); p->source=path; p->ended=false; ++p->sourceGeneration;
         if (!path.empty()) PlayerState::Load(p,path,p->sourceGeneration);
       }
     }
-    if (auto v=props.find("sceneJson");v!=props.end()) { p->Finish(); auto json=to_hstring(v->second.AsString()); JsonObject parsed{nullptr}; if (!json.empty()) JsonObject::TryParse(json,parsed); p->scene=parsed; }
+    if (auto v=props.find("sceneJson");v!=props.end()) {
+      auto json=to_hstring(v->second.AsString()); JsonObject parsed{nullptr};
+      if (!json.empty()) JsonObject::TryParse(json,parsed);
+      bool sameAnchor=false;
+      if (parsed && p->scene && parsed.GetNamedString(L"id",L"")==p->scene.GetNamedString(L"id",L"")) {
+        auto next=parsed.GetNamedObject(L"anchor",JsonObject{}), previous=p->scene.GetNamedObject(L"anchor",JsonObject{});
+        auto kind=next.GetNamedString(L"kind",L"point");
+        auto key=kind==L"interval" ? L"start_us" : L"at_us";
+        sameAnchor=kind==previous.GetNamedString(L"kind",L"point") && Number(next,key)==Number(previous,key);
+      }
+      if (!sameAnchor) p->Finish();
+      p->scene=parsed;
+    }
     if (auto v=props.find("tool");v!=props.end()) { auto tool=to_hstring(v->second.AsString()); if (tool!=p->tool) p->Finish(); p->tool=tool; p->overlay.IsHitTestVisible(tool!=L"none"); }
     if (auto v=props.find("strokeColor");v!=props.end()) p->color=to_hstring(v->second.AsString());
     if (auto v=props.find("reviewEndUs");v!=props.end()) p->reviewEnd=v->second.AsInt64();
@@ -302,13 +338,13 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
       p->ended=false; p->Seek(p->seekUs);
     }
     if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused) p->player.Pause(); else { p->ended=false; if (!p->seeking) p->player.Play(); } }
-    p->Render(); p->Emit(true);
-  } catch (hresult_error const& error) { p->Emit(true,to_string(error.message())); }
-  catch (std::exception const& error) { p->Emit(true,error.what()); }
+    p->applyingProps=false; p->Capture(); p->Render(); p->Emit(true);
+  } catch (hresult_error const& error) { p->applyingProps=false; p->Emit(true,to_string(error.message())); }
+  catch (std::exception const& error) { p->applyingProps=false; p->Emit(true,error.what()); }
 }
 ConstantProviderDelegate PlayerManager::ExportedCustomDirectEventTypeConstants() noexcept {
   return [](IJSValueWriter const& writer) noexcept {
-    WriteValue(writer,JSValueObject{{"topTime",JSValueObject{{"registrationName","onTime"}}},{"topDrawing",JSValueObject{{"registrationName","onDrawing"}}}});
+    WriteValue(writer,JSValueObject{{"topTime",JSValueObject{{"registrationName","onTime"}}},{"topDrawing",JSValueObject{{"registrationName","onDrawing"}}},{"topCaptureFinished",JSValueObject{{"registrationName","onCaptureFinished"}}}});
   };
 }
 void PlayerManager::OnDropViewInstance(FrameworkElement const& view) noexcept {

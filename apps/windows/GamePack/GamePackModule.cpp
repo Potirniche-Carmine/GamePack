@@ -53,6 +53,12 @@ void GamePackModule::Command(std::string request, ReactPromise<std::string> prom
 void GamePackModule::Directory(ReactPromise<std::string> promise) noexcept {
   try { promise.Resolve(DataDirectory()); } catch (std::exception const& error) { promise.Reject(error.what()); }
 }
+void GamePackModule::SetAppearance(std::string theme) noexcept {
+  if (theme != "system" && theme != "light" && theme != "dark") return;
+  context.UIDispatcher().Post([theme=std::move(theme)]() {
+    try { ApplyAppearance(to_hstring(theme)); } catch (...) {}
+  });
+}
 void GamePackModule::ChooseVideo(ReactPromise<JSValue> promise) noexcept {
   context.UIDispatcher().Post([promise]() {
     try {
