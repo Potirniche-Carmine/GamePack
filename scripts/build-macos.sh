@@ -8,6 +8,7 @@ command -v cargo >/dev/null 2>&1 || source "$HOME/.cargo/env"
 [[ -d macos/Pods ]] || pod install --project-directory=macos
 MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release --locked -p gamepack-core
 npm run typecheck
+npm run test:ui
 mkdir -p artifacts/local
 xcodebuild -workspace macos/gamepack.xcworkspace -scheme gamepack-macOS -configuration Release \
   -derivedDataPath build/macos -jobs "${GAMEPACK_BUILD_JOBS:-8}" CODE_SIGNING_ALLOWED=NO ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES build \

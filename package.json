@@ -6,6 +6,7 @@
     "start": "react-native start",
     "macos": "react-native run-macos",
     "typecheck": "tsc --noEmit",
+    "test:ui": "node scripts/test-ui.mjs",
     "test:rust": "cargo test --workspace",
     "build:macos": "bash scripts/build-macos.sh",
     "install:macos": "bash scripts/install-macos.sh"

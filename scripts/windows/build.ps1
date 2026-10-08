@@ -27,6 +27,7 @@ try {
     if (-not $SkipTests) {
         Run 'cargo.exe' @('test', '--workspace', '--locked')
         Run 'npm.cmd' @('run', 'typecheck')
+        Run 'npm.cmd' @('run', 'test:ui')
         Run 'cargo.exe' @('build', '--locked', '--bin', 'gamepack')
         & (Join-Path $PSScriptRoot 'test-contract.ps1') -CoreExecutable (Join-Path $root 'target\debug\gamepack.exe')
     }
