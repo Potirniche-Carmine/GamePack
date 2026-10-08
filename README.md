@@ -62,6 +62,7 @@ Back up the library with GamePack closed. Removing the app does not delete the l
 ```sh
 npm ci
 npm run typecheck
+npm run test:ui
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets -- -D warnings
 bash scripts/build-macos.sh
