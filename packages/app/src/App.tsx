@@ -3,7 +3,7 @@ import {ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, useWind
 import {anchorLabel, anchorStart, Button, Dialog, Empty, parseTime, Timeline, timeLabel} from './components';
 import {chooseVideo, command, dataDirectory, GamePackPlayer, setAppearance} from './native';
 import {beginLiveDraft, commentThreads, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings, visibleThreads} from './review';
-import {activeCommentIds, annotationScene, coloredReview, reviewColor} from './playback';
+import {activeCommentIds, annotationScene, coloredReview, commentColorMap} from './playback';
 import {ThemeContext, useTheme, useThemeChoice} from './theme';
 import type {Anchor, Bootstrap, CaptureFinished, Comment, Draft, Drawing, DrawingTool, PlayerTime, Profile, Project, Settings, ThemeChoice, Video} from './types';
 
@@ -78,7 +78,8 @@ export default function App() {
   const activeScene = draft ?? selected;
   const isLive = !!draft && liveId === draft.id;
   const aggregateScene = useMemo(() => annotationScene(videoComments, duration, theme.dark), [videoComments, duration, theme.dark]);
-  const selectedScene = useMemo(() => selected ? coloredReview(selected, theme.dark) : null, [selected, theme.dark]);
+  const commentColors = useMemo(() => commentColorMap(videoComments, theme.dark), [videoComments, theme.dark]);
+  const selectedScene = useMemo(() => selected ? coloredReview(selected, theme.dark, commentColors) : null, [selected, theme.dark, commentColors]);
   const draftStart = draft ? anchorStart(draft.anchor) : 0;
   const draftEnd = draft?.anchor.kind === 'interval' ? (isLive && !preview ? duration : draft.anchor.end_us) : 0;
   const draftKind = draft?.anchor.kind;
@@ -544,8 +545,8 @@ export default function App() {
           </Pressable>)}
           {threads.map(({node, depth}) => <View key={node.comment.comment_id} style={depth ? [s.threadRow, {marginLeft: Math.min(depth - 1, 3) * 10}] : undefined}>
             <CommentCard item={node.comment} selected={node.comment.comment_id === commentId} hasReplies={!!node.children.length} expanded={expanded.has(node.comment.comment_id)}
-              activeColor={annotationsVisible && activeIds.has(node.comment.comment_id) ? reviewColor(node.comment.comment_id, theme.dark) : undefined}
-              branchColor={annotationsVisible && !expanded.has(node.comment.comment_id) && activeBranches.has(node.comment.comment_id) ? reviewColor(activeBranches.get(node.comment.comment_id)!, theme.dark) : undefined}
+              activeColor={annotationsVisible && activeIds.has(node.comment.comment_id) ? commentColors.get(node.comment.comment_id) : undefined}
+              branchColor={annotationsVisible && !expanded.has(node.comment.comment_id) && activeBranches.has(node.comment.comment_id) ? commentColors.get(activeBranches.get(node.comment.comment_id)!) : undefined}
               onToggle={() => setExpanded(previous => { const next = new Set(previous); if (next.has(node.comment.comment_id)) next.delete(node.comment.comment_id); else next.add(node.comment.comment_id); return next; })}
               onSelect={() => selectComment(node.comment)} onPlay={() => { selectComment(node.comment); playReview(node.comment); }} onReply={() => newDraft(node.comment)} disabled={!!busy} />
           </View>)}

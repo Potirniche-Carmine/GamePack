@@ -5,11 +5,10 @@ export const MOMENT_PLAYBACK_US = 2_000_000;
 const darkPalette = ['#B3A0F7', '#81C7F5', '#80D0C2', '#EBA7CC', '#E8BB82'];
 const lightPalette = ['#6953BD', '#1F78BC', '#187E79', '#B14C80', '#AA6625'];
 
-export function reviewColor(commentId: string, dark: boolean): string {
-  let hash = 2166136261;
-  for (let i = 0; i < commentId.length; i++) hash = Math.imul(hash ^ commentId.charCodeAt(i), 16777619);
+export function commentColorMap(comments: readonly Comment[], dark: boolean): Map<string, string> {
   const palette = dark ? darkPalette : lightPalette;
-  return palette[(hash >>> 0) % palette.length];
+  const ordered = [...comments].sort((a, b) => (a.created_at_reported ?? 0) - (b.created_at_reported ?? 0) || a.comment_id.localeCompare(b.comment_id));
+  return new Map(ordered.map((comment, index) => [comment.comment_id, palette[index % palette.length]]));
 }
 
 export function playbackWindow(anchor: Anchor, durationUs: number): {start: number; end: number} {
@@ -31,6 +30,7 @@ export function annotationScene(comments: readonly Comment[], durationUs: number
   id: string; anchor: Anchor; drawings: Drawing[];
 } {
   const drawings: Drawing[] = [];
+  const colors = commentColorMap(comments, dark);
   const ordered = [...comments].sort((a, b) => {
     const startA = a.anchor.kind === 'point' ? a.anchor.at_us : a.anchor.start_us;
     const startB = b.anchor.kind === 'point' ? b.anchor.at_us : b.anchor.start_us;
@@ -39,7 +39,7 @@ export function annotationScene(comments: readonly Comment[], durationUs: number
   for (const comment of ordered) {
     const {start, end} = playbackWindow(comment.anchor, durationUs);
     if (end <= start) continue;
-    const color = reviewColor(comment.comment_id, dark);
+    const color = colors.get(comment.comment_id)!;
     for (const drawing of comment.drawings) {
       const point = comment.anchor.kind === 'point';
       const visibleFrom = point ? start : start + drawing.visible_from_us;
@@ -53,7 +53,7 @@ export function annotationScene(comments: readonly Comment[], durationUs: number
   return {id: 'all-comments', anchor: {kind: 'interval', start_us: 0, end_us: Math.max(1, durationUs + 1)}, drawings};
 }
 
-export function coloredReview(comment: Comment, dark: boolean): {id: string; anchor: Anchor; drawings: Drawing[]} {
-  const color = reviewColor(comment.comment_id, dark);
+export function coloredReview(comment: Comment, dark: boolean, colors?: ReadonlyMap<string, string>): {id: string; anchor: Anchor; drawings: Drawing[]} {
+  const color = colors?.get(comment.comment_id) ?? commentColorMap([comment], dark).get(comment.comment_id)!;
   return {id: comment.comment_id, anchor: comment.anchor, drawings: comment.drawings.map(drawing => ({...drawing, color}))};
 }

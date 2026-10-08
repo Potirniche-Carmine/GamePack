@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {activeCommentIds, annotationScene, coloredReview, playbackWindow, reviewColor} from '../packages/app/src/playback.ts';
+import {activeCommentIds, annotationScene, coloredReview, commentColorMap, playbackWindow} from '../packages/app/src/playback.ts';
 
 const second = 1_000_000;
 function record(id, anchor) {
@@ -45,13 +45,23 @@ test('a moment near the end stops at EOF and an exact-EOF point remains viewable
 test('comment color matches its drawings for combined and isolated review in each theme', () => {
   const comment = record('stable-comment', {kind: 'interval', start_us: second, end_us: 4 * second});
   for (const dark of [true, false]) {
-    const color = reviewColor(comment.comment_id, dark);
+    const colors = commentColorMap([comment], dark);
+    const color = colors.get(comment.comment_id);
     assert.equal(annotationScene([comment], 10 * second, dark).drawings[0].color, color);
-    assert.equal(coloredReview(comment, dark).drawings[0].color, color);
-    assert.equal(reviewColor(comment.comment_id, dark), color);
+    assert.equal(coloredReview(comment, dark, colors).drawings[0].color, color);
+    assert.equal(commentColorMap([comment], dark).get(comment.comment_id), color);
   }
-  assert.notEqual(reviewColor(comment.comment_id, true), reviewColor(comment.comment_id, false));
+  assert.notEqual(commentColorMap([comment], true).get(comment.comment_id), commentColorMap([comment], false).get(comment.comment_id));
   assert.equal(comment.drawings[0].color, '#FFFFFF');
+});
+
+test('neighboring reviews receive distinct colors and adding later reviews preserves existing colors', () => {
+  const comments = Array.from({length: 4}, (_, index) => ({...record(`review-${index}`, {kind: 'point', at_us: second}), created_at_reported: index + 1}));
+  const colors = commentColorMap(comments, true);
+  assert.equal(new Set(colors.values()).size, 4);
+  assert.deepEqual([...commentColorMap(comments.slice(0, 3), true)], [...colors].slice(0, 3));
+  assert.deepEqual([...commentColorMap([...comments].reverse(), true)], [...colors]);
+  assert.equal(coloredReview(comments[2], true, colors).drawings[0].color, annotationScene(comments, 10 * second, true).drawings[2].color);
 });
 
 test('overlapping drawing order is stable across input order', () => {
