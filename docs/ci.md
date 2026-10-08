@@ -10,6 +10,7 @@ machines. [GitHub hosted runner reference](https://docs.github.com/en/actions/re
 | `GamePack-macos-arm64.tar.gz` | `macos-15` | Apple silicon desktop app and `Install.command` |
 | `GamePack-macos-x64.tar.gz` | `macos-15-intel` | Intel desktop app and `Install.command` |
 | `GamePack-windows-x64.zip` | `windows-2022` | Windows desktop app package and installation instructions |
+| `GamePack-windows-arm64.zip` | `windows-2022` | ARM64 Windows desktop package, cross-compiled on x64 |
 
 The Mac runners build each architecture natively; neither package is a universal
 binary. macOS requires version 14 or later. React Native desktop hosts target
@@ -20,6 +21,9 @@ dispatches, and reusable workflow calls. Rust formatting, contract tests, and
 Clippy run before packaging. Shared TypeScript types are checked; desktop packages
 embed JavaScript and the Rust static library. CI uploads downloadable `release-*`
 artifacts for seven days. Failed Mac builds retain compiler logs separately.
+CocoaPods verifies the locked dependency graph, versions, and sources after
+installation; only evaluated local podspec checksums may vary by runner tooling.
+JavaScript source packages remain pinned by npm's integrity-checked lockfile.
 
 Pushing a version tag such as `v0.1.0` starts `release.yml`. It calls both platform
 workflows against that tag, waits for all packages, downloads only `release-*`

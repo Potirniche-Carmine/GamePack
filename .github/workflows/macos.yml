@@ -3,7 +3,9 @@ name: macOS native builds
 on:
   push:
     branches: [main]
+    paths-ignore: ['**.md', 'LICENSE']
   pull_request:
+    paths-ignore: ['**.md', 'LICENSE']
   workflow_dispatch:
   workflow_call:
 
@@ -52,7 +54,18 @@ jobs:
         run: |
           gem install cocoapods -v 1.17.0 --no-document
           npm ci
-          pod install --deployment --project-directory=macos
+          cp macos/Podfile.lock "$RUNNER_TEMP/gamepack-Podfile.lock"
+          pod install --project-directory=macos
+          ruby - "$RUNNER_TEMP/gamepack-Podfile.lock" macos/Podfile.lock <<'RUBY'
+          require 'yaml'
+          expected, actual = ARGV.map { |path| YAML.load_file(path) }
+          # React Native evaluates local podspecs using installed runner tooling.
+          # Keep the complete dependency graph and source/version lock unchanged;
+          # only generated spec checksums may differ between build environments.
+          expected.delete('SPEC CHECKSUMS')
+          actual.delete('SPEC CHECKSUMS')
+          abort 'CocoaPods dependency lock drifted; update and review Podfile.lock explicitly.' unless expected == actual
+          RUBY
       - name: Verify Rust contracts
         run: |
           cargo fmt --all --check
@@ -60,6 +73,13 @@ jobs:
           cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build the native macOS app
         run: bash scripts/build-macos.sh
+      - name: Verify native architecture and embedded resources
+        run: |
+          native_arch="$GAMEPACK_PACKAGE_ARCH"
+          [[ "$native_arch" != x64 ]] || native_arch=x86_64
+          test "$(lipo -archs dist/GamePack.app/Contents/MacOS/GamePack)" = "$native_arch"
+          test -s dist/GamePack.app/Contents/Resources/main.jsbundle
+          codesign --verify --deep --strict dist/GamePack.app
       - name: Package the app and installer
         run: bash scripts/package-macos.sh
       - name: Upload macOS desktop package
