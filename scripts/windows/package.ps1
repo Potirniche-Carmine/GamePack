@@ -95,6 +95,14 @@ Windows must have a codec installed for the videos you import.
 "@ | Set-Content (Join-Path $stage 'README.txt') -Encoding UTF8
 $zip = Join-Path $output "GamePack-windows-$Architecture.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
+# npm packages can preserve Unix-epoch notice timestamps. ZIP timestamps support
+# only 1980 through 2107; change the staged copies, never dependency sources.
+$zipMinimum = [datetime]::new(1980, 1, 2)
+$zipMaximum = [datetime]::new(2107, 12, 30)
+Get-ChildItem $stage -Recurse -Force | ForEach-Object {
+    if ($_.LastWriteTime -lt $zipMinimum) { $_.LastWriteTime = $zipMinimum }
+    elseif ($_.LastWriteTime -gt $zipMaximum) { $_.LastWriteTime = $zipMaximum }
+}
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText("$zip.sha256", "$hash  GamePack-windows-$Architecture.zip`n", [Text.Encoding]::ASCII)
