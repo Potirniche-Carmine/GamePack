@@ -45,3 +45,5 @@ Rust contracts, bundling, and package production; interactive playback and gestu
 behavior still need native application testing.
 
 For a focused Windows transport check, manually dispatch `windows.yml` with `contract_only: true`. This builds the Rust CLI and tests the native JSON payloads without compiling either desktop UI.
+
+Release verification: [v0.1.3 workflow run 37848971586](https://github.com/Potirniche-Carmine/GamePack/actions/runs/37848971586) passed the Windows protocol preflight, all four native build/package jobs, and the final checksum/publication job. The [published v0.1.3 release](https://github.com/Potirniche-Carmine/GamePack/releases/tag/v0.1.3) contains all four architecture-specific archives and their four SHA-256 files. macOS jobs also verified the executable architecture, embedded JavaScript, and strict application signatures before packaging.
