@@ -1,6 +1,9 @@
 #pragma once
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
+#undef GetCurrentTime
 #include <shobjidl.h>
 #include <DispatcherQueue.h>
 #include <winrt/Windows.System.h>

@@ -26,8 +26,10 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   JsonArray samples{nullptr};
   hstring tool{L"none"}, color{L"#FF775E"}, source;
   int64_t seekToken{-1}, seekUs{}, reviewEnd{-1};
-  bool paused{true}, ended{}, capturing{}, disposed{};
-  uint64_t sourceGeneration{};
+  bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{};
+  uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
+  int64_t pendingSeekTarget{};
+  event_token seekCompletedToken{};
   std::chrono::steady_clock::time_point lastEmit{};
   event_token timerToken{}, openedToken{}, endedToken{}, failedToken{};
   explicit PlayerState(IReactContext const& ctx) : context(ctx) {
@@ -52,7 +54,49 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     double fit = std::min(w / vw, h / vh);
     return Rect{static_cast<float>((w-vw*fit)/2), static_cast<float>((h-vh*fit)/2), static_cast<float>(vw*fit), static_cast<float>(vh*fit)};
   }
+  void ResetSeek() {
+    ++seekGeneration;
+    if (seekInFlight) player.PlaybackSession().SeekCompleted(seekCompletedToken);
+    seekInFlight=false;
+  }
+  void CompleteSeek(uint64_t generation) {
+    if (disposed || !seekInFlight || generation!=activeSeekGeneration) return;
+    player.PlaybackSession().SeekCompleted(seekCompletedToken);
+    seekInFlight=false;
+    // Serialize native seeks: an older completion cannot release a newer request.
+    if (generation!=seekGeneration) { StartSeek(); return; }
+    seeking=false;
+    if (!paused) player.Play();
+    Render(); Emit(true);
+  }
+  void StartSeek() {
+    if (disposed || seekInFlight || Duration()<=0) return;
+    auto target=std::clamp<int64_t>(pendingSeekTarget,0,Duration());
+    auto generation=seekGeneration;
+    if (Time()==target) { seeking=false; if (!paused) player.Play(); Render(); Emit(true); return; }
+    seekInFlight=true; activeSeekGeneration=generation;
+    auto weak=weak_from_this();
+    seekCompletedToken=player.PlaybackSession().SeekCompleted([weak,generation](auto const&,auto const&) {
+      if (auto self=weak.lock()) self->root.Dispatcher().RunAsync(Windows::UI::Core::CoreDispatcherPriority::Normal,[weak,generation] {
+        if (auto p=weak.lock()) p->CompleteSeek(generation);
+      });
+    });
+    player.PlaybackSession().Position(std::chrono::microseconds(target));
+  }
+  void Seek(int64_t target) {
+    Finish(); ++seekGeneration; pendingSeekTarget=target; seeking=true;
+    player.Pause(); StartSeek();
+  }
+  bool CanAnnotate() {
+    if (disposed || seeking || !scene || source.empty() || Duration()<=0) return false;
+    auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
+    auto t=Time();
+    if (anchor.GetNamedString(L"kind",L"point")==L"interval")
+      return t>=Number(anchor,L"start_us") && t<Number(anchor,L"end_us");
+    return paused && t==Number(anchor,L"at_us");
+  }
   void Emit(bool force = false, std::string error = {}) {
+    if (seeking && error.empty()) return;
     auto now = std::chrono::steady_clock::now();
     if (!force && now-lastEmit < std::chrono::milliseconds(80)) return;
     lastEmit = now;
@@ -68,23 +112,22 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     auto weak = weak_from_this();
     timer.Interval(std::chrono::milliseconds(16));
     timerToken = timer.Tick([weak](auto const&, auto const&) {
-      if (auto self = weak.lock(); self && !self->disposed) {
-        if (self->reviewEnd >= 0 && self->Time() >= self->reviewEnd) {
-          self->player.Pause(); self->paused = true;
-          self->player.PlaybackSession().Position(std::chrono::microseconds(self->reviewEnd));
-          self->ended = true;
+      if (auto self = weak.lock(); self && !self->disposed && !self->seeking) {
+        if (self->reviewEnd >= 0 && !self->paused && self->Time() >= self->reviewEnd) {
+          self->Finish(); self->player.Pause(); self->paused = true;
+          self->ended = true; self->Seek(self->reviewEnd);
         }
         self->Render(); self->Emit();
       }
     });
     openedToken = player.MediaOpened([weak](auto const&, auto const&) { if (auto self = weak.lock()) {
       self->root.Dispatcher().RunAsync(Windows::UI::Core::CoreDispatcherPriority::Normal, [weak] {
-        if (auto p = weak.lock(); p && !p->disposed) { p->player.PlaybackSession().Position(std::chrono::microseconds(p->seekUs)); if (!p->paused) p->player.Play(); p->Emit(true); }
+        if (auto p = weak.lock(); p && !p->disposed) { p->Seek(p->seekUs); }
       });
     }});
     endedToken = player.MediaEnded([weak](auto const&, auto const&) { if (auto self = weak.lock()) {
       self->root.Dispatcher().RunAsync(Windows::UI::Core::CoreDispatcherPriority::Normal, [weak] {
-        if (auto p = weak.lock(); p && !p->disposed) { p->ended = true; p->paused = true; p->Finish(); p->Emit(true); }
+        if (auto p = weak.lock(); p && !p->disposed && !p->seeking) { p->ended = true; p->paused = true; p->Finish(); p->Emit(true); }
       });
     }});
     failedToken = player.MediaFailed([weak](auto const&, auto const& args) { if (auto self = weak.lock()) {
@@ -94,8 +137,8 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
       });
     }});
     root.SizeChanged([weak](auto const&, auto const&) { if (auto self = weak.lock()) self->Render(); });
-    overlay.PointerPressed([weak](auto const&, Input::PointerRoutedEventArgs const& args) {
-      if (auto self = weak.lock(); self && self->tool != L"none") {
+    overlay.PointerPressed([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+      if (auto self = weak.lock(); self && self->tool != L"none" && self->CanAnnotate()) {
         auto point = args.GetCurrentPoint(self->overlay);
         auto r = self->ContentRect(); auto p = point.Position();
         if (r.Width <= 0 || p.X < r.X || p.Y < r.Y || p.X > r.X+r.Width || p.Y > r.Y+r.Height) return;
@@ -104,7 +147,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
         self->overlay.CapturePointer(args.Pointer());
         self->samples = JsonArray{}; self->live = JsonObject{};
         GUID guid{}; CoCreateGuid(&guid); wchar_t id[40]{}; StringFromGUID2(guid, id, 40);
-        self->live.SetNamedValue(L"id", S(id)); self->live.SetNamedValue(L"tool", S(self->tool));
+        self->live.SetNamedValue(L"id", S(hstring(id + 1, 36))); self->live.SetNamedValue(L"tool", S(self->tool));
         self->live.SetNamedValue(L"color", S(self->color)); self->live.SetNamedValue(L"width", N(3500));
         self->live.SetNamedValue(L"visible_from_us", N(self->RelativeTime()));
         self->live.SetNamedValue(L"visible_until_us", N(self->IntervalDuration()));
@@ -112,10 +155,10 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
         self->Sample(p); self->Render(); args.Handled(true);
       }
     });
-    overlay.PointerMoved([weak](auto const&, Input::PointerRoutedEventArgs const& args) { if (auto self=weak.lock(); self && self->capturing) {
+    overlay.PointerMoved([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) { if (auto self=weak.lock(); self && self->capturing) {
       self->Sample(args.GetCurrentPoint(self->overlay).Position()); self->Render(); args.Handled(true);
     }});
-    overlay.PointerReleased([weak](auto const&, Input::PointerRoutedEventArgs const& args) { if (auto self=weak.lock(); self && self->capturing) {
+    overlay.PointerReleased([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) { if (auto self=weak.lock(); self && self->capturing) {
       self->Sample(args.GetCurrentPoint(self->overlay).Position()); self->Finish(); args.Handled(true);
     }});
     overlay.PointerCanceled([weak](auto const&, auto const&) { if (auto self=weak.lock()) self->Finish(); });
@@ -136,6 +179,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   }
   void Sample(Point p) {
     if (!capturing || !samples) return;
+    if (!CanAnnotate()) { Finish(); return; }
     auto r=ContentRect(); if (r.Width <= 0 || r.Height <= 0) return;
     if (samples.Size() >= 50000) { Finish(); return; }
     JsonObject sample;
@@ -151,13 +195,19 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     capturing=false;
     overlay.ReleasePointerCaptures();
     if (live && samples && samples.Size()) {
+      if (live.GetNamedString(L"tool", L"pen") != L"pen") {
+        JsonArray endpoints;
+        endpoints.Append(samples.GetAt(0));
+        endpoints.Append(samples.GetAt(samples.Size()-1));
+        live.SetNamedValue(L"samples", endpoints);
+      }
       context.DispatchEvent(root, L"topDrawing", JSValueObject{{"drawingJson",to_string(live.Stringify())}});
     }
     live=nullptr; samples=nullptr; Render();
   }
   void Dispose() {
     if (disposed) return;
-    Finish(); disposed=true; timer.Stop(); timer.Tick(timerToken);
+    Finish(); ResetSeek(); disposed=true; timer.Stop(); timer.Tick(timerToken);
     player.MediaOpened(openedToken); player.MediaEnded(endedToken); player.MediaFailed(failedToken);
     player.Pause(); player.Close();
   }
@@ -166,7 +216,6 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
       auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(path);
       if (auto self=weak.lock(); self && !self->disposed && generation==self->sourceGeneration) {
         self->player.Source(Windows::Media::Core::MediaSource::CreateFromStorageFile(file));
-        if (!self->paused) self->player.Play();
       }
     } catch (hresult_error const& error) {
       if (auto self=weak.lock(); self && !self->disposed && generation==self->sourceGeneration) self->Emit(true,to_string(error.message()));
@@ -187,28 +236,29 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     unsigned int rgb=0xff775e;
     if (hex.size()==7 && hex[0]=='#') { try { rgb=std::stoul(hex.substr(1),nullptr,16); } catch (...) {} }
     SolidColorBrush brush(Color{255,static_cast<uint8_t>((rgb>>16)&255),static_cast<uint8_t>((rgb>>8)&255),static_cast<uint8_t>(rgb&255)});
-    double thickness=std::max(1.0,Number(drawing,L"width",3500)/scale*std::min(r.Width,r.Height));
+    double thickness=std::max(1.0,Number(drawing,L"width",3500)/scale*r.Width);
     auto a=points.front(), b=points.back();
     auto addLine=[&](std::vector<Point> const& p) {
-      Polyline line; line.Stroke(brush); line.StrokeThickness(thickness); line.StrokeStartLineCap(PenLineCap::Round); line.StrokeEndLineCap(PenLineCap::Round); line.StrokeLineJoin(PenLineJoin::Round);
+      Windows::UI::Xaml::Shapes::Polyline line; line.Stroke(brush); line.StrokeThickness(thickness); line.StrokeStartLineCap(PenLineCap::Round); line.StrokeEndLineCap(PenLineCap::Round); line.StrokeLineJoin(PenLineJoin::Round);
       for (auto const& point:p) line.Points().Append(point);
       overlay.Children().Append(line);
     };
     if (type==L"ellipse") {
-      Ellipse shape; shape.Stroke(brush); shape.StrokeThickness(thickness);
+      Windows::UI::Xaml::Shapes::Ellipse shape; shape.Stroke(brush); shape.StrokeThickness(thickness);
       shape.Width(std::max(1.0f,std::abs(a.X-b.X))); shape.Height(std::max(1.0f,std::abs(a.Y-b.Y)));
       Canvas::SetLeft(shape,std::min(a.X,b.X)); Canvas::SetTop(shape,std::min(a.Y,b.Y)); overlay.Children().Append(shape);
     } else if (type==L"arrow") {
       addLine({a,b}); double angle=std::atan2(b.Y-a.Y,b.X-a.X), size=std::max(12.0,thickness*4);
       addLine({Point{b.X-static_cast<float>(size*std::cos(angle-0.5)),b.Y-static_cast<float>(size*std::sin(angle-0.5))},b,Point{b.X-static_cast<float>(size*std::cos(angle+0.5)),b.Y-static_cast<float>(size*std::sin(angle+0.5))}});
     } else if (points.size()==1) {
-      Ellipse dot; dot.Fill(brush); dot.Width(thickness); dot.Height(thickness);
+      Windows::UI::Xaml::Shapes::Ellipse dot; dot.Fill(brush); dot.Width(thickness); dot.Height(thickness);
       Canvas::SetLeft(dot,a.X-thickness/2); Canvas::SetTop(dot,a.Y-thickness/2); overlay.Children().Append(dot);
     } else addLine(points);
   }
   void Render() {
     if (disposed) return;
     overlay.Children().Clear();
+    if (seeking) return;
     if (scene) {
       auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
       bool interval=anchor.GetNamedString(L"kind",L"point")==L"interval";
@@ -228,7 +278,7 @@ FrameworkElement PlayerManager::CreateView() noexcept {
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
-  return single_threaded_map<hstring,T>({{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String}}).GetView();
+  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
   auto it=players.find(ViewKey(view)); if (it==players.end()) return;
@@ -237,7 +287,7 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
     auto props=JSValueObject::ReadFrom(reader);
     if (auto v=props.find("source");v!=props.end()) {
       auto path=to_hstring(v->second.AsString());
-      if (p->source!=path) { p->Finish(); p->player.Pause(); p->player.Source(nullptr); p->source=path; p->ended=false; ++p->sourceGeneration;
+      if (p->source!=path) { p->Finish(); p->ResetSeek(); p->seeking=!path.empty(); p->player.Pause(); p->player.Source(nullptr); p->source=path; p->ended=false; ++p->sourceGeneration;
         if (!path.empty()) PlayerState::Load(p,path,p->sourceGeneration);
       }
     }
@@ -249,10 +299,10 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
     if (auto v=props.find("seekUs");v!=props.end()) p->seekUs=std::max<int64_t>(0,v->second.AsInt64());
     if (auto v=props.find("seekToken");v!=props.end() && v->second.AsInt64()!=p->seekToken) {
       p->Finish(); p->seekToken=v->second.AsInt64();
-      if (p->Duration()>0) p->player.PlaybackSession().Position(std::chrono::microseconds(p->seekUs));
+      p->Seek(p->seekUs);
       p->ended=false;
     }
-    if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused) p->player.Pause(); else { p->ended=false; p->player.Play(); } }
+    if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused) p->player.Pause(); else { p->ended=false; if (!p->seeking) p->player.Play(); } }
     p->Render(); p->Emit(true);
   } catch (hresult_error const& error) { p->Emit(true,to_string(error.message())); }
   catch (std::exception const& error) { p->Emit(true,error.what()); }

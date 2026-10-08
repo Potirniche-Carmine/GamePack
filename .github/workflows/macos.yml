@@ -3,9 +3,9 @@ name: macOS native builds
 on:
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'LICENSE']
+    paths-ignore: ['**.md', 'LICENSE', 'apps/windows/**', 'scripts/windows/**', '.github/workflows/windows.yml']
   pull_request:
-    paths-ignore: ['**.md', 'LICENSE']
+    paths-ignore: ['**.md', 'LICENSE', 'apps/windows/**', 'scripts/windows/**', '.github/workflows/windows.yml']
   workflow_dispatch:
   workflow_call:
 

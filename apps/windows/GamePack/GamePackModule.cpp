@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "GamePackModule.h"
 #include "GamePackPlayer.h"
+#include <fstream>
 #include "gamepack-core/src/lib.rs.h"
 
 using namespace winrt;
@@ -17,6 +18,17 @@ static std::wstring Environment(wchar_t const* key) {
 }
 std::string DataDirectory() {
   auto path = Environment(L"GAMEPACK_HOME");
+  if (path.empty()) {
+    std::wstring executable(32768,L'\0');
+    auto length=GetModuleFileNameW(nullptr,executable.data(),static_cast<DWORD>(executable.size()));
+    if (!length || length>=executable.size()) throw std::runtime_error("Cannot locate the installed application.");
+    executable.resize(length);
+    std::ifstream marker(std::filesystem::path(executable).parent_path()/L"gamepack-root.txt",std::ios::binary);
+    if (marker) {
+      std::string saved((std::istreambuf_iterator<char>(marker)),std::istreambuf_iterator<char>());
+      path=to_hstring(saved).c_str();
+    }
+  }
   if (path.empty()) {
     auto profile = Environment(L"USERPROFILE");
     if (profile.empty()) throw std::runtime_error("USERPROFILE is unavailable. Set GAMEPACK_HOME to a writable absolute directory.");

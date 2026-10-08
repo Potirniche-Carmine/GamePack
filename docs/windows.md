@@ -1,6 +1,10 @@
 # Windows source installation
 
-GamePack targets Windows 10 2004 or later, x64. The UI is the shared React Native app, embedded in the installed package. Release builds do not need Metro or another server. The host is a native Win32 window with a Windows XAML island and React Native Windows 0.81.6's Paper renderer; video is Windows MediaPlayerElement with a native Canvas vector overlay.
+GamePack targets Windows 10 2004 or later, x64 and ARM64. The UI is the shared React Native app, embedded in the installed package. Release builds do not need Metro or another server. The host is a native Win32 window with a Windows XAML island and React Native Windows 0.81.6's Paper renderer; video is Windows MediaPlayerElement with a native Canvas vector overlay.
+
+## Downloadable development package
+
+Windows CI uploads `release-windows-x64` and `release-windows-arm64`, each containing `GamePack-windows-<architecture>.zip` and its SHA-256 checksum. Choose ARM64 for Windows on ARM, or x64 for Intel and AMD PCs. Extract it, enable Windows Developer Mode, then run `powershell.exe -ExecutionPolicy Bypass -File .\install.ps1 -Launch` from the extracted folder. Node, Rust, and Visual Studio are not needed to install this compiled package. The ZIP includes the app layout, embedded JavaScript, Microsoft runtime dependencies, and installer. This is an unsigned development package; a public production package requires a trusted signature.
 
 ## Build and install
 
@@ -10,20 +14,24 @@ Install [App Installer](https://apps.microsoft.com/detail/9nblggh4nns1) for `win
 .\scripts\windows\bootstrap.ps1 -EnableDeveloperMode
 ```
 
-This installs Node LTS, Rust/MSVC and Visual Studio 2022 Build Tools with desktop C++, UWP C++ and SDK 10.0.22621.0. The optional switch enables Windows Developer Mode for source package registration. If Visual Studio installation requests a restart, complete that first. Open a new PowerShell terminal, then:
+This installs Node LTS, Rust/MSVC and Visual Studio 2022 Build Tools with desktop C++, UWP C++ and SDK 10.0.22621.0, including ARM64 cross-compilers. The optional switch enables Windows Developer Mode for source package registration. If Visual Studio installation requests a restart, complete that first. Open a new PowerShell terminal, then:
 
 ```powershell
 .\scripts\windows\build.ps1
 .\scripts\windows\install.ps1 -Launch
+# For Windows on ARM64, cross-build on an x64 Windows machine:
+.\scripts\windows\build.ps1 -Architecture arm64
+# Copy the ARM64 ZIP to the ARM64 machine and run its included installer.
+.\scripts\windows\package.ps1 -Architecture arm64
 ```
 
-The build runs Rust tests and TypeScript checking, builds the Rust static library and CXX bridge, bundles the shared JavaScript, then compiles the Windows solution and generates an unsigned MSIX development layout. The installer registers that layout and its Microsoft runtime dependencies. Keep the checkout and build output in place while the development package is installed. No new signing certificate is trusted. Remove with `Get-AppxPackage GamePack | Remove-AppxPackage`; this does not delete your GamePack library.
+The build runs Rust tests and TypeScript checking, builds the Rust static library and CXX bridge, bundles the shared JavaScript, then compiles the Windows solution and generates an unsigned MSIX development layout. The installer installs Microsoft runtime dependencies as needed, copies the complete app layout into `GAMEPACK_HOME\app\windows` or `%USERPROFILE%\.gamepack\app\windows`, then registers that stable layout. The checkout and downloaded ZIP are no longer needed after installation. No new signing certificate is trusted. Remove with `Get-AppxPackage GamePack | Remove-AppxPackage`; this does not delete your GamePack library.
 
 If dependencies are already installed, run only build and install. Visual Studio **2022** is selected explicitly; a machine with only VS 2026 needs the 2022 C++ build tools alongside it. For an ordinary distributable package, sign the MSIX with your organization's trusted code-signing certificate. The source workflow intentionally uses Developer Mode registration.
 
 ## Storage and playback
 
-All GamePack library data is in `%USERPROFILE%\.gamepack`, or the absolute directory named by `GAMEPACK_HOME`. The native module supplies that root on every Rust request. This includes SQLite, managed media copies, cache, temporary files, and configuration. Originals remain untouched. Set a user environment variable before launching from Start if using a custom root:
+All GamePack library data is in `%USERPROFILE%\.gamepack`, or the absolute directory named by `GAMEPACK_HOME`. The native module supplies that root on every Rust request. This includes SQLite, managed media copies, cache, temporary files, and configuration. Originals remain untouched. The installer records the selected library root beside the executable so Start menu launches keep using it. A process environment override has highest priority. To change the root for all future launches, set a user environment variable:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('GAMEPACK_HOME', 'D:\GamePackLibrary', 'User')
@@ -33,11 +41,12 @@ Windows needs the appropriate installed codec for the selected video. A decode e
 
 ## Validation status
 
-The Windows implementation is authored on macOS and has not been executed on Windows locally. The `Windows native build` GitHub Actions workflow compiles the Rust bridge, JavaScript bundle, C++ host, and package on `windows-2022`; its result is the build authority. A successful compile does not establish visual or playback correctness. Before distributing a Windows release, install the layout on Windows and test: import and restart persistence; pause/play/seek/rate; pen/arrow/ellipse capture; interval progressive replay and end exclusion; aspect-fit geometry after resize; review-end pause; profile and immutable post; original-file preservation; and custom `GAMEPACK_HOME`.
+The Windows implementation is authored on macOS and has not been executed on Windows locally. The `Windows native build` GitHub Actions workflow compiles the Rust bridge, JavaScript bundle, C++ host, and package on standard `windows-2022` runners, cross-compiling ARM64 with Rust `aarch64-pc-windows-msvc` and the Visual Studio ARM64 tools, then creates the installable development ZIP; its result is the build authority. A successful compile does not establish visual or playback correctness. Before distributing a Windows release, install the layout on Windows and test: import and restart persistence; pause/play/seek/rate; pen/arrow/ellipse capture; interval progressive replay and end exclusion; aspect-fit geometry after resize; review-end pause; profile and immutable post; original-file preservation; and custom `GAMEPACK_HOME`.
 
 ## Version and architecture references
 
 - [RN Windows 0.81.6 package metadata](https://registry.npmjs.org/react-native-windows/0.81.6) declares React `^19.1.4` and React Native `^0.81.0`; this repository pins RN 0.81.6 and React 19.1.4.
+- [Pinned RN Windows native NuGet](https://www.nuget.org/packages/Microsoft.ReactNative/0.81.6) includes both x64 and ARM64 Paper binaries.
 - [Visual Studio Build Tools component IDs](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022) lists the bootstrap workloads and C++ UWP/SDK components.
 - [Microsoft architecture documentation](https://microsoft.github.io/react-native-windows/docs/new-architecture/) describes the Paper/UWP renderer and its removal in 0.82. Keep RN Windows pinned to 0.81.6 for this host.
 - [Microsoft XAML Islands host guide](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/xaml-islands/using-the-xaml-hosting-api) documents desktop HWND hosting through WindowsXamlManager and DesktopWindowXamlSource.

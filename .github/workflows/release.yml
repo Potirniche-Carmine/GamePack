@@ -1,0 +1,69 @@
+name: Publish release packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/macos.yml
+
+  windows:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/windows.yml
+
+  publish:
+    name: Publish verified platform packages
+    needs: [macos, windows]
+    runs-on: macos-15
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-packages
+      - name: Verify packages and checksums before publication
+        working-directory: release-packages
+        run: |
+          for package in GamePack-macos-arm64.tar.gz GamePack-macos-x64.tar.gz GamePack-windows-x64.zip GamePack-windows-arm64.zip; do
+            test -f "$package"
+            test -f "$package.sha256"
+            shasum -a 256 -c "$package.sha256"
+          done
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          GamePack desktop packages include the shared Rust engine and bundled JavaScript. No developer tools, database server, or application account are needed after installation.
+
+          - **macOS Apple silicon:** download `GamePack-macos-arm64.tar.gz`, extract it, and run `Install.command`.
+          - **macOS Intel:** download `GamePack-macos-x64.tar.gz`, extract it, and run `Install.command`.
+          - **Windows x64:** download `GamePack-windows-x64.zip`, extract it, and follow the included installer instructions.
+          - **Windows ARM64:** download `GamePack-windows-arm64.zip`, extract it, and follow the included installer instructions.
+
+          macOS packages use an ad hoc signature and are not notarized. Windows packages are unsigned; follow the bundled installation instructions for the required Windows settings. SHA-256 checksum files accompany each download.
+
+          The MVP supports local video review, autosaved drafts, immutable posts and replies, and timed vector drawings. ZIP collaboration import/export is not available yet.
+          NOTES
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-packages/* --clobber
+          else
+            gh release create "$RELEASE_TAG" release-packages/* \
+              --verify-tag --title "GamePack $RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
