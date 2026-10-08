@@ -16,6 +16,11 @@ The Mac runners build each architecture natively; neither package is a universal
 binary. macOS requires version 14 or later. React Native desktop hosts target
 macOS and Windows.
 
+The standard Apple silicon runner has three CPU cores and 7 GB of memory; the
+standard Intel runner has four CPU cores and 14 GB. Native compilation uses three
+and four workers respectively, matching those CPU counts without larger runners.
+[Runner resource specifications](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+
 `macos.yml` and `windows.yml` run on pushes to `main`, pull requests, manual
 dispatches, and reusable workflow calls. Rust formatting, contract tests, and
 Clippy run before packaging. Shared TypeScript types are checked; desktop packages

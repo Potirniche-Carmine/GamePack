@@ -29,13 +29,15 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
+            build_jobs: 3
           - runner: macos-15-intel
             arch: x64
+            build_jobs: 4
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
       MACOSX_DEPLOYMENT_TARGET: '14.0'
-      GAMEPACK_BUILD_JOBS: '2'
+      GAMEPACK_BUILD_JOBS: ${{ matrix.build_jobs }}
       GAMEPACK_PACKAGE_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
