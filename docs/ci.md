@@ -30,7 +30,7 @@ CocoaPods verifies the locked dependency graph, versions, and sources after
 installation; only evaluated local podspec checksums may vary by runner tooling.
 JavaScript source packages remain pinned by npm's integrity-checked lockfile.
 
-Pushing a version tag such as `v0.1.2` starts `release.yml`. A fast Windows PowerShell 5 protocol check must pass first. It then calls both platform
+Pushing a version tag such as `v0.1.3` starts `release.yml`. A fast Windows PowerShell 5 protocol check must pass first. It then calls both platform
 workflows against that tag, waits for all packages, downloads only `release-*`
 artifacts, and verifies their SHA-256 checksums before publishing a GitHub release.
 The publisher uses the workflow's built-in `GITHUB_TOKEN` with `contents: write`;
