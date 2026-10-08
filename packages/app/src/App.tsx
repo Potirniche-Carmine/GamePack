@@ -238,7 +238,10 @@ export default function App() {
     setPreview(false); setReviewing(false); setPaused(true); setShowScene(true); setTool('pen'); setRedo([]);
     seek(anchorStart(value.anchor));
   };
-  const openDraft = (value: Draft) => leaveDraft(() => openDraftNow(value));
+  const openDraft = (value: Draft) => leaveDraft(() => {
+    const latest = draftsRef.current.find(item => item.id === value.id);
+    if (latest) openDraftNow(latest);
+  });
   const newDraftNow = (parent?: Comment) => {
     if (!video || busy) return;
     if (draft && !parent) { setTool('pen'); return; }
