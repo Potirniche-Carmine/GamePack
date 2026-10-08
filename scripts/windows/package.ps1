@@ -1,6 +1,30 @@
 [CmdletBinding()]
 param([ValidateSet('Release', 'Debug')][string]$Configuration = 'Release', [ValidateSet('x64', 'arm64')][string]$Architecture = 'x64')
 $ErrorActionPreference = 'Stop'
+function Assert-PeArchitecture([string]$Path, [string]$ExpectedArchitecture) {
+    $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($Path))
+    try {
+        if ($reader.ReadUInt16() -ne 0x5a4d) { throw "Not a Windows executable: $Path" }
+        $reader.BaseStream.Position = 0x3c
+        $peOffset = $reader.ReadUInt32()
+        if ($peOffset -gt $reader.BaseStream.Length - 6) { throw "Invalid PE header: $Path" }
+        $reader.BaseStream.Position = $peOffset
+        if ($reader.ReadUInt32() -ne 0x00004550) { throw "Missing PE signature: $Path" }
+        $expected = if ($ExpectedArchitecture -eq 'arm64') { 0xaa64 } else { 0x8664 }
+        $actual = $reader.ReadUInt16()
+        if ($actual -ne $expected) { throw ("Incorrect CPU architecture for {0}: machine 0x{1:x4}, expected 0x{2:x4}" -f $Path,$actual,$expected) }
+    } finally { $reader.Dispose() }
+}
+function Read-PackageIdentity([string]$Path) {
+    $archive = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $entry = $archive.GetEntry('AppxManifest.xml')
+        if (-not $entry) { throw "Dependency has no AppxManifest.xml: $Path" }
+        $reader = [IO.StreamReader]::new($entry.Open())
+        try { [xml]$document = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        return $document.Package.Identity
+    } finally { $archive.Dispose() }
+}
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $manifests = @(Get-ChildItem (Join-Path $root 'apps\windows\GamePack.Package') -Recurse -Filter AppxManifest.xml)
 $manifest = $manifests | Where-Object {
@@ -16,7 +40,10 @@ if (-not $manifest) { throw 'No complete compiled Windows package layout found.'
 $nativeExecutable = Join-Path $manifest.DirectoryName $layout.Package.Applications.Application.Executable
 $embeddedBundle = Join-Path (Split-Path $nativeExecutable -Parent) 'Bundle\index.windows.bundle'
 if (-not (Test-Path $embeddedBundle)) { throw 'The package is missing the embedded JavaScript bundle beside the executable.' }
-if (-not (Get-ChildItem $manifest.DirectoryName -Recurse -Filter Microsoft.ReactNative.dll)) { throw 'The package is missing Microsoft.ReactNative.dll.' }
+$nativeRuntime = @(Get-ChildItem $manifest.DirectoryName -Recurse -Filter Microsoft.ReactNative.dll)
+if (-not $nativeRuntime.Count) { throw 'The package is missing Microsoft.ReactNative.dll.' }
+Assert-PeArchitecture $nativeExecutable $Architecture
+foreach ($runtime in $nativeRuntime) { Assert-PeArchitecture $runtime.FullName $Architecture }
 $stage = Join-Path $root "artifacts\windows\release-stage-$Architecture"
 $output = Join-Path $root 'artifacts\windows\release'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
@@ -24,7 +51,20 @@ New-Item -ItemType Directory -Path (Join-Path $stage 'Package') -Force | Out-Nul
 New-Item -ItemType Directory -Path (Join-Path $stage "Dependencies\$Architecture") -Force | Out-Null
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 Copy-Item (Join-Path $manifest.DirectoryName '*') -Destination (Join-Path $stage 'Package') -Recurse -Force
-$dependencies = Get-ChildItem (Join-Path $root 'artifacts\windows\packages') -Recurse -Include '*.appx', '*.msix' | Where-Object { $_.FullName -match "[\\/]Dependencies[\\/]$Architecture[\\/]" }
+$dependencies = Get-ChildItem (Join-Path $root 'artifacts\windows\packages') -Recurse -Include '*.appx', '*.msix' | Where-Object { $_.FullName -match "[\\/]Dependencies[\\/]($Architecture|neutral)[\\/]" }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$identities = @($dependencies | ForEach-Object { Read-PackageIdentity $_.FullName })
+foreach ($required in @($layout.Package.Dependencies.PackageDependency)) {
+    if (-not $required -or -not $required.Name) { continue }
+    $minimumVersion = if ($required.MinVersion) { [version]$required.MinVersion } else { [version]'0.0.0.0' }
+    # A declared framework identity is required even if some of its DLLs are sidecars.
+    $matching = @($identities | Where-Object {
+        $_.Name -eq $required.Name -and [version]$_.Version -ge $minimumVersion -and
+        ($_.ProcessorArchitecture -eq $Architecture -or $_.ProcessorArchitecture -eq 'neutral') -and
+        (-not $required.Publisher -or $_.Publisher -eq $required.Publisher)
+    })
+    if (-not $matching.Count) { throw "Package declares missing $Architecture runtime framework: $($required.Name) >= $($required.MinVersion)" }
+}
 foreach ($dependency in $dependencies) { Copy-Item $dependency.FullName (Join-Path $stage "Dependencies\$Architecture") -Force }
 Copy-Item (Join-Path $PSScriptRoot 'install.ps1') (Join-Path $stage 'install.ps1')
 Copy-Item (Join-Path $root 'apps\windows\THIRD-PARTY-NOTICES.txt') $stage

@@ -27,7 +27,7 @@ if (-not (Test-Path (Join-Path $manifest.DirectoryName $layout.Package.Applicati
 $packageArchitecture = [string]$layout.Package.Identity.ProcessorArchitecture
 $hostArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($packageArchitecture -eq 'arm64' -and $hostArchitecture -ne 'Arm64') { throw 'This package needs Windows on ARM64. Download the x64 package for an Intel or AMD PC.' }
-$dependencies = Get-ChildItem $dependencyRoot -Recurse -Include '*.appx', '*.msix' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "[\\/]$packageArchitecture[\\/]" }
+$dependencies = Get-ChildItem $dependencyRoot -Recurse -Include '*.appx', '*.msix' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "[\\/]($packageArchitecture|neutral)[\\/]" }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($dependency in $dependencies) {
     $archive = [IO.Compression.ZipFile]::OpenRead($dependency.FullName)

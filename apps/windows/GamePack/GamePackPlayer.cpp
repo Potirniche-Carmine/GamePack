@@ -93,7 +93,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     auto t=Time();
     if (anchor.GetNamedString(L"kind",L"point")==L"interval")
       return t>=Number(anchor,L"start_us") && t<Number(anchor,L"end_us");
-    return paused && t==Number(anchor,L"at_us");
+    return paused && std::abs(t-static_cast<int64_t>(Number(anchor,L"at_us")))<=2000;
   }
   void Emit(bool force = false, std::string error = {}) {
     if (seeking && error.empty()) return;
@@ -263,7 +263,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
       auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
       bool interval=anchor.GetNamedString(L"kind",L"point")==L"interval";
       int64_t t=Time(), start=static_cast<int64_t>(Number(anchor,interval ? L"start_us":L"at_us"));
-      bool visible=interval ? t>=start && t<Number(anchor,L"end_us") : paused && t==start;
+      bool visible=interval ? t>=start && t<Number(anchor,L"end_us") : paused && std::abs(t-start)<=2000;
       if (visible) for (auto const& item:scene.GetNamedArray(L"drawings",JsonArray{})) {
         auto d=item.GetObject(); int64_t relative=interval ? t-start:0;
         if (!interval || (relative>=Number(d,L"visible_from_us") && relative<Number(d,L"visible_until_us"))) Draw(d,relative);
@@ -299,8 +299,7 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
     if (auto v=props.find("seekUs");v!=props.end()) p->seekUs=std::max<int64_t>(0,v->second.AsInt64());
     if (auto v=props.find("seekToken");v!=props.end() && v->second.AsInt64()!=p->seekToken) {
       p->Finish(); p->seekToken=v->second.AsInt64();
-      p->Seek(p->seekUs);
-      p->ended=false;
+      p->ended=false; p->Seek(p->seekUs);
     }
     if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused) p->player.Pause(); else { p->ended=false; if (!p->seeking) p->player.Play(); } }
     p->Render(); p->Emit(true);

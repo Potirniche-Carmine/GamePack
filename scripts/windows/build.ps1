@@ -27,6 +27,8 @@ try {
     if (-not $SkipTests) {
         Run 'cargo.exe' @('test', '--workspace', '--locked')
         Run 'npm.cmd' @('run', 'typecheck')
+        Run 'cargo.exe' @('build', '--locked', '--bin', 'gamepack')
+        & (Join-Path $PSScriptRoot 'test-contract.ps1') -CoreExecutable (Join-Path $root 'target\debug\gamepack.exe')
     }
     # Keep C++ and Rust on the dynamic MSVC runtime; staticlib includes the CXX wrapper.
     Run 'cargo.exe' @('build', '--locked', '--release', '--target', $rustTarget, '-p', 'gamepack-core')
