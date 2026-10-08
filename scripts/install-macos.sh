@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 [[ -d dist/GamePack.app ]] || bash scripts/build-macos.sh
 gamepack_root="${GAMEPACK_HOME:-$HOME/.gamepack}"
+[[ "$gamepack_root" == /* ]] || { printf 'GAMEPACK_HOME must be an absolute directory.\n' >&2; exit 1; }
 mkdir -p "$gamepack_root/app"
 /usr/bin/ditto dist/GamePack.app "$gamepack_root/app/GamePack.app"
 cat > "$gamepack_root/Launch GamePack.command" <<'LAUNCH'

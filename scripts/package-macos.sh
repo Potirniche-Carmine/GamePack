@@ -18,6 +18,7 @@ cat > "$stage/Install.command" <<'INSTALL'
 set -euo pipefail
 cd "$(dirname "$0")"
 gamepack_root="${GAMEPACK_HOME:-$HOME/.gamepack}"
+[[ "$gamepack_root" == /* ]] || { printf 'GAMEPACK_HOME must be an absolute directory.\n' >&2; exit 1; }
 mkdir -p "$gamepack_root/app"
 /usr/bin/ditto GamePack.app "$gamepack_root/app/GamePack.app"
 /usr/bin/ditto Notices "$gamepack_root/app/Notices"

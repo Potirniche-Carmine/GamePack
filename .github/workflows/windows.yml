@@ -42,6 +42,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-windows-${{ matrix.architecture }}
+          retention-days: 7
           if-no-files-found: error
           path: artifacts/windows/release/*
       - name: Upload native package and compiler diagnostics
@@ -49,6 +50,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GamePack-windows-${{ matrix.architecture }}
+          retention-days: 1
           if-no-files-found: warn
           path: |
             artifacts/windows/packages/**
