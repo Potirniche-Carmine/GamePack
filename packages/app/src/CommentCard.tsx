@@ -19,7 +19,7 @@ export function CommentCard({item, selected, onSelect, onPlay, onReply, disabled
   const date = new Date(item.created_at_reported / 1000);
   const dateLabel = Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
   const label = `${isReply ? 'Reply' : 'Comment'} by ${item.name_at_posting} at ${anchorLabel(item.anchor)}${replyCount ? `, ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}` : ''}: ${item.text || 'Drawing'}`;
-  const open = () => { onSelect(); if (replyCount) onToggle(); };
+  const open = () => { if (!replyCount || !expanded) onSelect(); if (replyCount) onToggle(); };
 
   return <View style={[local.card, {backgroundColor: selected ? colors.selected : colors.panel,
     borderColor: selected ? colors.selectedLine : hovered ? colors.separator : 'transparent'}, isReply && local.replyCard,
