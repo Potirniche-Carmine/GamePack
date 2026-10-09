@@ -1,5 +1,18 @@
 # Development verification
 
+## Pins and automatic review timing — October 9, 2026
+
+Verified in the native macOS Release app using AVPlayer and an isolated `GAMEPACK_HOME`. Footage and screenshots remain under ignored `artifacts/local/pins/`.
+
+- Opening a video starts at 00:00 without an open composer. An existing unfinished comment is available through its filmstrip marker and survives restart without being automatically resumed.
+- Selecting Pen does not open a composer. Drawing opens a compact composer and keeps Pen selected across playback, pausing, and additional strokes. A native recording from 0 to 2.566 seconds preserved blue and amber strokes through posting and subsequent playback.
+- Ordinary playback pauses on instant comments and just before a drawing range's exclusive end, retaining its completed drawings and opening the conversation. Pressing Play continues beyond that stop. Forward/reverse boundary selection, coincident stops, EOF, and resume behavior have domain coverage.
+- Explicit comment placement follows the clicked location. Dragging its pin moves the accompanying card; the card flips at the right edge. Saved pin positions survive restart. Hiding a card keeps its pin visible, and hiding an inline reply removes the editor while retaining the conversation.
+- Comment cards show the reviewer’s initials avatar and name. Pin colors follow reviewer identity, avoid collisions while palette colors remain available, and never replace original stroke colors. Draft and posted pins share their author color.
+- The composer grows and shrinks with its content and scrolls after reaching its height limit. Native checks cover short text, live wrapping, new lines, long text, and returning to a single line. The macOS measurement bridge corrects AppKit document origins after resizing without resetting the caret.
+- Inspected native light and dark screenshots of the review workspace, pins, compact composer, and reduced project tiles. Timing appears on the filmstrip; the composer has no time fields.
+- TypeScript, 64 UI/domain tests, and the macOS Release build pass. Windows automatic-stop handling is updated in source but has not been compiled or exercised on Windows. Hosted workflows remain disabled and no release was created.
+
 ## Spatial review refinement — October 9, 2026
 
 Verified with the signed macOS Release app, production JavaScript, AVPlayer, and Rust/SQLite in an isolated `GAMEPACK_HOME`. Fixture footage, thumbnail caches, and screenshots remain in ignored `artifacts/local/overhaul/`.

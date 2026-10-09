@@ -131,7 +131,9 @@ export default function App() {
   const activeScene = draft ?? selected;
   const isLive = !!draft && liveId === draft.id;
   const aggregateScene = useMemo(() => annotationScene(originalComments, duration), [originalComments, duration]);
-  const railColors = useMemo(() => commentColorMap(originalComments, displayTheme.dark), [originalComments, displayTheme.dark]);
+  const railColors = useMemo(() => commentColorMap([...(data?.comments ?? []), {
+    comment_id: 'active-draft', author_id: data?.profile.author_id ?? '', created_at_reported: Number.MAX_SAFE_INTEGER,
+  }], displayTheme.dark), [data?.comments, data?.profile.author_id, displayTheme.dark]);
   const selectedScene = useMemo(() => selected ? reviewScene(selected) : null, [selected]);
   const draftStart = draft ? anchorStart(draft.anchor) : 0;
   const draftEnd = draft?.anchor.kind === 'interval' ? (isLive ? duration : draft.anchor.end_us) : 0;
@@ -807,7 +809,7 @@ export default function App() {
                   onPause={() => setPaused(true)} onReply={replyToNote} onMove={moveComment}
                   onToggle={item => { setPaused(true); setNotesVisible(true); setExpanded(previous => notesVisible && previous.has(item.comment_id) ? new Set() : new Set([item.comment_id])); }} />
                 {!!draft && !draft.parent_comment_id && (composerOpen || !!draft.drawings.length || !!draft.text.trim()) && <PinnedCard position={notePosition(draft)} viewport={playerSize} rect={videoRect}
-                  color={commentColorMap([{...draft, comment_id: draft.id, author_id: data.profile.author_id} as Comment], displayTheme.dark).get(draft.id)!}
+                  color={railColors.get('active-draft')!}
                   label="Unposted comment pin" open={composerOpen} topInset={presenting ? 76 : 16} disabled={!!busy || dialogOpen}
                   onToggle={() => setComposerOpen(value => !value)} onGrab={() => { setPaused(true); commentInput.current?.blur(); }} onMove={position => updateDraft({position})}>
                   <View style={{borderRadius: 12, borderWidth: 1, borderColor: colors.line, overflow: 'hidden'}}><ScrollView keyboardShouldPersistTaps="handled" style={{maxHeight: cardAvailableHeight(playerSize, videoRect, presenting ? 76 : 16, 98)}}>{composer}</ScrollView></View>

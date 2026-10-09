@@ -5,13 +5,21 @@ export const MOMENT_PLAYBACK_US = 2_000_000;
 const darkPalette = ['#B3A0F7', '#81C7F5', '#80D0C2', '#EBA7CC', '#E8BB82'];
 const lightPalette = ['#6953BD', '#1F78BC', '#187E79', '#B14C80', '#AA6625'];
 
-export function commentColorMap(comments: readonly Comment[], dark: boolean): Map<string, string> {
+export function commentColorMap(comments: readonly Pick<Comment, 'comment_id' | 'author_id' | 'created_at_reported'>[], dark: boolean): Map<string, string> {
   const palette = dark ? darkPalette : lightPalette;
-  return new Map(comments.map(comment => {
+  const authors = new Map<string, string>();
+  const used = new Set<number>();
+  const ordered = [...comments].sort((a, b) => (a.created_at_reported || 0) - (b.created_at_reported || 0) || a.comment_id.localeCompare(b.comment_id));
+  for (const comment of ordered) {
     const identity = comment.author_id || comment.comment_id;
+    if (authors.has(identity)) continue;
     const hash = [...identity].reduce((value, character) => (value * 31 + character.codePointAt(0)!) >>> 0, 0);
-    return [comment.comment_id, palette[hash % palette.length]];
-  }));
+    let index = hash % palette.length;
+    // Give different reviewers distinct colors while the palette has room.
+    if (used.size < palette.length) while (used.has(index)) index = (index + 1) % palette.length;
+    used.add(index); authors.set(identity, palette[index]);
+  }
+  return new Map(comments.map(comment => [comment.comment_id, authors.get(comment.author_id || comment.comment_id)!]));
 }
 
 export function playbackWindow(anchor: Anchor, durationUs: number): {start: number; end: number} {

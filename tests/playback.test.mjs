@@ -71,6 +71,17 @@ test('neighboring reviews receive distinct colors and adding later reviews prese
   assert.equal(reviewScene(comments[2]).drawings[0].color, annotationScene(comments, 10 * second).drawings[2].color);
 });
 
+test('reviewer hash collisions use available pin colors while keeping an author consistent', () => {
+  const comments = ['a', 'f', 'k'].map((author_id, index) => ({...record(`note-${index}`, {kind: 'point', at_us: second}), author_id, created_at_reported: index + 1}));
+  const repeated = {...comments[1], comment_id: 'same-reviewer', created_at_reported: 4};
+  for (const dark of [true, false]) {
+    const colors = commentColorMap([...comments, repeated], dark);
+    assert.equal(new Set(comments.map(comment => colors.get(comment.comment_id))).size, 3);
+    assert.equal(colors.get(repeated.comment_id), colors.get(comments[1].comment_id));
+    assert.deepEqual(commentColorMap([...comments, repeated].reverse(), dark), colors);
+  }
+});
+
 test('overlapping drawing order is stable across input order', () => {
   const first = record('a', {kind: 'point', at_us: second});
   const secondComment = record('b', {kind: 'point', at_us: second});
