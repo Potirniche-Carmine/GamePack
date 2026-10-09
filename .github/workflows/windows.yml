@@ -1,23 +1,19 @@
 name: Windows native build
+# Paused during development. Re-enabling requires explicit user authorization.
 on:
-  push:
-    branches: [main]
-    paths-ignore: ['**.md', 'LICENSE', 'native/macos/**', 'macos/**', 'scripts/*-macos.sh', 'scripts/configure-macos.rb', 'scripts/make-icon.swift', 'scripts/macos-env.sh', '.github/workflows/macos.yml']
-  pull_request:
-    paths-ignore: ['**.md', 'LICENSE', 'native/macos/**', 'macos/**', 'scripts/*-macos.sh', 'scripts/configure-macos.rb', 'scripts/make-icon.swift', 'scripts/macos-env.sh', '.github/workflows/macos.yml']
   workflow_dispatch:
     inputs:
       contract_only:
-        description: Run the Windows PowerShell native protocol fixtures without compiling the UI
         type: boolean
         default: false
+        description: Run protocol fixtures only
   workflow_call:
     inputs:
       contract_only:
-        description: Run the Windows PowerShell native protocol fixtures without compiling the UI
         type: boolean
         default: false
         required: false
+
 concurrency:
   group: windows-${{ github.ref }}-${{ inputs.contract_only == true && 'contracts' || 'native' }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -25,8 +21,9 @@ permissions:
   contents: read
 jobs:
   contracts:
+    if: ${{ false && github.ref == 'refs/heads/main' && inputs.contract_only == true }}
     name: Windows PowerShell protocol fixtures
-    if: ${{ inputs.contract_only == true }}
+
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
@@ -43,7 +40,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not compile the Rust fixture CLI.' }
           ./scripts/windows/test-contract.ps1 -CoreExecutable (Join-Path (Get-Location) 'target\debug\gamepack.exe')
   windows:
-    if: ${{ inputs.contract_only != true }}
+    if: ${{ false && github.ref == 'refs/heads/main' && inputs.contract_only != true }}
+
     name: Windows ${{ matrix.architecture }}
     runs-on: windows-2022
     strategy:

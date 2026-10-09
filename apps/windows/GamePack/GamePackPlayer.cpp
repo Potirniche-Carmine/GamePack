@@ -24,12 +24,15 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   Microsoft::ReactNative::ReactContext context;
   JsonObject scene{nullptr}, live{nullptr};
   JsonArray samples{nullptr};
-  hstring tool{L"none"}, color{L"#FF775E"}, source;
+  hstring tool{L"pointer"}, color{L"#FF775E"}, source;
   int64_t seekToken{-1}, seekUs{}, reviewEnd{-1}, captureToken{}, captureRequest{};
   std::string captureDrawing;
-  bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{};
+  bool paused{true}, pauseOnDrawing{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{};
   uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
-  int64_t pendingSeekTarget{};
+  int64_t pendingSeekTarget{}, stepFrames{1};
+  double frameRate{}, rate{1};
+  bool reverseSeek{};
+  std::chrono::steady_clock::time_point reverseTick{};
   event_token seekCompletedToken{};
   std::chrono::steady_clock::time_point lastEmit{};
   event_token timerToken{}, openedToken{}, endedToken{}, failedToken{};
@@ -43,7 +46,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     player.IsVideoFrameServerEnabled(false);
     element.SetMediaPlayer(player);
     overlay.Background(SolidColorBrush(Colors::Transparent()));
-    overlay.IsHitTestVisible(false);
+    overlay.IsHitTestVisible(true);
   }
   int64_t Time() { return std::max<int64_t>(0, player.PlaybackSession().Position().count() / 10); }
   int64_t Duration() { return std::max<int64_t>(0, player.PlaybackSession().NaturalDuration().count() / 10); }
@@ -68,14 +71,14 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     if (generation!=seekGeneration) { StartSeek(); return; }
     seeking=false;
     if (captureRequest) Capture();
-    else if (!paused) player.Play();
+    else if (!paused && !reverseSeek) player.Play();
     Render(); Emit(true);
   }
   void StartSeek() {
     if (disposed || seekInFlight || Duration()<=0) return;
     auto target=std::clamp<int64_t>(pendingSeekTarget,0,Duration());
     auto generation=seekGeneration;
-    if (Time()==target) { seeking=false; if (captureRequest) Capture(); else if (!paused) player.Play(); Render(); Emit(true); return; }
+    if (Time()==target) { seeking=false; if (captureRequest) Capture(); else if (!paused && !reverseSeek) player.Play(); Render(); Emit(true); return; }
     seekInFlight=true; activeSeekGeneration=generation;
     auto weak=weak_from_this();
     seekCompletedToken=player.PlaybackSession().SeekCompleted([weak,generation](auto const&,auto const&) {
@@ -115,6 +118,16 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     timer.Interval(std::chrono::milliseconds(16));
     timerToken = timer.Tick([weak](auto const&, auto const&) {
       if (auto self = weak.lock(); self && !self->disposed && !self->seeking) {
+        if (self->reverseSeek && !self->paused) {
+          auto now=std::chrono::steady_clock::now();
+          double elapsed=std::chrono::duration<double>(now-self->reverseTick).count();
+          if (elapsed>=0.08) {
+            self->reverseTick=now;
+            auto target=std::max<int64_t>(0,self->Time()+static_cast<int64_t>(std::min(elapsed,0.25)*self->rate*1000000));
+            if (target==0) { self->paused=true; self->ended=true; }
+            self->Seek(target); return;
+          }
+        }
         if (self->reviewEnd >= 0 && !self->paused && self->Time() >= self->reviewEnd) {
           self->Finish(); self->player.Pause(); self->paused = true;
           self->ended = true; self->Seek(self->reviewEnd);
@@ -140,12 +153,18 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     }});
     root.SizeChanged([weak](auto const&, auto const&) { if (auto self = weak.lock()) self->Render(); });
     overlay.PointerPressed([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+      if (auto self = weak.lock(); self && self->tool == L"pointer") {
+        auto p = args.GetCurrentPoint(self->overlay).Position();
+        self->context.DispatchEvent(self->root,L"topPointer",JSValueObject{{"x",p.X/std::max(1.0,self->root.ActualWidth())},{"y",p.Y/std::max(1.0,self->root.ActualHeight())}});
+        args.Handled(true); return;
+      }
       if (auto self = weak.lock(); self && self->tool != L"none" && self->CanAnnotate()) {
         auto point = args.GetCurrentPoint(self->overlay);
         auto r = self->ContentRect(); auto p = point.Position();
         if (r.Width <= 0 || p.X < r.X || p.Y < r.Y || p.X > r.X+r.Width || p.Y > r.Y+r.Height) return;
         if (!point.Properties().IsLeftButtonPressed() && point.PointerDevice().PointerDeviceType() == Windows::Devices::Input::PointerDeviceType::Mouse) return;
         self->Finish(); self->capturing = true;
+        if (self->pauseOnDrawing) { self->player.Pause(); self->paused = true; }
         self->overlay.CapturePointer(args.Pointer());
         self->samples = JsonArray{}; self->live = JsonObject{};
         GUID guid{}; CoCreateGuid(&guid); wchar_t id[40]{}; StringFromGUID2(guid, id, 40);
@@ -155,6 +174,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
         self->live.SetNamedValue(L"visible_until_us", N(self->IntervalDuration()));
         self->live.SetNamedValue(L"samples", self->samples);
         self->Sample(p); self->Render(); args.Handled(true);
+        self->context.DispatchEvent(self->root,L"topDrawingStart",JSValueObject{{"time_us",self->Time()},{"paused",self->paused}});
       }
     });
     overlay.PointerMoved([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) { if (auto self=weak.lock(); self && self->capturing) {
@@ -233,7 +253,13 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   static fire_and_forget Load(std::weak_ptr<PlayerState> weak, hstring path, uint64_t generation) {
     try {
       auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(path);
+      double frameRate=0;
+      try {
+        auto properties=co_await file.Properties().RetrievePropertiesAsync(single_threaded_vector<hstring>({L"System.Video.FrameRate"}));
+        if (properties.HasKey(L"System.Video.FrameRate")) frameRate=unbox_value<uint32_t>(properties.Lookup(L"System.Video.FrameRate"))/1000.0;
+      } catch (...) { /* Forward stepping still uses the native decoded frame. */ }
       if (auto self=weak.lock(); self && !self->disposed && generation==self->sourceGeneration) {
+        self->frameRate=frameRate;
         self->player.Source(Windows::Media::Core::MediaSource::CreateFromStorageFile(file));
       }
     } catch (hresult_error const& error) {
@@ -297,7 +323,7 @@ FrameworkElement PlayerManager::CreateView() noexcept {
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
-  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String},{L"captureToken",T::Number}}).GetView();
+  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"pauseOnDrawing",T::Boolean},{L"rate",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String},{L"captureToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
   auto it=players.find(ViewKey(view)); if (it==players.end()) return;
@@ -328,23 +354,41 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
       if (!sameAnchor) p->Finish();
       p->scene=parsed;
     }
-    if (auto v=props.find("tool");v!=props.end()) { auto tool=to_hstring(v->second.AsString()); if (tool!=p->tool) p->Finish(); p->tool=tool; p->overlay.IsHitTestVisible(tool!=L"none"); }
+    if (auto v=props.find("tool");v!=props.end()) { auto tool=to_hstring(v->second.AsString()); if (tool!=p->tool) p->Finish(); p->tool=tool; p->overlay.IsHitTestVisible(true); }
     if (auto v=props.find("strokeColor");v!=props.end()) p->color=to_hstring(v->second.AsString());
     if (auto v=props.find("reviewEndUs");v!=props.end()) p->reviewEnd=v->second.AsInt64();
-    if (auto v=props.find("rate");v!=props.end()) p->player.PlaybackSession().PlaybackRate(std::clamp(v->second.AsDouble(),0.25,4.0));
+    if (auto v=props.find("stepFrames");v!=props.end()) p->stepFrames=v->second.AsInt64();
+    if (auto v=props.find("stepToken");v!=props.end() && v->second.AsInt64()>0) {
+      p->Finish(); p->player.Pause();
+      p->paused=true;
+      if (p->stepFrames<0) {
+        if (p->frameRate>0) p->Seek(std::max<int64_t>(0,(p->seeking ? p->pendingSeekTarget : p->Time())-static_cast<int64_t>(std::llround(1000000.0/p->frameRate))));
+        else p->Emit(true,"The frame rate is unavailable; use the timeline to seek backward.");
+      } else if (!p->seeking) p->player.StepForwardOneFrame();
+    }
+    if (auto v=props.find("rate");v!=props.end()) {
+      p->rate=std::clamp(v->second.AsDouble(),-4.0,4.0);
+      auto session=p->player.PlaybackSession();
+      p->reverseSeek=p->rate<0 && !session.IsSupportedPlaybackRateRange(p->rate,p->rate);
+      session.PlaybackRate(p->reverseSeek ? 1 : p->rate);
+      p->reverseTick=std::chrono::steady_clock::now();
+      if (p->reverseSeek) p->player.Pause();
+      else if (!p->paused && !p->seeking) p->player.Play();
+    }
     if (auto v=props.find("seekUs");v!=props.end()) p->seekUs=std::max<int64_t>(0,v->second.AsInt64());
     if (auto v=props.find("seekToken");v!=props.end() && v->second.AsInt64()!=p->seekToken) {
       p->Finish(); p->seekToken=v->second.AsInt64();
       p->ended=false; p->Seek(p->seekUs);
     }
-    if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused || p->captureRequest) p->player.Pause(); else { p->ended=false; if (!p->seeking) p->player.Play(); } }
+    if (auto v=props.find("pauseOnDrawing");v!=props.end()) p->pauseOnDrawing=v->second.AsBoolean();
+    if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused || p->captureRequest) p->player.Pause(); else { p->ended=false; if (!p->seeking && !p->reverseSeek) p->player.Play(); } }
     p->applyingProps=false; p->Capture(); p->Render(); p->Emit(true);
   } catch (hresult_error const& error) { p->applyingProps=false; p->Emit(true,to_string(error.message())); }
   catch (std::exception const& error) { p->applyingProps=false; p->Emit(true,error.what()); }
 }
 ConstantProviderDelegate PlayerManager::ExportedCustomDirectEventTypeConstants() noexcept {
   return [](IJSValueWriter const& writer) noexcept {
-    WriteValue(writer,JSValueObject{{"topTime",JSValueObject{{"registrationName","onTime"}}},{"topDrawing",JSValueObject{{"registrationName","onDrawing"}}},{"topCaptureFinished",JSValueObject{{"registrationName","onCaptureFinished"}}}});
+    WriteValue(writer,JSValueObject{{"topDrawingStart",JSValueObject{{"registrationName","onDrawingStart"}}},{"topPointer",JSValueObject{{"registrationName","onPointer"}}},{"topTime",JSValueObject{{"registrationName","onTime"}}},{"topDrawing",JSValueObject{{"registrationName","onDrawing"}}},{"topCaptureFinished",JSValueObject{{"registrationName","onCaptureFinished"}}}});
   };
 }
 void PlayerManager::OnDropViewInstance(FrameworkElement const& view) noexcept {

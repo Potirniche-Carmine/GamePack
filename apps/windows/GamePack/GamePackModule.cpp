@@ -8,6 +8,59 @@ using namespace winrt;
 using namespace Microsoft::ReactNative;
 namespace gamepack::windows {
 HWND mainWindow{};
+static ReactContext shortcutContext;
+static std::vector<std::string> shortcuts;
+static bool recordingShortcut{};
+static std::string typingShortcut;
+void GamePackModule::Initialize(ReactContext const& value) noexcept { context=value; shortcutContext=value; }
+void GamePackModule::ConfigureShortcuts(std::vector<std::string> chords, bool recording, std::string typing) noexcept {
+  context.UIDispatcher().Post([chords=std::move(chords),recording,typing=std::move(typing)]() {
+    shortcuts=chords; recordingShortcut=recording; typingShortcut=typing;
+  });
+}
+bool HandleShortcut(MSG const& message) {
+  if (message.message!=WM_KEYDOWN && message.message!=WM_SYSKEYDOWN) return false;
+  if (GetAncestor(message.hwnd,GA_ROOT)!=mainWindow || GetForegroundWindow()!=mainWindow) return false;
+  std::string key;
+  switch (message.wParam) {
+    case VK_LEFT: key="ArrowLeft"; break; case VK_RIGHT: key="ArrowRight"; break;
+    case VK_UP: key="ArrowUp"; break; case VK_DOWN: key="ArrowDown"; break;
+    case VK_SPACE: key="Space"; break; case VK_RETURN: key="Enter"; break;
+    case VK_BACK: key="Backspace"; break; case VK_DELETE: key="Delete"; break;
+    case VK_HOME: key="Home"; break; case VK_END: key="End"; break;
+    case VK_PRIOR: key="PageUp"; break; case VK_NEXT: key="PageDown"; break;
+    case VK_ESCAPE: key="Escape"; break; case VK_TAB: return false;
+    case VK_OEM_COMMA: key=","; break; case VK_OEM_PERIOD: key="."; break;
+    case VK_OEM_1: key=";"; break; case VK_OEM_2: key="/"; break;
+    case VK_OEM_4: key="["; break; case VK_OEM_6: key="]"; break;
+    case VK_OEM_7: key="'"; break; case VK_OEM_MINUS: key="-"; break;
+    case VK_OEM_PLUS: key="="; break;
+    default:
+      if (message.wParam>='A' && message.wParam<='Z') key=static_cast<char>(message.wParam);
+      else if (message.wParam>='0' && message.wParam<='9') key=static_cast<char>(message.wParam);
+      else return false;
+  }
+  bool control=(GetKeyState(VK_CONTROL)&0x8000)!=0, alt=(GetKeyState(VK_MENU)&0x8000)!=0;
+  if ((GetKeyState(VK_LWIN)&0x8000) || (GetKeyState(VK_RWIN)&0x8000) || (control && (GetKeyState(VK_RMENU)&0x8000))) return false;
+  std::string chord=(control ? "Mod+" : "");
+  if (alt) chord+="Alt+";
+  if (GetKeyState(VK_SHIFT)&0x8000) chord+="Shift+";
+  chord+=key;
+  auto focus=Windows::UI::Xaml::Input::FocusManager::GetFocusedElement();
+  bool editing=focus && (focus.try_as<Windows::UI::Xaml::Controls::TextBox>() || focus.try_as<Windows::UI::Xaml::Controls::RichEditBox>() || focus.try_as<Windows::UI::Xaml::Controls::PasswordBox>());
+  if (!recordingShortcut && (std::find(shortcuts.begin(),shortcuts.end(),chord)==shortcuts.end() || (editing && chord!=typingShortcut && chord!="Escape"))) return false;
+  JSValueObject payload{{"chord",chord},{"repeat",(message.lParam & (1LL<<30))!=0}};
+  if (!recordingShortcut && editing && chord==typingShortcut) {
+    if (auto input=focus.try_as<Windows::UI::Xaml::Controls::TextBox>()) payload["text"]=to_string(input.Text());
+    else if (auto input=focus.try_as<Windows::UI::Xaml::Controls::RichEditBox>()) {
+      hstring text;
+      input.Document().GetText(Windows::UI::Text::TextGetOptions::None,text);
+      payload["text"]=to_string(text);
+    }
+  }
+  shortcutContext.EmitJSEvent(L"RCTDeviceEventEmitter", L"GamePackShortcut", std::move(payload));
+  return true;
+}
 static std::mutex coreMutex;
 static std::wstring Environment(wchar_t const* key) {
   auto size = GetEnvironmentVariableW(key, nullptr, 0);
@@ -57,6 +110,28 @@ void GamePackModule::SetAppearance(std::string theme) noexcept {
   if (theme != "system" && theme != "light" && theme != "dark") return;
   context.UIDispatcher().Post([theme=std::move(theme)]() {
     try { ApplyAppearance(to_hstring(theme)); } catch (...) {}
+  });
+}
+void GamePackModule::SetFullScreen(bool enabled) noexcept {
+  context.UIDispatcher().Post([enabled]() {
+    static bool fullScreen{};
+    static WINDOWPLACEMENT placement{sizeof(WINDOWPLACEMENT)};
+    static LONG_PTR style{};
+    if (!mainWindow || enabled==fullScreen) return;
+    if (enabled) {
+      style=GetWindowLongPtrW(mainWindow,GWL_STYLE);
+      GetWindowPlacement(mainWindow,&placement);
+      MONITORINFO monitor{sizeof(MONITORINFO)};
+      if (!GetMonitorInfoW(MonitorFromWindow(mainWindow,MONITOR_DEFAULTTONEAREST),&monitor)) return;
+      SetWindowLongPtrW(mainWindow,GWL_STYLE,style & ~WS_OVERLAPPEDWINDOW);
+      SetWindowPos(mainWindow,HWND_TOP,monitor.rcMonitor.left,monitor.rcMonitor.top,monitor.rcMonitor.right-monitor.rcMonitor.left,monitor.rcMonitor.bottom-monitor.rcMonitor.top,SWP_FRAMECHANGED);
+    } else {
+      SetWindowLongPtrW(mainWindow,GWL_STYLE,style);
+      SetWindowPlacement(mainWindow,&placement);
+      SetWindowPos(mainWindow,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED);
+    }
+    fullScreen=enabled;
+    shortcutContext.EmitJSEvent(L"RCTDeviceEventEmitter",L"GamePackWindowState",JSValueObject{{"fullScreen",enabled}});
   });
 }
 void GamePackModule::ChooseVideo(ReactPromise<JSValue> promise) noexcept {

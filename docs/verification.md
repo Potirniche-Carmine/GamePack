@@ -1,8 +1,69 @@
-# MVP verification
+# Development verification
+
+## Comment hierarchy and drawing controls — October 8, 2026
+
+Verified with a signed macOS Release build in a separate app and an isolated `GAMEPACK_HOME` copied from the local library.
+
+- Replies use an inset surface, stronger indentation, a reply icon, and smaller author/body type. Inspected the expanded thread in both light and dark appearances.
+- Simultaneous on-video comments form a vertical, scrollable stack. Inspected three overlapping cards at 00:10 in the window and fullscreen; their individual Reply actions remain available and the carousel is removed.
+- Command/Control hint badges and their native modifier-state emitters are removed. Shortcuts remain available in Settings and as accessibility hints. Native checks exercised playback, seeking, drawing-tool shortcuts, Settings, and Command–Return posting.
+- Pointer is the default and is restored when leaving drawing modes. Native video clicks preserve both paused and playing states, including switching from a drawing tool during playback. The native click-to-toggle-playback event is removed on both platforms.
+- Selecting Pen, Arrow, or Ellipse leaves the Comments dock closed. Completing a pen stroke also leaves it closed while respecting the pause-on-drawing preference. M explicitly opens the composer; the posted test comment retained its complete text and one drawing. The isolated database integrity check returned `ok`.
+- TypeScript, all 31 existing UI/domain tests, the macOS Release build, and deep signature verification pass. Local screenshots `54`–`58` are ignored under `artifacts/local/screenshots/`.
+
+Windows source is updated but has not been compiled or exercised on Windows. Hosted workflows remain disabled.
+
+## Drawing and focus refinement — October 8, 2026
+
+Verified in a separate macOS Release app and isolated `GAMEPACK_HOME`, preserving the user's running app and library.
+
+- A native stroke pauses AVPlayer before its first sample. Finishing it opens the composer without focusing text. M focuses the comment, ordinary spaces remain text, Escape blurs it, and Space resumes playback with the selected drawing tool retained. A second stroke paused again and both drawings posted in their captured 00:10–00:17 range.
+- Native clock settling exposed a submillisecond interval after an otherwise frozen stroke. Capture now uses the existing 2 ms moment tolerance. The final native build posted “Hold this frame.” as a point at 2,608,544 µs with all drawing sample times zero. SQLite integrity returned `ok`.
+- Discard clears the current drawing and composer. Preview and the Draw toggle are removed; drawing tools remain visible. The collapsed composer is compact, and Discard/Post share dimensions. Pointer clicks produce a temporary pulse without creating a comment or persisted drawing.
+- Normal windows have independently collapsible Library and Comments docks. Fullscreen hides those docks, restores them on exit, and places the compact composer and original-comment cards at the right. Profile circles are removed and author names emphasized. Close, add, and delete controls share alignment.
+- Native reply expansion/collapse was checked by clicking the same screen coordinates twice. The disclosure remains in the parent action row; expanding children no longer triggers automatic scroll-to-selection. Global expansion remains available.
+- Inspected native screenshots in both themes, including loaded video, fullscreen, composer, and an empty library. Evidence is local and ignored under `artifacts/local/screenshots/48`–`53`; `empty-light.jpg` and `empty-dark.jpg` are the requested no-video views.
+- Shortcut badges now fit inside their controls and use high-contrast labels instead of clipped negative offsets. Native accessibility exposes the configured shortcuts. A physical Command hold remains a manual visual check: synthesized held chords did not capture the transient modifier state reliably.
+- TypeScript, 31 UI/domain tests, 16 Rust contract tests, and the signed macOS Release build pass. Regression coverage includes frozen-frame capture, native clock settling, and resuming a moment into a longer review.
+- Installed under `~/.gamepack/app/GamePack.app`; its JavaScript SHA-256 matches the verified build and deep signature validation passes. The user's existing process was already running and was left intact; relaunch it to load this update.
+
+Windows source includes pause-on-contact and pointer events but has not been compiled or exercised on Windows. Hosted workflows remain disabled.
+
+## Continuous video workspace — October 8, 2026
+
+Verified with the local macOS Release app, production JavaScript, AVPlayer, and Rust/SQLite in an isolated `GAMEPACK_HOME`. Existing source changes and the user's library were preserved.
+
+- The running installed app initially contained an older reply implementation. The rebuilt interface inserts and removes actual reply rows. Native checks cover individual disclosure, global expand/collapse across multiple threads, and disclosure with a focused composer.
+- Playback, timeline, drawing tools, color, undo/redo, and the composer now sit on an edge-to-edge video surface. Library and discussion open as floating panels without resizing the footage. Drawing tools appear on demand. Timing is expandable; drawing minimizes the composer. There is no drafts UI or startup restoration of unfinished composers; existing stored records are preserved.
+- Native drawing verification created an ellipse at 00:04, posted a 00:04–00:09 comment, entered fullscreen, sought to the exclusive end (card disappears), and sought backward (card and drawing return). A reply posted from fullscreen retained its full text and parent relationship after restart.
+- The standard fullscreen icon sits at the right end of the playback controls; there is no separate Present action. Fullscreen entry/exit, Escape, Page Down navigation, selection preservation, and opening the complete discussion in fullscreen were exercised. Global expansion reveals replies in fullscreen as well.
+- Moving controls over the player exposed AppKit forwarding mouse events to the video. The native overlay now accepts only a mouse sequence that starts on the video itself. Rechecked that clicking Comment creates a paused moment, while native drawing still records geometry.
+- Light and dark workspace screenshots and the dark fullscreen surface were inspected. Text contrast meets 4.5:1; input, button, and selected-state boundaries meet 3:1. Video overlays deliberately use a dark surface in either appearance. Local final screenshots are `44-fullscreen-icon-final.jpg`, `45-final-light.jpg`, and `46-final-dark.jpg` under ignored `artifacts/local/screenshots/`.
+- Space starts and stops native playback, while a Space typed into the focused composer remains text. Original comments alone appear over the video and in next/previous navigation; replies and nested replies remain accessible through the discussion. Native disclosure checks were repeated in the floating discussion.
+- TypeScript, 29 UI/domain tests, 16 Rust contract tests, the macOS Release build, and deep signature verification pass. Added cases cover timed note boundaries, overlapping notes, EOF, chronological navigation, nested/global disclosure, original-only video notes/navigation, and migration that preserves older custom keybindings.
+- Shortcut hints use the configured bindings, include accessible shortcut descriptions, and suppress unrelated hints while editing text. Accessibility inspection confirmed the preserved custom play binding and Command–1 project mapping. A modifier-only physical keyboard hold still needs a manual visual check: the automation API rejects modifier-only key presses and did not capture the transient badges during synthesized chords.
+- Installed the final local build under `~/.gamepack/app/GamePack.app`, verified its deep signature and byte-identical JavaScript bundle, and opened it against the existing library. Native inspection confirmed existing footage/comments, Space playback binding, the fullscreen icon, and no drafts list. The user's separate preview window and active annotation were left running.
+
+Windows fullscreen and Control-key hint handling are implemented in source but have not been compiled or exercised on Windows. Hosted workflows remain disabled. This iteration changes the local review interface; it does not add ZIP exchange, cloud sharing, or synchronization.
+
+## Current interface iteration — October 8, 2026
+
+This iteration is under active development, not a stable MVP. Verification uses the local macOS Release build, its production JavaScript bundle, AVPlayer, and Rust/SQLite in an isolated `GAMEPACK_HOME`. Demo footage and verification screenshots are not committed.
+
+- TypeScript checks, 23 UI/domain tests, 16 Rust contract tests, Rust formatting, and Clippy with warnings denied pass. The added checks cover shortcut conflicts and remapping, appearance contrast, preference migration/persistence, and scoped project/video deletion with shared media and immutable comment guards preserved.
+- The macOS Release build compiles and signs locally. Native checks cover shortcut recording/conflict feedback, replacement of Space with a custom binding, persistence after restart, text-entry isolation, Command–Return posting, frame stepping, project navigation, and opening/cancelling deletion confirmation.
+- Drawing tools remain visible. Native playback pauses after completing a stroke with that preference enabled, keeps the tool selected for more marks, and posts two drawings with the inline comment. The review workspace and Settings are inspected in both light and dark appearances.
+- Automated contrast checks cover normal/muted text, button labels, input outlines, and selected-control outlines. Native screenshots remain necessary to check actual rendered assets and layout.
+- Native checks caught and fixed stale icon tints after theme changes and a final-character race during immediate keyboard posting. Rechecked theme switching, complete posted text, and posting while the time field has focus. Official Lucide assets and their license are included in the notice inventory.
+- macOS, Windows, and release workflows are disabled on GitHub. Their source has no push, pull-request, or tag triggers; each job remains disabled and restricted to `main`. No release was made for this iteration.
+
+The Windows shortcut/player source is updated but has **not** been compiled or exercised on a Windows device for this iteration. Hosted verification remains paused as requested. Project/video deletion is exercised by Rust integration tests; the native confirmation UI is inspected without deleting a user library. Deleting a library item retains cached media bytes and original source files.
+
+## Historical v0.1.3 verification
 
 Verified on October 8, 2026. The local UI run uses the installed Release app on Apple silicon, native AVPlayer, the production JavaScript bundle, and the real Rust/SQLite engine. It does not use a browser mock, Metro server, or seeded comment fixture.
 
-## Local macOS results
+### Historical local macOS results
 
 The demo MP4 from Downloads was imported through the native file picker. It is 1920 × 1080, approximately 30 seconds, and 17,839,845 bytes. The source and managed copy both have SHA-256 `d6617a009c0c6c9aebf7398d43cad6d1985ddc1b9ab0479e2ea977362b8af5b0`. The original was not modified. Footage and screenshots remain local and are excluded from this public repository.
 
@@ -34,15 +95,15 @@ The demo MP4 from Downloads was imported through the native file picker. It is 1
 
 Evidence is saved under `artifacts/local/screenshots/`. Screenshots `01`–`10` cover the initial import, drawing tools, isolated review, seeking, restart, and hosted-package installation. The final interface is covered by `11-light-threaded.png`, `12-light-raw-video.png`, `13-dark-overlays.png`, `14-live-capture.png`, `15-comment-prompt.png`, `16-saved-live-clip.png`, `17-normal-playback-later.png`, `18-compact-dark.png`, `19-restart-live-clip.png`, `20-draft-navigation-recovery.png`, `21-nested-live-reply.png`. The installed GitHub-built v0.1.3 package is shown in `22-release-v0.1.3-dark.png` and `23-release-v0.1.3-light-raw.png`.
 
-## Automated verification
+### Historical automated verification
 
 `npm run typecheck`, Rust formatting, and Clippy with warnings denied pass locally. Fourteen Rust integration tests run on macOS; thirteen run on Windows because the symlink fixture uses Unix-only APIs. These cover persistence and appearance migration, media deduplication and tamper detection, atomic publication and retry idempotency, concurrent publication, transaction rollback, immutable snapshots, reply boundaries, drawing validation, strict JSON validation, deterministic seek evaluation, metadata updates, and filesystem symlink containment. Nineteen UI-domain tests cover aggregate playback, consistent review colors, exclusive ends, EOF moments, native capture boundaries, live draft recovery and navigation, final-stroke deduplication, large stroke data, and nested/cyclic/orphaned reply trees. The macOS native Release build and package script pass locally. Windows CI also runs JSON payload regression fixtures against the compiled Rust CLI, checks the app/runtime PE machine codes, and verifies that declared Microsoft framework dependencies are bundled.
 
 The [v0.1.3 release workflow](https://github.com/Potirniche-Carmine/GamePack/actions/runs/37848971586) passed all four macOS ARM64/x64 and Windows ARM64/x64 builds and published [four installers with checksums](https://github.com/Potirniche-Carmine/GamePack/releases/tag/v0.1.3). Public downloads were fetched and checked against their SHA-256 files; the installed Apple silicon archive matches the public download byte for byte. Both Mac architectures passed binary architecture, version, signature, and notice checks. Both Windows archives passed checks for every native DLL, manifest activation path, OS minimum, runtime dependency, and notice. The release workflow requires every package and checksum before publishing. A successful build establishes compilation and packaging; Windows playback, pointer interaction, and visual correctness still require an interactive Windows device check. They are not established by the Mac screenshots.
 
-## Practical limits
+### Historical practical limits
 
-This is an offline MVP, with no ZIP exchange, mobile targets, Linux target, live sync, or automatic update service. macOS packages are ad-hoc signed and not notarized; Windows packages are unsigned and use development-package registration. Installation documentation explains the relevant OS prompts.
+This is an offline development app, with no ZIP exchange, mobile targets, Linux target, live sync, or automatic update service. macOS packages are ad-hoc signed and not notarized; Windows packages are unsigned and use development-package registration. Installation documentation explains the relevant OS prompts.
 
 The UI and media engines use source media time, stored as integer microseconds. That storage precision is not a claim of microsecond playback accuracy: frames, input sampling, media decoding, and display refresh have their normal platform limits. Native moment overlays allow a 2 ms match tolerance around a seek; interval ends are exclusive.
 

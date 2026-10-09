@@ -42,6 +42,15 @@ export function finalizeCapturedClip(draft: Draft, nativeUs: number, durationUs:
   let firstOffset = Number.MAX_SAFE_INTEGER;
   for (const drawing of draft.drawings) for (const sample of drawing.samples) firstOffset = Math.min(firstOffset, sample.t_us);
   const start = draft.anchor.start_us + firstOffset;
+  // Native clocks can settle a fraction of a millisecond after Pause. Use the
+  // same 2 ms tolerance as moment playback so a frozen frame stays visible.
+  const frozenFrameToleranceUs = 2000;
+  if (nativeUs <= start + frozenFrameToleranceUs && furthestUs <= start + frozenFrameToleranceUs &&
+      draft.drawings.every(drawing => drawing.samples.every(sample => sample.t_us - firstOffset <= frozenFrameToleranceUs))) {
+    return {...draft, anchor: {kind: 'point', at_us: start}, drawings: draft.drawings.map(drawing => ({...drawing,
+      visible_from_us: 0, visible_until_us: 0, samples: drawing.samples.map(sample => ({...sample, t_us: 0})),
+    }))};
+  }
   const end = Math.min(durationUs, Math.max(start + 1, nativeUs, furthestUs));
   const rebased: Draft = {...draft, anchor: {kind: 'interval', start_us: start, end_us: end},
     drawings: draft.drawings.map(item => ({...item,
@@ -67,6 +76,21 @@ export function liveScene(draft: Draft, durationUs: number): {id: string; anchor
 }
 
 export type CommentThread = {comment: Comment; children: CommentThread[]};
+export function replyBranches(roots: CommentThread[]): Set<string> {
+  const ids = new Set<string>(), stack = [...roots];
+  while (stack.length) {
+    const node = stack.pop()!;
+    if (node.children.length) ids.add(node.comment.comment_id);
+    for (const child of node.children) stack.push(child);
+  }
+  return ids;
+}
+
+export function toggleReplies(current: ReadonlySet<string>, id: string): Set<string> {
+  const next = new Set(current);
+  if (next.has(id)) next.delete(id); else next.add(id);
+  return next;
+}
 /** Missing parents and cycles become roots so every immutable comment remains
  * reachable. Building and flattening are iterative to tolerate deep replies. */
 export function commentThreads(comments: Comment[]): CommentThread[] {

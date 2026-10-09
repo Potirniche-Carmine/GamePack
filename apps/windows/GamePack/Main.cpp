@@ -75,6 +75,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     MSG message{};
     auto native2=island.as<IDesktopWindowXamlSourceNative2>();
     while (GetMessageW(&message,nullptr,0,0)>0) {
+      if (gamepack::windows::HandleShortcut(message)) continue;
       BOOL handled{}; native2->PreTranslateMessage(&message,&handled);
       if (!handled) { TranslateMessage(&message); DispatchMessageW(&message); }
     }

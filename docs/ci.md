@@ -1,6 +1,8 @@
 # Hosted builds and release packages
 
-GitHub Actions builds the project on standard hosted runners. This repository is
+All build and release workflows are currently disabled during rapid development. There are no push, pull-request, or tag triggers. Every job has a literal false guard and a `refs/heads/main` check, including manually dispatched and reusable workflows. Releases, tags, publication, and re-enabling automation require an explicit user request.
+
+The retained workflow definitions use standard hosted runners when authorized to run. This repository is
 public; GitHub documents standard hosted runner use as free and unlimited for
 public repositories. These workflows do not use larger paid runners or self-hosted
 machines. [GitHub hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
@@ -21,29 +23,15 @@ standard Intel runner has four CPU cores and 14 GB. Native compilation uses thre
 and four workers respectively, matching those CPU counts without larger runners.
 [Runner resource specifications](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
 
-`macos.yml` and `windows.yml` run on pushes to `main`, pull requests, manual
-dispatches, and reusable workflow calls. Rust formatting, contract tests, and
-Clippy run before packaging. Shared TypeScript types are checked; desktop packages
-embed JavaScript and the Rust static library. CI uploads downloadable `release-*`
-artifacts for seven days. Failed Mac builds retain compiler logs separately.
-CocoaPods verifies the locked dependency graph, versions, and sources after
-installation; only evaluated local podspec checksums may vary by runner tooling.
-JavaScript source packages remain pinned by npm's integrity-checked lockfile.
+`macos.yml` and `windows.yml` retain manual and reusable entry points, but their jobs cannot run until the hard-off guard is deliberately changed. `release.yml` is manual-only, restricted to `main`, and requires an explicit existing version tag matching that main commit. Its jobs are also hard-disabled. Dispatching a workflow does not override these guards.
 
-Pushing a version tag such as `v0.1.3` starts `release.yml`. A fast Windows PowerShell 5 protocol check must pass first. It then calls both platform
-workflows against that tag, waits for all packages, downloads only `release-*`
-artifacts, and verifies their SHA-256 checksums before publishing a GitHub release.
-The publisher uses the workflow's built-in `GITHUB_TOKEN` with `contents: write`;
-build jobs have read-only repository access. No personal access token or signing
-secret is required. A manual release dispatch must select an existing `v*` tag;
-dispatches against branches do not publish. GitHub supports calling repository
-workflows through `workflow_call`. [Reusable workflow documentation](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)
+Local source builds and tests remain available while automation is paused. No release was created for the settings and review UI changes.
 
 Mac packages carry an ad hoc signature and are not notarized. Windows packages are
 unsigned and include installation guidance. A hosted build verifies compilation,
 Rust contracts, bundling, and package production; interactive playback and gesture
 behavior still need native application testing.
 
-For a focused Windows transport check, manually dispatch `windows.yml` with `contract_only: true`. This builds the Rust CLI and tests the native JSON payloads without compiling either desktop UI.
+Run `scripts/windows/test-contract.ps1` locally on Windows for the transport fixtures while hosted jobs are disabled.
 
 Release verification: [v0.1.3 workflow run 37848971586](https://github.com/Potirniche-Carmine/GamePack/actions/runs/37848971586) passed the Windows protocol preflight, all four native build/package jobs, and the final checksum/publication job. The [published v0.1.3 release](https://github.com/Potirniche-Carmine/GamePack/releases/tag/v0.1.3) contains all four architecture-specific archives and their four SHA-256 files. macOS jobs also verified the executable architecture, embedded JavaScript, and strict application signatures before packaging.

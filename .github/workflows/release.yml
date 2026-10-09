@@ -1,9 +1,13 @@
 name: Publish release packages
 
+# Paused during development. Re-enabling requires explicit user authorization.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version_tag:
+        description: Existing version tag on the current main commit (release remains disabled)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,23 +18,27 @@ concurrency:
 
 jobs:
   preflight:
+    if: ${{ false && github.ref == 'refs/heads/main' }}
     name: Verify Windows JSON transport
-    if: startsWith(github.ref, 'refs/tags/v')
+
     uses: ./.github/workflows/windows.yml
     with:
       contract_only: true
 
   macos:
+    if: ${{ false && github.ref == 'refs/heads/main' }}
     needs: preflight
-    if: startsWith(github.ref, 'refs/tags/v')
+
     uses: ./.github/workflows/macos.yml
 
   windows:
+    if: ${{ false && github.ref == 'refs/heads/main' }}
     needs: preflight
-    if: startsWith(github.ref, 'refs/tags/v')
+
     uses: ./.github/workflows/windows.yml
 
   publish:
+    if: ${{ false && github.ref == 'refs/heads/main' }}
     name: Publish verified platform packages
     needs: [macos, windows]
     runs-on: macos-15
@@ -39,6 +47,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Verify explicitly requested tag matches main
+        env:
+          RELEASE_TAG: ${{ inputs.version_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$RELEASE_TAG^{commit}")"
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -55,7 +70,7 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.version_tag }}
         run: |
           cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
           GamePack desktop packages include the shared Rust engine and bundled JavaScript. No developer tools, database server, or application account are needed after installation.

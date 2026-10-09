@@ -44,6 +44,28 @@ test('drawing-free capture becomes a text-comment moment at the native stop', ()
   assert.deepEqual(finalizeCapturedClip(draft(), 8 * second, 30 * second).anchor, {kind: 'point', at_us: 8 * second});
 });
 
+test('drawing on a frozen frame posts a visible moment and can resume into a longer review', () => {
+  const frozen = draft([stroke('first', [4 * second, 4 * second]), stroke('second', [4 * second, 4 * second])]);
+  const posted = finalizeCapturedClip(frozen, 5 * second, 30 * second, 5 * second);
+  assert.deepEqual(posted.anchor, {kind: 'point', at_us: 5 * second});
+  assert.deepEqual(posted.drawings.map(mark => mark.samples.map(sample => sample.t_us)), [[0, 0], [0, 0]]);
+  const resumed = beginLiveDraft(posted, 30 * second, 5 * second);
+  const continued = {...resumed, drawings: [...resumed.drawings, stroke('later', [3 * second, 3 * second])]};
+  const result = finalizeCapturedClip(continued, 8 * second, 30 * second, 8 * second);
+  assert.deepEqual(result.anchor, {kind: 'interval', start_us: 5 * second, end_us: 8 * second + 1});
+  assert.equal(result.drawings.length, 3);
+  assert.equal(result.drawings[2].samples[0].t_us, 3 * second);
+});
+
+test('native pause clock settling does not create a disappearing submillisecond comment', () => {
+  const frozen = draft([stroke('first', [4 * second, 4 * second + 89])]);
+  const posted = finalizeCapturedClip(frozen, 5 * second + 177, 30 * second, 5 * second + 177);
+  assert.deepEqual(posted.anchor, {kind: 'point', at_us: 5 * second});
+  assert.deepEqual(posted.drawings[0].samples.map(sample => sample.t_us), [0, 0]);
+  const resumed = finalizeCapturedClip(frozen, 5 * second + 10000, 30 * second);
+  assert.equal(resumed.anchor.kind, 'interval');
+});
+
 test('a persisted live snapshot restores the first-stroke origin and complete visibility range', () => {
   const live = draft([stroke('first', [3 * second, 3.5 * second])]);
   const restored = JSON.parse(JSON.stringify(finalizeCapturedClip(live, 9 * second, 30 * second)));

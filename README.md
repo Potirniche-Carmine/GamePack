@@ -2,13 +2,13 @@
 
 Offline video review with immutable comments and timed drawings. GamePack uses React Native desktop screens, a shared Rust/SQLite engine, and native media players. No account, upload service, telemetry, or runtime server is required.
 
-The MVP supports adding a video, drawing with pen/arrow/ellipse tools while it plays, and saving the captured clip with a comment. Paused-frame comments and manual time ranges are also supported. Replies appear as collapsible children of their parent. Drafts autosave; saved comments cannot be edited. ZIP import and export are visible but disabled.
+The app is under active development and is not a stable MVP. It supports local video review, comments with optional end times, pen/arrow/ellipse markup, nested replies, and persistent appearance and keyboard settings. Posted comments cannot be edited; deleting their video or project removes them. ZIP exchange is not implemented.
 
 ## Download
 
 [GitHub Releases](https://github.com/Potirniche-Carmine/GamePack/releases) provides separate macOS ARM64, macOS x64, Windows ARM64, and Windows x64 packages. Choose the architecture of your computer. Each package includes an installer, embedded JavaScript, the Rust engine, and a SHA-256 checksum; developer tools are only needed to build from source.
 
-Standard GitHub-hosted runners build the packages. Version tags publish a release only after every architecture succeeds. See [builds and releases](docs/ci.md). Linux is deferred.
+All GitHub Actions build and release jobs are currently disabled, including manual and reusable calls. Only `main` is permitted when explicitly re-enabled. Do not create tags or releases without an explicit user request. See [builds and releases](docs/ci.md). Linux is deferred.
 
 ## macOS
 
@@ -35,19 +35,30 @@ To rebuild after changes, run `bash scripts/build-macos.sh`, then install again.
 
 ## Windows
 
-See [Windows installation](docs/windows.md) for the dependency installer, source build, and package registration. Windows code is compiled by the repository's Windows CI; a Mac run does not establish Windows playback or visual correctness. See [verification](docs/verification.md) for actual results and outstanding platform checks.
+See [Windows installation](docs/windows.md) for the dependency installer, source build, and package registration. Windows changes require a native Windows build and interactive verification; hosted jobs are currently disabled. A Mac run does not establish Windows playback or visual correctness. See [verification](docs/verification.md) for actual results and outstanding platform checks.
 
 ## Review a video
 
-1. Choose **Add video**. GamePack stores one byte-preserving managed copy in the library, reused for identical footage across projects.
-2. Choose **Comment** and draw over the footage while it plays. A captured clip starts at the first stroke. You can also pause to annotate a single frame.
-3. Choose **Save** to pause and finish the clip at the native video playhead, including its final stroke.
-4. Enter the comment in the dialog and save it. Set your display name when prompted. The comment and drawings are saved together.
-5. Play the video normally to see saved drawings and their matching highlighted comments. **Hide annotations** shows the original footage. Use **Reply** to add a child review; expand or collapse the thread beside its parent.
+1. Open **Library** and choose **Add video**. GamePack stores one byte-preserving managed copy in the library, reused for identical footage across projects.
+2. Press Space or click the video to play or pause. The drawing tools are always available beneath playback. Choose **Comment** or press M to focus the comment box; Escape returns focus to the video so Space resumes playback.
+3. Add markup. Playback pauses as soon as a stroke starts, and the comment box opens when it finishes without taking keyboard focus. Continue drawing, write a comment, or press Space to resume. Expand the timestamp to adjust timing. Turn off **Pause when drawing starts** in Settings to capture continuous playback. The pointer makes a temporary pulse without saving a drawing.
+4. Choose **Post** or press Command/Control+Return to capture the final stroke and publish. Set your display name when prompted.
+5. Use **View**, **Reply**, or the previous/next comment arrows to review. Open **Comments** for the discussion; **Expand all** and **Collapse all** control every reply branch. The comment icon in the header toggles timed cards; the eye control toggles drawings.
+6. Use the fullscreen icon at the right of the playback controls or press F. Space plays/pauses, Up/Down or a Page Up/Page Down presenter advances through original comments, and Escape closes an open panel or exits fullscreen. Comments, replies, and drawing use the same video workspace in either size.
+
+Library and discussion dock beside the video in the normal window and can be closed independently. Fullscreen hides both docks and keeps comments on the right of the video; either panel can still be opened on demand. There is no drafts list or preview step. **Discard** removes the current comment and its drawings; **Post** publishes them. Only original comments and their drawings appear during playback; replies stay in the discussion. Spaces typed in the composer remain text.
 
 A stroke drawn while paused appears complete at that frame's timestamp. During an interval, samples are revealed by source media time; speed changes, seeks, and pauses do not use a separate annotation timer. The end of a range is exclusive. Normal playback shows moment annotations for two seconds, capped at the video end; selecting a moment still displays its exact frame. Rendering uses a stable matching color for each comment and its drawings without changing the saved drawing data.
 
-Open your profile to choose System, Light, or Dark appearance. Both themes use light-blue accents; the preference is saved inside the library database.
+Comments with drawings appear from the first visible drawing sample until the final drawing ends. Text-only comments follow their moment or range. Overlapping notes can be paged through without covering the video with a stack of cards.
+
+Open **Settings** to choose System, Light, or Dark appearance and edit keyboard shortcuts. Click a shortcut and press its replacement; conflicts and reserved system/text keys are rejected. Clear unneeded bindings or reset all defaults. Appearance, bindings, and drawing behavior are stored in SQLite.
+
+Defaults: Space plays/pauses; J/K/L shuttle backward, stop, and shuttle forward; Left/Right step frames; Shift+Left/Right seek five seconds; I/O set comment start/end; M starts a comment; P/A/E select drawing tools; V selects the pointer; Command/Control+Z and +Shift+Z undo/redo drawings. Command/Control+1–9 opens projects; Option/Alt+Up/Down changes videos. Hold Command/Control to reveal contextual shortcut badges. F toggles fullscreen; Shift+M toggles on-video comments; Command/Control+Shift+R expands or collapses replies. Existing custom assignments take precedence over these new defaults. Full assignments are searchable in Settings. Shortcuts do not intercept text editing, except the configured post shortcut.
+
+Trash controls delete a project or video after confirmation, including its comments and drafts. Original files and content-addressed managed media are retained; shared footage remains available to other projects and re-imports. This action does not reclaim disk space.
+
+Icons use official [Lucide](https://lucide.dev/) assets with their bundled license. `npm run icons` regenerates native-scale image assets from the locked library version.
 
 ## One library folder
 
@@ -55,7 +66,7 @@ All application-owned mutable data is under `GAMEPACK_HOME` or `~/.gamepack` (`%
 
 The original selected file is read-only. GamePack hashes and copies media incrementally, verifies its managed copy, and deduplicates by BLAKE3 plus byte length. Ordinary comments never transcode or burn marks into footage. Database writes use WAL and `synchronous=FULL`; complete comments and drawings publish atomically with their draft status. Publication retries reuse the draft's stable ID.
 
-Back up the library with GamePack closed. Removing the app does not delete the library. ZIP interchange is not implemented and no archive format is promised by this MVP.
+Back up the library with GamePack closed. Removing the app does not delete the library. ZIP interchange is not implemented and no archive format is promised during development.
 
 ## Development
 
@@ -77,4 +88,4 @@ The release build embeds a production JavaScript bundle. `npm start` and `npm ru
 - `docs/mvp-contract.md`: concrete integration contract.
 - `GamePack-Implementation-Plan-v3.md`: longer product roadmap, including deferred ZIP exchange and mobile targets.
 
-Mobile targets, live collaboration, narrated/frozen-frame walkthroughs, ZIP exchange, and signed consumer installers remain outside this MVP. Actual tested behavior and limitations are documented in [verification](docs/verification.md).
+Mobile targets, live collaboration, narrated/frozen-frame walkthroughs, ZIP exchange, and signed consumer installers remain outside the current development scope. Actual tested behavior and limitations are documented in [verification](docs/verification.md).

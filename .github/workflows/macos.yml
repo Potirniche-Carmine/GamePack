@@ -1,11 +1,7 @@
 name: macOS native builds
 
+# Paused during development. Re-enabling requires explicit user authorization.
 on:
-  push:
-    branches: [main]
-    paths-ignore: ['**.md', 'LICENSE', 'apps/windows/**', 'scripts/windows/**', '.github/workflows/windows.yml']
-  pull_request:
-    paths-ignore: ['**.md', 'LICENSE', 'apps/windows/**', 'scripts/windows/**', '.github/workflows/windows.yml']
   workflow_dispatch:
   workflow_call:
 
@@ -22,6 +18,7 @@ env:
 
 jobs:
   macos:
+    if: ${{ false && github.ref == 'refs/heads/main' }}
     name: macOS ${{ matrix.arch }} desktop app
     strategy:
       fail-fast: false
