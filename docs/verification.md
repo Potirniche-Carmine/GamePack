@@ -1,5 +1,22 @@
 # Development verification
 
+## Spatial review refinement — October 9, 2026
+
+Verified with the signed macOS Release app, production JavaScript, AVPlayer, and Rust/SQLite in an isolated `GAMEPACK_HOME`. Fixture footage, thumbnail caches, and screenshots remain in ignored `artifacts/local/overhaul/`.
+
+- Removed the discussion side panel and its header controls. Native checks cover collapsed cards, reply indicators, expanded nested replies, inline reply posting through Command–Return, and drawing a native ellipse to open a nearby composer. Comment and composer headers drag without triggering playback; posting retains the dragged location and complete text.
+- Card placement uses video coordinates and a separate schema-v5 table. Rust tests verify save, post, move, reopen, migration, and invalid coordinates while preserving immutable comment content and digests. Additional UI regression cases cover letterboxing, zoom, crowded legacy notes, late drawing starts, and newly posted replies before state refresh.
+- Empty video space plays and pauses with the normal pointer. The separate laser tool leaves playback unchanged. The native zoom menu, mouse wheel, keyboard plus/minus, and Fit reset were exercised; video and drawings share the same transform. Fullscreen entry and exit retain accessible cards and transport controls.
+- The timeline displays twelve native video thumbnails. Files cache under `GAMEPACK_HOME`, and missing thumbnails fall back to the ordinary timeline. Coincident comment markers remain individually reachable.
+- Inspected native light/dark workspace and Settings screenshots, the initials profile, fullscreen, project navigation, and an empty folder. App-owned library menus support keyboard selection and Escape. Search and profile inputs have centered content and no native blue bezel.
+- The video switcher is anchored beneath its trigger and contains only videos in the current folder. Native Down/Return navigation opens Browse folder without invoking the underlying comment shortcuts; the small menu fits its contents.
+- Final theme checks caught an AppKit backing-layer redraw issue that hid paused annotations until the next seek. The overlay now invalidates on effective appearance changes; switching light to dark and back keeps drawings visible without seeking.
+- The requested animation audit led to 100 ms press feedback, 160 ms release, a restrained 180 ms settings entrance for pointer activation, and 140 ms switch movement. Keyboard activation remains immediate and reduced-motion preferences remove scale/travel. Drawing, dragging, playback, and comment disclosure stay direct.
+- TypeScript, 59 UI/domain tests, 24 Rust integration tests, formatting, strict Clippy, and the macOS Release build pass. The isolated database reports schema version 5 and `integrity_check = ok`.
+- Installed and opened the final build at `~/.gamepack/app/GamePack.app`; the existing project library and initials profile are present. Its executable and JavaScript SHA-256 values match the tested build, and deep signature verification passes.
+
+Windows player and thumbnail source is updated but has not been compiled or exercised on a Windows device in this iteration. Hosted workflows remain disabled; no release was created.
+
 ## Workspace overhaul — October 9, 2026
 
 Verified with the signed macOS Release app, production JavaScript, AVPlayer, and Rust/SQLite in an isolated `GAMEPACK_HOME`. Local fixture media and screenshots are excluded from Git.
