@@ -12,8 +12,9 @@ import {SettingsPage} from './SettingsPage';
 import {Avatar} from './Avatar';
 import {CommentCard} from './CommentCard';
 import {toggleDiscussion} from './discussion';
+import {resumableDraft} from './drafts';
 import {LibraryBrowser} from './LibraryBrowser';
-import {libraryContents} from './library';
+import {libraryContents, videoTitle} from './library';
 import {ReviewTimeline} from './ReviewTimeline';
 import {binding, bindingError, migrateReviewBindings, shortcutAction, shortcuts, type ShortcutEvent} from './shortcuts';
 import {ThemeContext, useTheme, useThemeChoice} from './theme';
@@ -267,10 +268,18 @@ export default function App() {
     if (draftsRef.current.some(item => item.id === activeDraftRef.current)) requestCapture('leave', after);
     else void after();
   };
+  const restoreDraftNow = (pending: Draft) => {
+    activeDraftRef.current = pending.id; setDraftId(pending.id); setCommentId(null); setLive(null);
+    setComposerOpen(true); setDiscussionVisible(!presenting); setLibraryVisible(false); setTimingOpen(false);
+    setPaused(true); setReviewing(false); setIsolatedReview(false); setShowScene(true); setTool('pointer'); setRedo([]);
+    seek(anchorStart(pending.anchor));
+  };
   const openVideoNow = async (item: Video) => {
     const generation = ++sourceGeneration.current;
     setPaused(true); setRate(1); clearEditing(); setShowScene(true); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false); setDiscussionOpen(false);
     setCommentId(null); setExpanded(new Set()); setDuration(item.duration_us); seek(0);
+    const pending = resumableDraft(draftsRef.current, item.id);
+    if (pending) restoreDraftNow(pending);
     try {
       const result = await command<{valid: boolean; path: string}>(root, 'verify_video', {video_id: item.id});
       if (generation === sourceGeneration.current && !result.valid)
@@ -296,6 +305,8 @@ export default function App() {
     if (!video || busy) return;
     if (revealComposer) { setComposerOpen(true); setDiscussionVisible(!presenting); setLibraryVisible(false); }
     if (draft && !parent) return draft;
+    const pending = resumableDraft(draftsRef.current, video.id, parent?.comment_id ?? null);
+    if (pending) { restoreDraftNow(pending); return pending; }
     setTimingOpen(false);
     try {
       let value: Draft = {id: uuid(), project_id: video.project_id, video_id: video.id, text: '',
@@ -598,13 +609,12 @@ export default function App() {
       await flushAll();
       await command(root, deleteTarget.kind === 'video' ? 'delete_video' : deleteTarget.kind === 'folder' ? 'delete_folder' : 'delete_project', {[`${deleteTarget.kind}_id`]: deleteTarget.id});
       const refreshed = await command<Bootstrap>(root, 'bootstrap');
-      const nextProject = refreshed.projects.find(item => item.id === projectId) ?? refreshed.projects[0];
+      const nextProject = refreshed.projects.find(item => item.id === projectId);
       const nextVideo = refreshed.videos.find(item => item.id === videoId);
       if (!refreshed.folders.some(item => item.id === folderId)) setFolderId(null);
-      draftsRef.current = refreshed.drafts; setData(refreshed); clearEditing(); setCommentId(null); setDeleteTarget(null);
+      draftsRef.current = refreshed.drafts; setData(refreshed); setDeleteTarget(null);
       setProjectId(nextProject?.id ?? null);
-      if (nextVideo) await openVideoNow(nextVideo);
-      else { setVideoId(null); setDuration(0); seek(0); }
+      if (!nextVideo) { clearEditing(); setCommentId(null); setVideoId(null); setDuration(0); seek(0); }
     } catch (cause) { setError(`Could not delete: ${message(cause)}`); }
     finally { setBusy(''); }
   };
@@ -706,18 +716,18 @@ export default function App() {
   const composer = draft ? <View style={presenting ? [cs.composer, !composerOpen && cs.composerCollapsed] : s.composerDock}>
                 <View style={cs.draftHeader}>
                   <Button quiet compact icon={composerOpen ? 'chevronDown' : 'chevronRight'} expanded={composerOpen} label={composerOpen ? 'Minimize composer' : 'Open composer'} onPress={() => setComposerOpen(value => !value)}>{draft.parent_comment_id ? 'Reply' : 'Comment'}</Button>
-                  <View style={{flex: 1}} /><Button quiet compact disabled={!!busy} label="Close comment" icon="close" onPress={() => { setPaused(true); if (draft.text.trim() || draft.drawings.length) setDiscardOpen(true); else void discard(); }} />
+                  <View style={{flex: 1}} /><Button quiet compact disabled={!!busy || dialogOpen} label="Close comment" icon="close" onPress={() => { setPaused(true); if (draft.text.trim() || draft.drawings.length) setDiscardOpen(true); else void discard(); }} />
                 </View>
                 {composerOpen && <ScrollView style={{maxHeight: Math.max(170, height - 330)}} keyboardShouldPersistTaps="handled">
-                  <TextInput ref={commentInput} accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Write a reply…' : 'Write a comment…'} placeholderTextColor={colors.faint} multiline editable={!busy} style={[cs.input, cs.textArea, {marginTop: 8}]} value={draft.text} onFocus={() => setPaused(true)} accessibilityHint="Escape returns to the video" onChangeText={text => updateDraft({text})} maxLength={16000} />
-                  <Button quiet compact icon="clock" expanded={timingOpen} style={{alignSelf: 'flex-start', marginTop: 8}} disabled={!!busy} onPress={() => setTimingOpen(value => !value)}>{anchorLabel(draft.anchor)}</Button>
+                  <TextInput ref={commentInput} accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Write a reply…' : 'Write a comment…'} placeholderTextColor={colors.faint} multiline editable={!busy && !dialogOpen} style={[cs.input, cs.textArea, {marginTop: 8}]} value={draft.text} onFocus={() => setPaused(true)} accessibilityHint="Escape returns to the video" onChangeText={text => updateDraft({text})} maxLength={16000} />
+                  <Button quiet compact icon="clock" expanded={timingOpen} style={{alignSelf: 'flex-start', marginTop: 8}} disabled={!!busy || dialogOpen} onPress={() => setTimingOpen(value => !value)}>{anchorLabel(draft.anchor)}</Button>
                   {timingOpen && <>
-                    <AnchorEditor anchor={draft.anchor} live={isLive} time={time} duration={duration} locked={!!draft.drawings.length} disabled={!!busy} onChange={changeAnchor} onError={setError} />
-                    {!!draft.drawings.length && !isLive && <VisibilityEditor key={`${draft.id}-${draft.drawings.length}`} draft={draft} disabled={!!busy} onChange={drawings => updateDraft({drawings})} onError={setError} />}
+                    <AnchorEditor anchor={draft.anchor} live={isLive} time={time} duration={duration} locked={!!draft.drawings.length} disabled={!!busy || dialogOpen} onChange={changeAnchor} onError={setError} />
+                    {!!draft.drawings.length && !isLive && <VisibilityEditor key={`${draft.id}-${draft.drawings.length}`} draft={draft} disabled={!!busy || dialogOpen} onChange={drawings => updateDraft({drawings})} onError={setError} />}
                   </>}
                   <View style={cs.draftActions}>
-                    {failedDrafts.has(draft.id) && <Button compact disabled={!!busy} onPress={() => void flushLatest(draft.id).catch(() => undefined)}>Retry</Button>}
-                    <View style={{flex: 1}} /><Button style={cs.composerAction} disabled={!!busy} onPress={() => void discard()}>Discard</Button>
+                    {failedDrafts.has(draft.id) && <Button compact disabled={!!busy || dialogOpen} onPress={() => void flushLatest(draft.id).catch(() => undefined)}>Retry</Button>}
+                    <View style={{flex: 1}} /><Button style={cs.composerAction} disabled={!!busy || dialogOpen} onPress={() => void discard()}>Discard</Button>
                     <Button primary style={cs.composerAction} shortcut="submit" disabled={!!busy || (!draft.text.trim() && !draft.drawings.length)} onPress={() => requestCapture('save')}>{busy === 'Saving…' ? 'Saving…' : 'Post'}</Button>
                   </View>
                 </ScrollView>}
@@ -726,28 +736,28 @@ export default function App() {
   const currentFolder = data.folders?.find(item => item.id === folderId);
   const startProject = () => leaveDraft(() => { setPaused(true); setProjectTitle(''); setError(''); setProjectOpen(true); });
   const header = <View style={presenting ? vs.videoHeader : s.workspaceHeader}>
-    <Pressable accessibilityRole="button" accessibilityLabel="All projects" onFocus={() => setBrandFocused(true)} onBlur={() => setBrandFocused(false)} onPress={() => browse(null)} disabled={!!busy}
+    <Pressable accessibilityRole="button" accessibilityLabel="All projects" onFocus={() => setBrandFocused(true)} onBlur={() => setBrandFocused(false)} onPress={() => browse(null)} disabled={!!busy || dialogOpen}
       style={({pressed}) => [s.brandButton, pressed && {opacity: .65}, brandFocused && {backgroundColor: colors.selected}]}>
       <View style={s.brandMark}><Icon name="play" color={colors.primaryText} /></View>
       {width > 1000 && <Text style={s.brand}>GamePack</Text>}
     </Pressable>
     <View style={s.breadcrumb}>
-      {!!currentProject && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact disabled={!!busy} style={s.breadcrumbPart} label={`Browse project ${currentProject.title}`} onPress={() => browse(projectId)}>{currentProject.title}</Button></>}
-      {!!currentFolder && width > 850 && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact disabled={!!busy} style={s.breadcrumbPart} label={`Browse folder ${currentFolder.title}`} onPress={() => browse(projectId, folderId)}>{currentFolder.title}</Button></>}
-      {!!video && <><Text style={s.breadcrumbSlash}>/</Text><Text numberOfLines={1} style={[s.title, {flex: 1}]}>{video.title}</Text></>}
+      {!!currentProject && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact disabled={!!busy || dialogOpen} style={s.breadcrumbPart} label={`Browse project ${currentProject.title}`} onPress={() => browse(projectId)}>{currentProject.title}</Button></>}
+      {!!currentFolder && width > 850 && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact disabled={!!busy || dialogOpen} style={s.breadcrumbPart} label={`Browse folder ${currentFolder.title}`} onPress={() => browse(projectId, folderId)}>{currentFolder.title}</Button></>}
+      {!!video && <><Text style={s.breadcrumbSlash}>/</Text><Text numberOfLines={1} style={[s.title, {flex: 1}]}>{videoTitle(video)}</Text></>}
     </View>
     {!!video && <>
       <Button quiet compact icon="library" label={libraryVisible ? 'Hide library' : 'Show library'} active={libraryVisible} onPress={() => { setLibraryVisible(value => !value); setDiscussionVisible(false); setPaused(true); }} />
-      <Button quiet compact icon={notesVisible ? 'comment' : 'eyeOff'} shortcut="onVideoNotes" active={notesVisible} label="Comments on video" disabled={!!busy} onPress={() => setNotesVisible(value => !value)} />
+      <Button quiet compact icon={notesVisible ? 'comment' : 'eyeOff'} shortcut="onVideoNotes" active={notesVisible} label="Comments on video" disabled={!!busy || dialogOpen} onPress={() => setNotesVisible(value => !value)} />
       <Button quiet compact icon="discussion" label={discussionVisible ? 'Hide discussion' : 'Show discussion'} active={discussionVisible} onPress={() => { setDiscussionVisible(value => !value); setLibraryVisible(false); setPaused(true); }}>{width > 1000 ? 'Comments' : undefined}</Button>
       <View style={s.headerDivider} />
     </>}
-    <Button quiet compact shortcut="settings" icon="settings" label="Settings" disabled={!!busy} onPress={() => openSettings()} />
-    <Pressable accessibilityRole="button" accessibilityLabel={data.profile.name ? `Profile: ${data.profile.name}` : 'Set your name'} onFocus={() => setAvatarFocused(true)} onBlur={() => setAvatarFocused(false)} disabled={!!busy} onPress={() => openSettings('profile')}
+    <Button quiet compact shortcut="settings" icon="settings" label="Settings" disabled={!!busy || dialogOpen} onPress={() => openSettings()} />
+    <Pressable accessibilityRole="button" accessibilityLabel={data.profile.name ? `Profile: ${data.profile.name}` : 'Set your name'} onFocus={() => setAvatarFocused(true)} onBlur={() => setAvatarFocused(false)} disabled={!!busy || dialogOpen} onPress={() => openSettings('profile')}
       style={({pressed}) => [s.avatarButton, pressed && {opacity: .65}, avatarFocused && {borderColor: colors.text}]}><Avatar name={data.profile.name} size={30} /></Pressable>
   </View>;
   const libraryProps = {
-    projects: data.projects, folders: data.folders ?? [], videos: data.videos, projectId, folderId, videoId, disabled: !!busy,
+    projects: data.projects, folders: data.folders ?? [], videos: data.videos, projectId, folderId, videoId, disabled: !!busy || dialogOpen,
     onOpenProject: openProject, onOpenFolder: (folder: Folder) => browse(folder.project_id, folder.id), onOpenRoot: () => browse(projectId), onOpenVideo: openVideo,
     onNewProject: startProject, onImport: () => { void importVideo(); }, onCreateFolder: () => editFolder('create'),
     onRenameProject: (project: Project) => editFolder('renameProject', project), onDeleteProject: (project: Project) => askDelete('project', project),
@@ -760,7 +770,7 @@ export default function App() {
   </View>;
   const discussionPanel = <View style={presenting ? [s.discussionPopover, {maxHeight: height - 260, width: Math.min(420, width - 32)}] : s.discussionDock}>
         <View style={s.railHeader}><Text style={s.railTitle}>Comments</Text><View style={{flex: 1}} />
-          {!!branches.size && <Button quiet compact shortcut="allReplies" icon={allRepliesExpanded ? 'collapse' : 'expand'} expanded={allRepliesExpanded} disabled={!!busy} onPress={toggleAllReplies}>{allRepliesExpanded ? 'Collapse all' : 'Expand all'}</Button>}
+          {!!branches.size && <Button quiet compact shortcut="allReplies" icon={allRepliesExpanded ? 'collapse' : 'expand'} expanded={allRepliesExpanded} disabled={!!busy || dialogOpen} onPress={toggleAllReplies}>{allRepliesExpanded ? 'Collapse all' : 'Expand all'}</Button>}
           <Button quiet compact icon="close" label="Close discussion" onPress={() => setDiscussionVisible(false)} />
         </View>
         {!presenting && composer}
@@ -769,9 +779,9 @@ export default function App() {
             <CommentCard item={node.comment} selected={node.comment.comment_id === commentId} replyCount={node.children.length} expanded={expanded.has(node.comment.comment_id)}
               activeColor={annotationsVisible && activeIds.has(node.comment.comment_id) ? railColors.get(node.comment.comment_id) : undefined}
               onToggle={() => setExpanded(previous => toggleDiscussion(videoComments, node.comment.comment_id, previous))}
-              onSelect={() => selectComment(node.comment)} onPlay={() => leaveDraft(() => { setFullDiscussionOpen(false); selectCommentNow(node.comment); playReview(node.comment); })} onReply={() => replyToNote(node.comment)} disabled={!!busy} />
+              onSelect={() => selectComment(node.comment)} onPlay={() => leaveDraft(() => { setFullDiscussionOpen(false); selectCommentNow(node.comment); playReview(node.comment); })} onReply={() => replyToNote(node.comment)} disabled={!!busy || dialogOpen} />
           </View>)}
-          {!videoComments.length && <View style={s.emptyComments}><Icon name="comment" color={colors.faint} /><Text style={[s.emptyCommentsText, {marginTop: 12}]}>No comments yet</Text><Button quiet onPress={focusComment} disabled={!!busy}>Add comment</Button></View>}
+          {!videoComments.length && <View style={s.emptyComments}><Icon name="comment" color={colors.faint} /><Text style={[s.emptyCommentsText, {marginTop: 12}]}>No comments yet</Text><Button quiet onPress={focusComment} disabled={!!busy || dialogOpen}>Add comment</Button></View>}
         </ScrollView>
       </View>;
 
@@ -791,44 +801,44 @@ export default function App() {
               onDrawingStart={event => { setTime(event.nativeEvent.time_us); if (event.nativeEvent.paused) setPaused(true); if (presenting) setComposerOpen(false); }}
               onPointer={event => setPointerPulse({...event.nativeEvent, token: Date.now()})}
               onTime={event => onTime(event.nativeEvent)} onDrawing={event => onDrawing(event.nativeEvent.drawingJson)} /> :
-              <ThemeContext.Provider value={displayTheme}><Empty title="No videos" action={<Button primary disabled={!!busy} onPress={() => projectId ? importVideo() : setProjectOpen(true)}>{projectId ? 'Add video' : 'New project'}</Button>} /></ThemeContext.Provider>}
+              <ThemeContext.Provider value={displayTheme}><Empty title="No videos" action={<Button primary disabled={!!busy || dialogOpen} onPress={() => projectId ? importVideo() : setProjectOpen(true)}>{projectId ? 'Add video' : 'New project'}</Button>} /></ThemeContext.Provider>}
             {presenting && header}
             {!!video && <>
-              {notesVisible && !draft && !discussionVisible && !(presenting && libraryVisible) && <ThemeContext.Provider value={displayTheme}><VideoNote notes={onVideoNotes} comments={videoComments} profileName={data.profile.name} colors={railColors} large={presenting} paused={paused} disabled={!!busy} onPause={() => setPaused(true)} onReply={replyToNote} /></ThemeContext.Provider>}
+              {notesVisible && !draft && !discussionVisible && !(presenting && libraryVisible) && <ThemeContext.Provider value={displayTheme}><VideoNote notes={onVideoNotes} comments={videoComments} profileName={data.profile.name} colors={railColors} large={presenting} paused={paused} disabled={!!busy || dialogOpen} onPause={() => setPaused(true)} onReply={replyToNote} /></ThemeContext.Provider>}
               {presenting && composer}
               <PointerPulse point={pointerPulse} />
               <View style={vs.videoControls}>
                 <View pointerEvents={busy ? 'none' : 'auto'} style={vs.transport}>
                   <Timeline time={time} duration={duration} comments={originalComments} selectedId={commentId} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />
                   <View style={vs.transportRow}>
-                    <Button quiet compact shortcut="previousComment" disabled={!previousNote || !!busy} label="Previous comment" icon="previous" onPress={() => navigateNote(-1)} />
-                    <Button compact shortcut="play" disabled={!!busy} style={vs.playButton} label={paused ? 'Play video' : 'Pause video'} icon={paused ? 'play' : 'pause'} onPress={play} />
-                    <Button quiet compact shortcut="nextComment" disabled={!nextNote || !!busy} label="Next comment" icon="chevronRight" onPress={() => navigateNote(1)} />
+                    <Button quiet compact shortcut="previousComment" disabled={!previousNote || !!busy || dialogOpen} label="Previous comment" icon="previous" onPress={() => navigateNote(-1)} />
+                    <Button compact shortcut="play" disabled={!!busy || dialogOpen} style={vs.playButton} label={paused ? 'Play video' : 'Pause video'} icon={paused ? 'play' : 'pause'} onPress={play} />
+                    <Button quiet compact shortcut="nextComment" disabled={!nextNote || !!busy || dialogOpen} label="Next comment" icon="chevronRight" onPress={() => navigateNote(1)} />
                     <Text style={vs.time}>{timeLabel(time)}{!compactPlayer && <Text style={{color: videoTheme.colors.faint}}> / {timeLabel(duration)}</Text>}</Text>
                     <View style={vs.transportSpacer} />
-                    <Button quiet compact disabled={!!busy} label="Playback speed" onPress={() => setRate(previous => previous === 0.5 ? 1 : previous === 1 ? 1.5 : previous === 1.5 ? 2 : 0.5)}>{rate}×</Button>
-                    <Button quiet compact shortcut="annotations" active={annotationsVisible} label={annotationsVisible ? 'Hide drawings' : 'Show drawings'} icon={annotationsVisible ? 'eye' : 'eyeOff'} disabled={!!busy} onPress={() => setAnnotationsVisible(value => !value)} />
-                    <Button primary compact shortcut="comment" disabled={!!busy} onPress={focusComment} icon="comment" label="Write comment">{compactPlayer ? undefined : 'Comment'}</Button>
-                    <Button quiet compact icon={presenting ? 'minimize' : 'maximize'} label={presenting ? 'Exit full screen' : 'Enter full screen'} shortcut="present" disabled={!!busy} onPress={togglePresentation} />
+                    <Button quiet compact disabled={!!busy || dialogOpen} label="Playback speed" onPress={() => setRate(previous => previous === 0.5 ? 1 : previous === 1 ? 1.5 : previous === 1.5 ? 2 : 0.5)}>{rate}×</Button>
+                    <Button quiet compact shortcut="annotations" active={annotationsVisible} label={annotationsVisible ? 'Hide drawings' : 'Show drawings'} icon={annotationsVisible ? 'eye' : 'eyeOff'} disabled={!!busy || dialogOpen} onPress={() => setAnnotationsVisible(value => !value)} />
+                    <Button primary compact shortcut="comment" disabled={!!busy || dialogOpen} onPress={focusComment} icon="comment" label="Write comment">{compactPlayer ? undefined : 'Comment'}</Button>
+                    <Button quiet compact icon={presenting ? 'minimize' : 'maximize'} label={presenting ? 'Exit full screen' : 'Enter full screen'} shortcut="present" disabled={!!busy || dialogOpen} onPress={togglePresentation} />
                   </View>
                 </View>
               </View>
               <ThemeContext.Provider value={displayTheme}>
-                <View style={s.toolBar}>
-                  <Button quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={!!busy} onPress={() => { chooseTool('pointer'); setPaletteOpen(false); }} />
-                  {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={!!busy} onPress={() => chooseTool(value)} />)}
+                <View style={[s.toolBar, presenting && {top: 76}]}>
+                  <Button quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={!!busy || dialogOpen} onPress={() => { chooseTool('pointer'); setPaletteOpen(false); }} />
+                  {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={!!busy || dialogOpen} onPress={() => chooseTool(value)} />)}
                   <View style={{height: 1, width: 22, backgroundColor: colors.separator, marginVertical: 3}} />
-                  <Button quiet compact shortcut="comment" icon="comment" label="Add comment" disabled={!!busy} onPress={focusComment} />
+                  <Button quiet compact shortcut="comment" icon="comment" label="Add comment" disabled={!!busy || dialogOpen} onPress={focusComment} />
                   {tool !== 'pointer' && <Pressable accessibilityRole="button" accessibilityLabel="Drawing colors" accessibilityState={{expanded: paletteOpen}} onPress={() => setPaletteOpen(value => !value)} style={[s.swatch, {marginVertical: 3}]}><View style={[s.swatchFill, {backgroundColor: strokeColor}]} /></Pressable>}
-                  {!!draft && <><View style={{height: 1, width: 22, backgroundColor: colors.separator, marginVertical: 3}} /><Button quiet compact shortcut="undo" label="Undo drawing" disabled={!draft.drawings.length || !!busy} icon="undo" onPress={undoDrawing} /><Button quiet compact shortcut="redo" label="Redo drawing" disabled={!redo.length || !!busy} icon="redo" onPress={redoDrawing} /></>}
+                  {!!draft && <><View style={{height: 1, width: 22, backgroundColor: colors.separator, marginVertical: 3}} /><Button quiet compact shortcut="undo" label="Undo drawing" disabled={!draft.drawings.length || !!busy || dialogOpen} icon="undo" onPress={undoDrawing} /><Button quiet compact shortcut="redo" label="Redo drawing" disabled={!redo.length || !!busy || dialogOpen} icon="redo" onPress={redoDrawing} /></>}
                 </View>
-                {paletteOpen && tool !== 'pointer' && <View style={s.drawingPalette}>{palette.map((color, index) => <Pressable key={color} disabled={!!busy} accessibilityRole="button" accessibilityLabel={`Drawing color ${['Blue', 'White', 'Amber', 'Green'][index]}`} accessibilityState={{selected: strokeColor === color}}
+                {paletteOpen && tool !== 'pointer' && <View style={[s.drawingPalette, presenting && {top: 76}]}>{palette.map((color, index) => <Pressable key={color} disabled={!!busy || dialogOpen} accessibilityRole="button" accessibilityLabel={`Drawing color ${['Blue', 'White', 'Amber', 'Green'][index]}`} accessibilityState={{selected: strokeColor === color}}
                   onPress={() => { setStrokeColor(color); setPaletteOpen(false); }} style={[s.swatch, strokeColor === color && s.swatchSelected]}><View style={[s.swatchFill, {backgroundColor: color}]} /></Pressable>)}</View>}
               </ThemeContext.Provider>
             </>}
           </View>
         </ThemeContext.Provider>
-        {!presenting && <ReviewTimeline time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy} onSelect={selectComment} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />}
+        {!presenting && <ReviewTimeline time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />}
         </>}
         {!!busy && <View style={s.statusRow}><Text style={s.status}>{busy}</Text></View>}
       </View>
@@ -841,7 +851,7 @@ export default function App() {
       <Text style={s.modalTitle}>Delete {deleteTarget?.kind}?</Text>
       <Text style={s.modalBody}>{deleteTarget?.kind === 'folder' ? `Remove “${deleteTarget.title}”? Its videos will return to the project.` : `“${deleteTarget?.title}” and its comments will be removed from your library.`}</Text>
       {!!error && <Text accessibilityRole="alert" style={{color: colors.danger}}>{error}</Text>}
-      <View style={s.modalActions}><Button disabled={!!busy} onPress={() => setDeleteTarget(null)}>Cancel</Button><Button danger disabled={!!busy} onPress={() => void deleteItem()}>Delete</Button></View>
+      <View style={s.modalActions}><Button autoFocus disabled={!!busy} onPress={() => setDeleteTarget(null)}>Cancel</Button><Button danger disabled={!!busy} onPress={() => void deleteItem()}>Delete</Button></View>
     </Dialog>
     <Dialog visible={!!folderDialog} onDismiss={() => { if (!busy) setFolderDialog(null); }}>
       <Text style={s.modalTitle}>{folderDialog?.kind === 'create' ? 'New folder' : folderDialog?.kind === 'renameProject' ? 'Rename project' : 'Rename folder'}</Text>
@@ -856,7 +866,7 @@ export default function App() {
         {data.folders.filter(item => item.project_id === moveTarget?.project_id).map(item => <Button key={item.id} quiet icon="folder" disabled={!!busy || moveTarget?.folder_id === item.id} onPress={() => void moveVideo(item.id)} style={{justifyContent: 'flex-start', marginBottom: 6}}>{item.title}</Button>)}
       </ScrollView>
       {!!error && <Text accessibilityRole="alert" style={[s.hint, {color: colors.danger}]}>{error}</Text>}
-      <View style={s.modalActions}><Button disabled={!!busy} onPress={() => setMoveTarget(null)}>Cancel</Button></View>
+      <View style={s.modalActions}><Button autoFocus disabled={!!busy} onPress={() => setMoveTarget(null)}>Cancel</Button></View>
     </Dialog>
     <Dialog visible={profileOpen} onDismiss={closeProfile}>
       <Text style={s.modalTitle}>Your name</Text>
@@ -871,7 +881,7 @@ export default function App() {
       <View style={s.modalActions}><Button disabled={!!busy} onPress={() => setProjectOpen(false)}>Cancel</Button><Button primary disabled={!projectTitle.trim() || !!busy} onPress={() => void createProject()}>Create</Button></View>
     </Dialog>
     <Dialog visible={discardOpen} onDismiss={() => { if (!busy) setDiscardOpen(false); }}>
-      <Text style={s.modalTitle}>Discard comment?</Text><View style={s.modalActions}><Button onPress={() => setDiscardOpen(false)}>Keep editing</Button><Button primary onPress={() => void discard()}>Discard</Button></View>
+      <Text style={s.modalTitle}>Discard comment?</Text><View style={s.modalActions}><Button autoFocus onPress={() => setDiscardOpen(false)}>Keep editing</Button><Button primary onPress={() => void discard()}>Discard</Button></View>
     </Dialog>
   </View></ShortcutContext.Provider></ThemeContext.Provider>;
 }

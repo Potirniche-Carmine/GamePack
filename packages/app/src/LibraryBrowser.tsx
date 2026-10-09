@@ -83,7 +83,7 @@ export function LibraryBrowser(props: LibraryBrowserProps) {
     {!compact && <View style={local.heading}>
       <Text numberOfLines={1} style={[local.headingTitle, {color: c.text}]}>{folder?.title || project?.title || 'Projects'}</Text>
       <View style={local.headingActions}>
-        {project ? <><Button quiet icon="folder" disabled={disabled || !!folder} onPress={props.onCreateFolder}>New folder</Button><Button primary icon="plus" shortcut="import" disabled={disabled} onPress={props.onImport}>Add video</Button></>
+        {project ? <>{!folder && <Button quiet icon="folder" disabled={disabled} onPress={props.onCreateFolder}>New folder</Button>}<Button primary icon="plus" shortcut="import" disabled={disabled} onPress={props.onImport}>Add video</Button></>
           : <Button primary icon="plus" shortcut="newProject" disabled={disabled} onPress={props.onNewProject}>New project</Button>}
       </View>
     </View>}

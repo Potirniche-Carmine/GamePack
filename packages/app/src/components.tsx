@@ -1,4 +1,4 @@
-import React, {createContext, useContext, useState, type ReactNode} from 'react';
+import React, {createContext, useContext, useState, useEffect, useRef, type ReactNode} from 'react';
 import {Platform, Pressable, Text, View, StyleSheet, type StyleProp, type ViewStyle, type GestureResponderEvent} from 'react-native';
 import type {Anchor, Comment} from './types';
 import {Icon, type IconName} from './Icon';
@@ -7,16 +7,18 @@ import {binding, shortcutLabel, type Keybindings} from './shortcuts';
 
 export const ShortcutContext = createContext<Keybindings>({});
 
-export function Button({children, onPress, disabled, active, primary, compact, label, style, icon, danger, expanded, shortcut, quiet}: {
+export function Button({children, onPress, disabled, active, primary, compact, label, style, icon, danger, expanded, shortcut, quiet, autoFocus}: {
   children?: ReactNode; icon?: IconName; danger?: boolean; expanded?: boolean; onPress?: () => void; disabled?: boolean; active?: boolean;
-  primary?: boolean; compact?: boolean; label?: string; style?: StyleProp<ViewStyle>; shortcut?: string; quiet?: boolean;
+  primary?: boolean; compact?: boolean; label?: string; style?: StyleProp<ViewStyle>; shortcut?: string; quiet?: boolean; autoFocus?: boolean;
 }) {
   const {styles: s, colors} = useTheme();
+  const target = useRef<View>(null);
+  useEffect(() => { if (autoFocus && !disabled) { const frame = requestAnimationFrame(() => target.current?.focus()); return () => cancelAnimationFrame(frame); } }, [autoFocus, disabled]);
   const bindings = useContext(ShortcutContext);
   const chord = shortcut ? binding(shortcut, bindings) : null;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  return <Pressable focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={chord ? shortcutLabel(chord, Platform.OS === 'macos') : undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
+  return <Pressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={chord ? shortcutLabel(chord, Platform.OS === 'macos') : undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
     onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     disabled={disabled} onPress={onPress} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
       hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && s.buttonPressed,
