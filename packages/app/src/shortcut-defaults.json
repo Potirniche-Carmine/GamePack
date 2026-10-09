@@ -13,8 +13,6 @@
   {"id":"start","label":"Go to beginning","group":"Playback","key":"Home","repeat":false},
   {"id":"end","label":"Go to end","group":"Playback","key":"End","repeat":false},
   {"id":"comment","label":"New comment","group":"Comments & drawing","key":"M","repeat":false},
-  {"id":"markIn","label":"Set comment start","group":"Comments & drawing","key":"I","repeat":false},
-  {"id":"markOut","label":"Set comment end","group":"Comments & drawing","key":"O","repeat":false},
   {"id":"submit","label":"Post comment","group":"Comments & drawing","key":"Mod+Enter","repeat":false},
   {"id":"pen","label":"Pen","group":"Comments & drawing","key":"P","repeat":false},
   {"id":"arrow","label":"Arrow","group":"Comments & drawing","key":"A","repeat":false},

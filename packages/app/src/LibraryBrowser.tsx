@@ -114,8 +114,8 @@ export function LibraryBrowser(props: LibraryBrowserProps) {
   const searching = !!query.trim();
   const emptyTitle = searching ? 'No matches' : !project ? 'No projects yet' : folder ? 'This folder is empty' : 'No videos yet';
   const contentWidth = Math.max(0, Math.min(1040, bounds.width - 64));
-  const columns = contentWidth < 560 ? 1 : contentWidth < 900 || contents.projects.length <= 2 ? 2 : 3;
-  const tileWidth = (contentWidth - (columns - 1) * 16) / columns;
+  const columns = contentWidth < 520 ? 1 : contentWidth < 820 ? 2 : 3;
+  const tileWidth = (contentWidth - (columns - 1) * 12) / columns;
   const search = <View style={[local.search, compact && local.compactSearch]}>
     <TextField accessibilityLabel={project ? 'Search videos and folders' : 'Search projects'} placeholder={project ? 'Search videos and folders' : 'Search projects'}
       value={query} onChangeText={value => {setQuery(value); setMenu(null);}} style={[local.searchField, {borderColor: c.separator}, !!query && local.searchWithClear]}
@@ -182,27 +182,27 @@ const local = StyleSheet.create({
   content: {paddingBottom: 32, gap: 4},
   compactContent: {paddingHorizontal: 10, paddingBottom: 16, gap: 2},
   emptyScroll: {flexGrow: 1},
-  grid: {flexDirection: 'row', flexWrap: 'wrap', gap: 16},
+  grid: {flexDirection: 'row', flexWrap: 'wrap', gap: 12},
   folderList: {gap: 4, marginBottom: 14},
   videoList: {paddingTop: 6},
   item: {borderRadius: 11},
-  tile: {height: 154, borderWidth: 1, borderRadius: 15, overflow: 'hidden'},
+  tile: {height: 72, borderWidth: 1, borderRadius: 11, overflow: 'hidden'},
   itemMain: {minWidth: 0, minHeight: 68, paddingLeft: 14, paddingRight: 52, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 10},
   compactMain: {minHeight: 40, paddingVertical: 8, paddingLeft: 9, paddingRight: 38, gap: 10},
-  tileMain: {height: 152, alignItems: 'flex-start', flexDirection: 'column', justifyContent: 'space-between', padding: 22, gap: 18},
+  tileMain: {height: 70, paddingLeft: 14, paddingRight: 46, paddingVertical: 12, gap: 12},
   itemIcon: {width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 11},
   compactIcon: {width: 18, height: 20, borderRadius: 0},
   tileIcon: {width: 40, height: 40},
   itemText: {flex: 1, minWidth: 0, gap: 4},
-  tileText: {flex: 0, paddingRight: 4},
+  tileText: {flex: 1, paddingRight: 0},
   itemTitle: {fontSize: 14, fontWeight: '500', lineHeight: 20, letterSpacing: -0.15},
-  tileTitle: {fontSize: 16, lineHeight: 22, letterSpacing: -0.25, fontWeight: '600'},
+  tileTitle: {fontSize: 14, lineHeight: 20, letterSpacing: -0.25, fontWeight: '600'},
   compactTitle: {fontSize: 12, lineHeight: 18},
   itemSubtitle: {fontSize: 12, lineHeight: 17},
   rowChevron: {marginRight: 6},
   optionsButton: {position: 'absolute', width: 32, height: 32, right: 8, top: 18, borderRadius: 8, alignItems: 'center', justifyContent: 'center'},
   compactOptions: {width: 28, height: 28, top: 6, right: 4},
-  tileOptions: {top: 26, right: 20},
+  tileOptions: {top: 19, right: 9},
   dots: {flexDirection: 'row', alignItems: 'center', gap: 3},
   dot: {height: 3, width: 3, borderRadius: 1.5},
   sectionHeader: {minHeight: 34, flexDirection: 'row', alignItems: 'center', paddingLeft: 9, gap: 4},

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {contentRect, normalizedPoint, notePosition, cardOrigin, cardAvailableHeight, clampCard, layoutNotePositions} from '../packages/app/src/spatial.ts';
+import {contentRect, normalizedPoint, notePosition, cardOrigin, cardAvailableHeight, clampCard, layoutNotePositions, pinnedCardOffset} from '../packages/app/src/spatial.ts';
 
 test('expanded conversations fit above transport in letterboxed and fullscreen views', () => {
   for (const view of [{width: 1200, height: 700}, {width: 1200, height: 360}]) {
@@ -129,4 +129,16 @@ test('new cards sit beside drawings while persisted placement wins and legacy no
   assert.deepEqual(notePosition({drawings, position: {x: .8, y: .6}}), {x: .8, y: .6});
   assert.notDeepEqual(notePosition({drawings: []}, 0), notePosition({drawings: []}, 1));
   assert.doesNotThrow(() => notePosition({drawings: [{samples: Array.from({length: 200000}, () => ({x: 900000, y: 800000}))}]}));
+});
+
+test('comment bubbles flip at the right edge and grow upward without changing their pin', async () => {
+  const view = {width: 1000, height: 700};
+  const pin = {x: 900, y: 500};
+  const short = pinnedCardOffset(pin, view, {width: 280, height: 100});
+  const tall = pinnedCardOffset(pin, view, {width: 280, height: 250});
+  assert.equal(short.x, -290);
+  assert.equal(tall.x, short.x);
+  assert.ok(pin.y + tall.y + 250 <= view.height - 82);
+  assert.deepEqual(pin, {x: 900, y: 500});
+  assert.equal(pinnedCardOffset({x: 200, y: 120}, view, {width: 280, height: 100}).x, 42);
 });

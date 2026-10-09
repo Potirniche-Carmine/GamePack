@@ -99,3 +99,11 @@ export function layoutNotePositions(notes: readonly PositionedNote[], rect: Rect
   });
   return positions;
 }
+
+/** Place the bubble beside a fixed pin, flipping left and lifting at the edges. */
+export function pinnedCardOffset(pin: Point, view: Size, card: Size, topInset = 16): Point {
+  const right = pin.x + 42;
+  const left = right + card.width <= view.width - 16 ? right : pin.x - card.width - 10;
+  return {x: clamp(left, 76, view.width - card.width - 16) - pin.x,
+    y: clamp(pin.y - 4, topInset, view.height - card.height - 82) - pin.y};
+}
