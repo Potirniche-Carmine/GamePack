@@ -1,5 +1,22 @@
 # Development verification
 
+## Workspace overhaul — October 9, 2026
+
+Verified with the signed macOS Release app, production JavaScript, AVPlayer, and Rust/SQLite in an isolated `GAMEPACK_HOME`. Local fixture media and screenshots are excluded from Git.
+
+- The application opens to projects. Native checks cover project and folder navigation, creating a folder, moving a video between folders, and the resulting empty folder. The moved location, profile, comments, and appearance survive restarting the app.
+- Light and dark screenshots were inspected for the video workspace, expanded on-video conversations, Settings, and the no-video project state. The dark discussion, initials profile, and fullscreen layout were also inspected. Evidence lives under ignored `artifacts/local/overhaul/`.
+- Clicking a timed comment expands its entire conversation, including replies to replies. A native reply posted through Command–Return retains its full text and correct parent. Individual and global sidebar disclosure work, and collapsed cards retain a subtle reply indicator.
+- Coincident timeline markers group without hiding comments; clicking a group opens the discussion.
+- Native playback, drawing-tool shortcuts, ellipse capture, posting, fullscreen entry, and returning from fullscreen to projects were exercised. The drawing toolbar remains below the fullscreen header.
+- A comment with a native ellipse was left through the folder breadcrumb and reopened with its complete text and drawing, then posted. Empty drawing-tool selections do not reopen as unfinished work.
+- Profile editing updates the initials avatar, and appearance settings persist. Confirmation dialogs focus Cancel and disable the background controls; Escape returns to the library without applying deletion.
+- Theme switching with expanded conversations exposed a React Native macOS shadow-color lifetime crash. Comment cards and drawing controls now use borders; repeated light/dark switches with the conversations mounted pass in the rebuilt native app.
+- SQLite reports `integrity_check = ok`, schema version 4. Folder migration and removal, cross-project move rejection, immutable comment preservation, Unicode initials, reply traversal, folder-scoped navigation, and unfinished-comment selection have automated coverage. TypeScript, 47 UI/domain tests, 20 Rust contract tests, Rust formatting, strict Clippy, the macOS build, and deep signature verification pass.
+- Installed the verified build under `~/.gamepack/app/GamePack.app`. Its JavaScript SHA-256 matches the tested build and deep signature validation passes. The existing user process was left running; relaunch GamePack to load the update.
+
+Windows runtime and screenshot verification remain outstanding; the shared React Native interface and Rust changes have not been built on a Windows machine in this iteration. Hosted workflows remain disabled and no release was created.
+
 ## Comment hierarchy and drawing controls — October 8, 2026
 
 Verified with a signed macOS Release build in a separate app and an isolated `GAMEPACK_HOME` copied from the local library.

@@ -46,7 +46,7 @@ export function createStyles(c: Colors) { return StyleSheet.create({
   transportSpacer: {flex: 1},
   statusRow: {minHeight: 29, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 12},
   status: {color: c.muted, fontSize: 11, flex: 1},
-  toolBar: {position: 'absolute', left: 16, top: 20, padding: 6, borderWidth: 1, borderColor: c.separator, backgroundColor: c.panel, borderRadius: 16, alignItems: 'center', gap: 5, shadowColor: '#000000', shadowOffset: {width: 0, height: 3}, shadowOpacity: 0.12, shadowRadius: 14},
+  toolBar: {position: 'absolute', left: 16, top: 20, padding: 6, borderWidth: 1, borderColor: c.separator, backgroundColor: c.panel, borderRadius: 16, alignItems: 'center', gap: 5},
   toolDivider: {height: 20, width: 1, backgroundColor: c.line, marginHorizontal: 5},
   swatch: {height: 30, width: 30, borderRadius: 13, borderWidth: 2, borderColor: 'transparent', padding: 3},
   swatchSelected: {borderColor: c.text},

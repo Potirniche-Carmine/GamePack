@@ -44,8 +44,7 @@ function NoteCard({note, comments, expanded, color, number, disabled, profileNam
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const replyLabel = replies.length ? `, ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}` : '';
-  return <View style={[local.card, {backgroundColor: colors.panel, borderColor: hovered || expanded ? colors.separator : colors.panel,
-    shadowOpacity: dark ? 0.24 : 0.12}, disabled && {opacity: 0.6}]}>
+  return <View style={[local.card, {backgroundColor: colors.panel, borderColor: hovered || expanded ? colors.line : colors.separator}, disabled && {opacity: 0.6}]}>
     <Pressable accessibilityRole="button" accessibilityLabel={`Comment by ${note.name_at_posting} at ${anchorLabel(note.anchor)}${replyLabel}: ${note.text || 'Drawing'}`}
       accessibilityState={{expanded, disabled}} disabled={disabled}
       onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
@@ -99,7 +98,7 @@ const local = StyleSheet.create({
   notesLarge: {top: 88, right: 28, width: 366, bottom: 112},
   scroll: {flexGrow: 0},
   noteList: {gap: 10, padding: 2},
-  card: {borderRadius: 16, borderWidth: 1, shadowColor: '#000000', shadowOffset: {width: 0, height: 5}, shadowRadius: 14},
+  card: {borderRadius: 16, borderWidth: 1},
   noteBody: {padding: 14, borderRadius: 15},
   noteHeader: {flexDirection: 'row', alignItems: 'center', gap: 9},
   noteIdentity: {minWidth: 0, flex: 1, gap: 3},
