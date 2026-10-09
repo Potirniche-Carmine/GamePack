@@ -1,9 +1,10 @@
-import React, {createContext, useContext, useState, useEffect, useRef, type ReactNode} from 'react';
-import {Platform, Pressable, Text, View, StyleSheet, type StyleProp, type ViewStyle, type GestureResponderEvent} from 'react-native';
+import React, {createContext, forwardRef, useContext, useState, useEffect, useRef, type ReactNode} from 'react';
+import {Platform, Text, TextInput, View, StyleSheet, type TextInputProps, type TextStyle, type StyleProp, type ViewStyle, type GestureResponderEvent} from 'react-native';
 import type {Anchor, Comment} from './types';
 import {Icon, type IconName} from './Icon';
 import {useTheme} from './theme';
 import {binding, shortcutLabel, type Keybindings} from './shortcuts';
+import {MotionPressable} from './motion';
 
 export const ShortcutContext = createContext<Keybindings>({});
 
@@ -18,15 +19,38 @@ export function Button({children, onPress, disabled, active, primary, compact, l
   const chord = shortcut ? binding(shortcut, bindings) : null;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  return <Pressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={chord ? shortcutLabel(chord, Platform.OS === 'macos') : undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
+  return <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={chord ? shortcutLabel(chord, Platform.OS === 'macos') : undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
     onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     disabled={disabled} onPress={onPress} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
-      hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && s.buttonPressed,
+      hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && !primary && {backgroundColor: colors.inset},
       disabled && s.buttonDisabled, style, focused && s.focusRing]}>
     {!!icon && <Icon name={icon} color={disabled ? colors.faint : danger ? colors.danger : primary ? colors.primaryText : active ? colors.accentText : colors.text} />}
     {children !== undefined && <Text numberOfLines={1} style={[s.buttonText, primary && s.buttonPrimaryText, active && s.accentText, danger && {color: colors.danger}, disabled && s.disabledText]}>{children}</Text>}
-  </Pressable>;
+  </MotionPressable>;
 }
+
+const textStyleKeys = new Set(['color', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'fontVariant', 'letterSpacing', 'lineHeight', 'textAlign', 'textDecorationLine', 'textDecorationStyle', 'textDecorationColor', 'textTransform', 'writingDirection', 'includeFontPadding', 'textAlignVertical']);
+
+/** Keep the native editor inside an app-owned field; macOS draws no blue bezel. */
+export const TextField = forwardRef<TextInput, TextInputProps & {inputStyle?: StyleProp<TextStyle>}>(function TextField({style, inputStyle, onFocus, onBlur, multiline, editable, ...props}, ref) {
+  const {colors} = useTheme();
+  const [focused, setFocused] = useState(false);
+  const flat = StyleSheet.flatten(style) || {};
+  const outer: Record<string, unknown> = {};
+  const text: Record<string, unknown> = {};
+  Object.entries(flat).forEach(([key, value]) => { (textStyleKeys.has(key) ? text : outer)[key] = value; });
+  const focusProps = Platform.OS === 'macos' ? {enableFocusRing: false} : {};
+  return <View style={[{minHeight: 40, borderWidth: 1, borderColor: colors.line, borderRadius: 9, backgroundColor: colors.input,
+    paddingHorizontal: 12, justifyContent: multiline ? 'flex-start' : 'center'}, outer,
+    focused && {borderColor: colors.selectedLine}]}>
+    <TextInput {...props} {...focusProps} ref={ref} editable={editable} multiline={multiline}
+      placeholderTextColor={props.placeholderTextColor ?? colors.faint}
+      onFocus={event => { setFocused(true); onFocus?.(event); }} onBlur={event => { setFocused(false); onBlur?.(event); }}
+      style={[{color: colors.text, fontSize: 14, padding: 0, margin: 0, borderWidth: 0, backgroundColor: 'transparent',
+        minHeight: multiline ? 64 : 20, flexShrink: 1, textAlignVertical: multiline ? 'top' : 'center'}, text, inputStyle]} />
+  </View>;
+});
+export const AppTextInput = TextField;
 
 export function Empty({title, children, action}: {title?: string; children?: ReactNode; action?: ReactNode}) {
   const {styles: s} = useTheme();
