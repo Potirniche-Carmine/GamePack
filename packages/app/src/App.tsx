@@ -838,7 +838,7 @@ export default function App() {
             </>}
           </View>
         </ThemeContext.Provider>
-        {!presenting && <ReviewTimeline time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />}
+        {!presenting && <ReviewTimeline time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => leaveDraft(() => { setDiscussionVisible(true); setLibraryVisible(false); selectCommentNow(items[0]); })} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />}
         </>}
         {!!busy && <View style={s.statusRow}><Text style={s.status}>{busy}</Text></View>}
       </View>
