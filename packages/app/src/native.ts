@@ -9,6 +9,7 @@ type NativeBridge = {
   configureShortcuts(chords: string[], recording: boolean, typingShortcut: string): void;
   setAppearance(theme: ThemeChoice): void;
   setFullScreen(enabled: boolean): void;
+  measureCommentInput?(reactTag: number): Promise<number | null>;
 };
 
 function bridge(): NativeBridge {
@@ -24,6 +25,7 @@ export async function videoThumbnails(path: string, mediaId: string): Promise<st
 }
 export function setAppearance(theme: ThemeChoice): void { bridge().setAppearance(theme); }
 export function setFullScreen(enabled: boolean): void { bridge().setFullScreen(enabled); }
+export async function measureCommentInput(reactTag: number | null): Promise<number | null> { return reactTag === null ? null : await bridge().measureCommentInput?.(reactTag) ?? null; }
 export async function command<T>(_root: string, name: string, fields: Record<string, unknown> = {}): Promise<T> {
   // The native bridge resolves GAMEPACK_HOME and passes root separately to Rust.
   const raw = await bridge().command(JSON.stringify({command: name, ...fields}));

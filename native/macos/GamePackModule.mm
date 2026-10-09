@@ -1,5 +1,8 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
+#import <React/RCTBridge.h>
+#import <React/RCTUIManager.h>
+#import <React/RCTBaseTextInputView.h>
 #import <AppKit/AppKit.h>
 #import <AVFoundation/AVFoundation.h>
 #include "gamepack-core/src/lib.rs.h"
@@ -61,6 +64,36 @@
 }
 RCT_EXPORT_METHOD(configureShortcuts:(NSArray<NSString *> *)chords recording:(BOOL)recording typingShortcut:(NSString *)typingShortcut) {
   dispatch_async(dispatch_get_main_queue(), ^{ self->_shortcuts = [NSSet setWithArray:chords]; self->_recordShortcut = recording; self->_typingShortcut = typingShortcut; });
+}
+// AppKit's autoresizing can leave the document above the clip view after Yoga
+// changes the editor height. Restore its origin without moving the caret.
+RCT_REMAP_METHOD(measureCommentInput, measureCommentInput:(nonnull NSNumber *)reactTag resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSView *view = [self.bridge.uiManager viewForReactTag:reactTag];
+    if (![view isKindOfClass:RCTBaseTextInputView.class]) { resolve(nil); return; }
+    [view layoutSubtreeIfNeeded];
+    id backed = [(RCTBaseTextInputView *)view backedTextInputView];
+    if (![backed isKindOfClass:NSTextView.class]) { resolve(nil); return; }
+    NSTextView *text = backed;
+    [text setFrameOrigin:NSZeroPoint];
+    NSScrollView *scroll = text.enclosingScrollView;
+    NSSize viewport = scroll.contentView.bounds.size;
+    // The live NSTextContainer is clipped to the current input height. Measure
+    // its attributed text in an unbounded container using the same native font.
+    NSTextStorage *storage = [[NSTextStorage alloc] initWithAttributedString:text.textStorage];
+    NSLayoutManager *layout = [NSLayoutManager new];
+    NSTextContainer *container = [[NSTextContainer alloc] initWithContainerSize:NSMakeSize(MAX(1, viewport.width - text.textContainerInset.width * 2), CGFLOAT_MAX)];
+    container.lineFragmentPadding = text.textContainer.lineFragmentPadding;
+    [storage addLayoutManager:layout]; [layout addTextContainer:container];
+    [layout ensureLayoutForTextContainer:container];
+    CGFloat contentHeight = [layout usedRectForTextContainer:container].size.height + text.textContainerInset.height * 2;
+    if (scroll && contentHeight <= viewport.height + 1) {
+      [scroll.contentView scrollToPoint:NSZeroPoint];
+      [scroll reflectScrolledClipView:scroll.contentView];
+      scroll.hasVerticalScroller = NO;
+    }
+    resolve(@(ceil(contentHeight) + 4));
+  });
 }
 RCT_EXPORT_METHOD(setFullScreen:(BOOL)enabled) {
   dispatch_async(dispatch_get_main_queue(), ^{
