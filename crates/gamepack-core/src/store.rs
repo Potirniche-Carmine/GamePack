@@ -1,4 +1,4 @@
-use crate::model::{Comment, Draft, Profile, Project, Request, Settings, Theme, Video};
+use crate::model::{Comment, Draft, Folder, Profile, Project, Request, Settings, Theme, Video};
 use crate::validation;
 use anyhow::{ensure, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -85,17 +85,32 @@ impl Store {
         )?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         ensure!(
-            version <= 2,
+            version <= 4,
             "This database was created by a newer GamePack version"
         );
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(SCHEMA)?;
+        if version < 4 {
+            // Inspect the column as well as the version so an interrupted older
+            // development migration can safely reopen without altering records.
+            let has_folder: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('videos') WHERE name='folder_id')",
+                [],
+                |row| row.get(0),
+            )?;
+            if !has_folder {
+                tx.execute_batch("ALTER TABLE videos ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL;")?;
+            }
+        }
+        tx.execute_batch(include_str!("../../../schemas/local-v4.sql"))?;
         tx.execute(
             "INSERT OR IGNORE INTO profile(singleton,author_id,name) VALUES(1,?1,'')",
             [id()],
         )?;
-        tx.execute("INSERT INTO projects(id,title,created_at) SELECT ?1,'Review library',?2 WHERE NOT EXISTS(SELECT 1 FROM projects)", params![id(), now()?])?;
-        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); PRAGMA user_version=2;")?;
+        if version == 0 {
+            tx.execute("INSERT INTO projects(id,title,created_at) SELECT ?1,'Review library',?2 WHERE NOT EXISTS(SELECT 1 FROM projects)", params![id(), now()?])?;
+        }
+        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); INSERT OR IGNORE INTO preferences(singleton) VALUES(1); PRAGMA user_version=4;")?;
         tx.commit()?;
         Ok(Self { root, db })
     }
@@ -108,8 +123,18 @@ impl Store {
                     "UPDATE settings SET theme=?1 WHERE singleton=1",
                     [theme.as_str()],
                 )?;
-                value(Settings { theme })
+                value(self.settings()?)
             }
+            Request::SetPreferences {
+                keybindings,
+                pause_after_drawing,
+            } => {
+                crate::shortcuts::validate(&keybindings)?;
+                self.db.execute("UPDATE preferences SET keybindings=?1,pause_after_drawing=?2 WHERE singleton=1", params![serde_json::to_string(&keybindings)?, pause_after_drawing])?;
+                value(self.settings()?)
+            }
+            Request::DeleteVideo { video_id } => self.delete_scope(&video_id, false),
+            Request::DeleteProject { project_id } => self.delete_scope(&project_id, true),
             Request::SetProfile { name } => {
                 validation::label(&name, "Display name")?;
                 self.db.execute(
@@ -131,6 +156,94 @@ impl Store {
                 )?;
                 value(project)
             }
+            Request::RenameProject { project_id, title } => {
+                validation::identifier(&project_id)?;
+                validation::label(&title, "Project title")?;
+                self.atomic(|store| {
+                    let changed = store.db.execute(
+                        "UPDATE projects SET title=?1 WHERE id=?2",
+                        params![title.trim(), project_id],
+                    )?;
+                    ensure!(changed == 1, "Project does not exist");
+                    value(store.db.query_row(
+                        "SELECT id,title,created_at FROM projects WHERE id=?1",
+                        [project_id],
+                        |row| {
+                            Ok(Project {
+                                id: row.get(0)?,
+                                title: row.get(1)?,
+                                created_at: row.get(2)?,
+                            })
+                        },
+                    )?)
+                })
+            }
+            Request::CreateFolder { project_id, title } => {
+                validation::identifier(&project_id)?;
+                validation::label(&title, "Folder title")?;
+                self.atomic(|store| {
+                    let exists: bool = store.db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1)",
+                        [&project_id],
+                        |row| row.get(0),
+                    )?;
+                    ensure!(exists, "Project does not exist");
+                    let folder = Folder {
+                        id: id(),
+                        project_id,
+                        title: title.trim().into(),
+                        created_at: now()?,
+                    };
+                    store.db.execute(
+                        "INSERT INTO folders(id,project_id,title,created_at) VALUES(?1,?2,?3,?4)",
+                        params![
+                            folder.id,
+                            folder.project_id,
+                            folder.title,
+                            folder.created_at
+                        ],
+                    )?;
+                    value(folder)
+                })
+            }
+            Request::RenameFolder { folder_id, title } => {
+                validation::identifier(&folder_id)?;
+                validation::label(&title, "Folder title")?;
+                self.atomic(|store| {
+                    let changed = store.db.execute(
+                        "UPDATE folders SET title=?1 WHERE id=?2",
+                        params![title.trim(), folder_id],
+                    )?;
+                    ensure!(changed == 1, "Folder does not exist");
+                    value(store.folder(&folder_id)?)
+                })
+            }
+            Request::DeleteFolder { folder_id } => {
+                validation::identifier(&folder_id)?;
+                let changed = self
+                    .db
+                    .execute("DELETE FROM folders WHERE id=?1", [folder_id])?;
+                ensure!(changed == 1, "Folder does not exist");
+                Ok(Value::Null)
+            }
+            Request::MoveVideo {
+                video_id,
+                folder_id,
+            } => self.atomic(|store| {
+                let video = store.video(&video_id)?;
+                if let Some(folder_id) = &folder_id {
+                    let folder = store.folder(folder_id)?;
+                    ensure!(
+                        folder.project_id == video.project_id,
+                        "A video folder must belong to the same project"
+                    );
+                }
+                store.db.execute(
+                    "UPDATE videos SET folder_id=?1 WHERE id=?2",
+                    params![folder_id, video_id],
+                )?;
+                value(store.video(&video_id)?)
+            }),
             Request::ImportVideo {
                 path,
                 project_id,
@@ -200,6 +313,31 @@ impl Store {
         }
     }
 
+    fn delete_scope(&self, scope: &str, project: bool) -> Result<Value> {
+        validation::identifier(scope)?;
+        self.atomic(|store| {
+            let table = if project { "projects" } else { "videos" };
+            let exists: bool = store.db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?1)"), [scope], |row| row.get(0))?;
+            ensure!(exists, "The item no longer exists");
+            let column = if project { "project_id" } else { "video_id" };
+            // Only this explicit library deletion may remove immutable posts.
+            // The write lock and transactional DDL restore the guard on success
+            // or rollback. Other connections cannot observe it being absent.
+            store.db.execute_batch("DROP TRIGGER comments_no_delete; PRAGMA defer_foreign_keys=ON;")?;
+            store.db.execute(&format!("DELETE FROM drafts WHERE {column}=?1"), [scope])?;
+            store.db.execute(&format!("DELETE FROM comments WHERE {column}=?1"), [scope])?;
+            if project {
+                store.db.execute("DELETE FROM videos WHERE project_id=?1", [scope])?;
+                store.db.execute("DELETE FROM folders WHERE project_id=?1", [scope])?;
+            }
+            store.db.execute(&format!("DELETE FROM {table} WHERE id=?1"), [scope])?;
+            store.db.execute_batch("CREATE TRIGGER comments_no_delete BEFORE DELETE ON comments BEGIN SELECT RAISE(ABORT,'Posted comments are immutable'); END;")?;
+            // Content-addressed media remains available for re-import and for
+            // references in other projects. Never touch users' source files.
+            Ok(Value::Null)
+        })
+    }
+
     fn profile(&self) -> Result<Profile> {
         Ok(self.db.query_row(
             "SELECT author_id,name FROM profile WHERE singleton=1",
@@ -219,7 +357,14 @@ impl Store {
                 .query_row("SELECT theme FROM settings WHERE singleton=1", [], |row| {
                     row.get(0)
                 })?;
+        let (bindings, pause_after_drawing): (String, bool) = self.db.query_row(
+            "SELECT keybindings,pause_after_drawing FROM preferences WHERE singleton=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
         Ok(Settings {
+            keybindings: serde_json::from_str(&bindings)?,
+            pause_after_drawing,
             theme: match theme.as_str() {
                 "system" => Theme::System,
                 "light" => Theme::Light,
@@ -231,8 +376,20 @@ impl Store {
 
     fn video(&self, video_id: &str) -> Result<Video> {
         validation::identifier(video_id)?;
-        let video = self.db.query_row("SELECT v.id,v.project_id,v.media_id,v.title,m.filename,m.byte_size,m.duration_us,m.width,m.height FROM videos v JOIN media m ON m.id=v.media_id WHERE v.id=?1", [video_id], video_row).optional()?.context("Video does not exist; import it before creating a review")?;
+        let video = self.db.query_row("SELECT v.id,v.project_id,v.media_id,v.title,m.filename,m.byte_size,m.duration_us,m.width,m.height,v.folder_id FROM videos v JOIN media m ON m.id=v.media_id WHERE v.id=?1", [video_id], video_row).optional()?.context("Video does not exist; import it before creating a review")?;
         self.resolve_video_path(video)
+    }
+
+    fn folder(&self, folder_id: &str) -> Result<Folder> {
+        validation::identifier(folder_id)?;
+        self.db
+            .query_row(
+                "SELECT id,project_id,title,created_at FROM folders WHERE id=?1",
+                [folder_id],
+                folder_row,
+            )
+            .optional()?
+            .context("Folder does not exist")
     }
 
     fn resolve_video_path(&self, mut video: Video) -> Result<Video> {
@@ -272,10 +429,17 @@ impl Store {
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
         let videos = {
-            let mut statement = self.db.prepare("SELECT v.id,v.project_id,v.media_id,v.title,m.filename,m.byte_size,m.duration_us,m.width,m.height FROM videos v JOIN media m ON m.id=v.media_id ORDER BY v.created_at,v.id")?;
+            let mut statement = self.db.prepare("SELECT v.id,v.project_id,v.media_id,v.title,m.filename,m.byte_size,m.duration_us,m.width,m.height,v.folder_id FROM videos v JOIN media m ON m.id=v.media_id ORDER BY v.created_at,v.id")?;
             let rows = statement.query_map([], video_row)?;
             rows.map(|row| self.resolve_video_path(row?))
                 .collect::<Result<Vec<_>>>()?
+        };
+        let folders = {
+            let mut statement = self.db.prepare(
+                "SELECT id,project_id,title,created_at FROM folders ORDER BY created_at,id",
+            )?;
+            let rows = statement.query_map([], folder_row)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
         let drafts = {
             let mut statement = self.db.prepare("SELECT body FROM drafts ORDER BY rowid")?;
@@ -301,7 +465,7 @@ impl Store {
         })
         .sum::<u64>();
         Ok(
-            json!({"profile": self.profile()?, "settings": self.settings()?, "projects": projects, "videos": videos, "comments": self.load_comments()?, "drafts": drafts, "storage": {"root": self.root.to_str().context("Data path is not valid UTF-8")?, "managed_bytes": managed_bytes, "database_bytes": database_bytes}}),
+            json!({"profile": self.profile()?, "settings": self.settings()?, "projects": projects, "folders": folders, "videos": videos, "comments": self.load_comments()?, "drafts": drafts, "storage": {"root": self.root.to_str().context("Data path is not valid UTF-8")?, "managed_bytes": managed_bytes, "database_bytes": database_bytes}}),
         )
     }
 
@@ -538,6 +702,7 @@ fn video_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Video> {
     Ok(Video {
         id: row.get(0)?,
         project_id: row.get(1)?,
+        folder_id: row.get(9)?,
         media_id: row.get(2)?,
         title: row.get(3)?,
         path: row.get(4)?,
@@ -545,6 +710,15 @@ fn video_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Video> {
         duration_us: row.get(6)?,
         width: row.get(7)?,
         height: row.get(8)?,
+    })
+}
+
+fn folder_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Folder> {
+    Ok(Folder {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        title: row.get(2)?,
+        created_at: row.get(3)?,
     })
 }
 

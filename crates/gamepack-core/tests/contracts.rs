@@ -67,19 +67,28 @@ impl Fixture {
 fn themes_are_strict_persisted_and_migrate_existing_libraries() {
     let fixture = Fixture::new();
     let initial = fixture.boot();
-    assert_eq!(initial["settings"], json!({"theme":"system"}));
+    assert_eq!(
+        initial["settings"],
+        json!({"theme":"system","keybindings":{},"pause_after_drawing":true})
+    );
     // Recreate an actual pre-settings library, retaining its existing records.
     let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
     db.execute_batch("DROP TABLE settings; PRAGMA user_version=1;")
         .unwrap();
     drop(db);
     let migrated = fixture.boot();
-    assert_eq!(migrated["settings"], json!({"theme":"system"}));
+    assert_eq!(
+        migrated["settings"],
+        json!({"theme":"system","keybindings":{},"pause_after_drawing":true})
+    );
     assert_eq!(migrated["profile"], initial["profile"]);
     assert_eq!(migrated["videos"], initial["videos"]);
     for theme in ["dark", "light", "system"] {
         let saved = success(fixture.root(), json!({"command":"set_theme","theme":theme}));
-        assert_eq!(saved, json!({"theme":theme}));
+        assert_eq!(
+            saved,
+            json!({"theme":theme,"keybindings":{},"pause_after_drawing":true})
+        );
         assert_eq!(fixture.boot()["settings"], saved);
     }
     for invalid in [
@@ -98,11 +107,14 @@ fn themes_are_strict_persisted_and_migrate_existing_libraries() {
         fixture.root(),
         json!({"command":"set_theme","theme":"dark","extra":1}),
     );
-    assert_eq!(fixture.boot()["settings"], json!({"theme":"system"}));
+    assert_eq!(
+        fixture.boot()["settings"],
+        json!({"theme":"system","keybindings":{},"pause_after_drawing":true})
+    );
     let other = TempDir::new().unwrap();
     assert_eq!(
         success(other.path(), json!({"command":"bootstrap"}))["settings"],
-        json!({"theme":"system"})
+        json!({"theme":"system","keybindings":{},"pause_after_drawing":true})
     );
 }
 
@@ -517,4 +529,96 @@ fn storage_symlinks_cannot_redirect_managed_writes() {
     std::os::unix::fs::symlink(outside.path(), directory.path().join("media")).unwrap();
     assert!(failure(directory.path(), json!({"command":"bootstrap"})).contains("symlink"));
     assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn preferences_persist_and_reject_conflicts_without_partial_writes() {
+    let fixture = Fixture::new();
+    let save = |bindings| {
+        request(
+            fixture.root(),
+            json!({"command":"set_preferences","keybindings":bindings,"pause_after_drawing":false}),
+        )
+    };
+    assert_eq!(save(json!({"play":"Shift+P"}))["ok"], true);
+    assert_eq!(fixture.boot()["settings"]["keybindings"]["play"], "Shift+P");
+    assert_eq!(fixture.boot()["settings"]["pause_after_drawing"], false);
+    for invalid in [
+        json!({"play":"J"}),
+        json!({"play":"Mod+Q"}),
+        json!({"play":"Escape"}),
+        json!({"submit":"P"}),
+        json!({"missing":"U"}),
+        json!({"play":"Shift+Mod+U"}),
+    ] {
+        assert_eq!(save(invalid)["ok"], false);
+        assert_eq!(fixture.boot()["settings"]["keybindings"]["play"], "Shift+P");
+    }
+    assert_eq!(save(json!({"play":"P", "pen":null}))["ok"], true);
+    success(
+        fixture.root(),
+        json!({"command":"set_theme","theme":"dark"}),
+    );
+    assert_eq!(fixture.boot()["settings"]["keybindings"]["play"], "P");
+    assert_eq!(save(json!({}))["ok"], true);
+}
+
+#[test]
+fn deleting_scope_removes_threads_and_drafts_but_preserves_other_projects() {
+    let fixture = Fixture::new();
+    fixture.named("Reviewer");
+    fixture.save(fixture.draft("parent"));
+    fixture.post("parent");
+    let mut reply = fixture.draft("reply");
+    reply["parent_comment_id"] = json!("parent");
+    fixture.save(reply);
+    fixture.post("reply");
+    fixture.save(fixture.draft("unfinished"));
+    let other = success(
+        fixture.root(),
+        json!({"command":"create_project","title":"Other"}),
+    );
+    let shared = success(
+        fixture.root(),
+        json!({"command":"import_video","project_id":other["id"],"path":fixture.source.path().join("clip.mp4")}),
+    );
+    success(
+        fixture.root(),
+        json!({"command":"delete_video","video_id":fixture.video["id"]}),
+    );
+    let state = fixture.boot();
+    assert_eq!(state["comments"], json!([]));
+    assert_eq!(state["drafts"], json!([]));
+    assert_eq!(state["videos"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        success(
+            fixture.root(),
+            json!({"command":"verify_video","video_id":shared["id"]})
+        )["valid"],
+        true
+    );
+    assert!(fixture.source.path().join("clip.mp4").exists());
+    let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name='comments_no_delete'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    success(
+        fixture.root(),
+        json!({"command":"delete_project","project_id":other["id"]}),
+    );
+    success(
+        fixture.root(),
+        json!({"command":"delete_project","project_id":fixture.project}),
+    );
+    assert_eq!(fixture.boot()["projects"], json!([]));
+    failure(
+        fixture.root(),
+        json!({"command":"delete_project","project_id":fixture.project}),
+    );
 }

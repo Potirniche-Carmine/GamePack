@@ -29,6 +29,8 @@ impl Theme {
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     pub theme: Theme,
+    pub keybindings: std::collections::BTreeMap<String, Option<String>>,
+    pub pause_after_drawing: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,9 +43,20 @@ pub struct Project {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct Folder {
+    pub id: String,
+    pub project_id: String,
+    pub title: String,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Video {
     pub id: String,
     pub project_id: String,
+    #[serde(default)]
+    pub folder_id: Option<String>,
     pub media_id: String,
     pub title: String,
     pub path: String,
@@ -124,8 +137,37 @@ pub(crate) enum Request {
     SetTheme {
         theme: Theme,
     },
+    SetPreferences {
+        keybindings: std::collections::BTreeMap<String, Option<String>>,
+        pause_after_drawing: bool,
+    },
+    DeleteVideo {
+        video_id: String,
+    },
+    DeleteProject {
+        project_id: String,
+    },
     CreateProject {
         title: String,
+    },
+    RenameProject {
+        project_id: String,
+        title: String,
+    },
+    CreateFolder {
+        project_id: String,
+        title: String,
+    },
+    RenameFolder {
+        folder_id: String,
+        title: String,
+    },
+    DeleteFolder {
+        folder_id: String,
+    },
+    MoveVideo {
+        video_id: String,
+        folder_id: Option<String>,
     },
     ImportVideo {
         path: String,

@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS profile (
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at INTEGER NOT NULL
 );
+-- v4: one level of folders inside each project. Removing a folder keeps videos.
+CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
+    title TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS folders_project ON folders(project_id,created_at,id);
 CREATE TABLE IF NOT EXISTS media (
     id TEXT PRIMARY KEY, filename TEXT NOT NULL UNIQUE,
     byte_size INTEGER NOT NULL CHECK(byte_size>0),
@@ -42,3 +48,10 @@ WHEN EXISTS(SELECT 1 FROM comments WHERE id=NEW.id)
 BEGIN SELECT RAISE(ABORT,'Posted comments are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS comments_no_delete BEFORE DELETE ON comments
 BEGIN SELECT RAISE(ABORT,'Posted comments are immutable'); END;
+
+-- v3: application preferences remain local to this library.
+CREATE TABLE IF NOT EXISTS preferences (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    keybindings TEXT NOT NULL DEFAULT '{}',
+    pause_after_drawing INTEGER NOT NULL DEFAULT 1 CHECK(pause_after_drawing IN (0,1))
+);

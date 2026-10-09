@@ -2,6 +2,7 @@
 mod evaluator;
 mod json;
 pub mod model;
+mod shortcuts;
 mod store;
 mod validation;
 
