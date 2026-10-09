@@ -1,18 +1,28 @@
-import React, {useState, type ReactNode} from 'react';
+import React, {createContext, useContext, useState, type ReactNode} from 'react';
 import {Platform, Pressable, Text, View, StyleSheet, type StyleProp, type ViewStyle, type GestureResponderEvent} from 'react-native';
 import type {Anchor, Comment} from './types';
+import {Icon, type IconName} from './Icon';
 import {useTheme} from './theme';
+import {binding, shortcutLabel, type Keybindings} from './shortcuts';
 
-export function Button({children, onPress, disabled, active, primary, compact, label, style}: {
-  children: ReactNode; onPress?: () => void; disabled?: boolean; active?: boolean;
-  primary?: boolean; compact?: boolean; label?: string; style?: StyleProp<ViewStyle>;
+export const ShortcutContext = createContext<Keybindings>({});
+
+export function Button({children, onPress, disabled, active, primary, compact, label, style, icon, danger, expanded, shortcut, quiet}: {
+  children?: ReactNode; icon?: IconName; danger?: boolean; expanded?: boolean; onPress?: () => void; disabled?: boolean; active?: boolean;
+  primary?: boolean; compact?: boolean; label?: string; style?: StyleProp<ViewStyle>; shortcut?: string; quiet?: boolean;
 }) {
-  const {styles: s} = useTheme();
-  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled: !!disabled, selected: !!active}}
-    disabled={disabled} onPress={onPress} style={({pressed}) => [s.button, compact && s.buttonCompact,
-      primary && s.buttonPrimary, active && s.buttonActive, pressed && !disabled && s.buttonPressed,
-      disabled && s.buttonDisabled, style]}>
-    <Text style={[s.buttonText, primary && s.buttonPrimaryText, active && s.accentText, disabled && s.disabledText]}>{children}</Text>
+  const {styles: s, colors} = useTheme();
+  const bindings = useContext(ShortcutContext);
+  const chord = shortcut ? binding(shortcut, bindings) : null;
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  return <Pressable focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={chord ? shortcutLabel(chord, Platform.OS === 'macos') : undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
+    onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+    disabled={disabled} onPress={onPress} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
+      hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && s.buttonPressed,
+      disabled && s.buttonDisabled, style, focused && s.focusRing]}>
+    {!!icon && <Icon name={icon} color={disabled ? colors.faint : danger ? colors.danger : primary ? colors.primaryText : active ? colors.accentText : colors.text} />}
+    {children !== undefined && <Text numberOfLines={1} style={[s.buttonText, primary && s.buttonPrimaryText, active && s.accentText, danger && {color: colors.danger}, disabled && s.disabledText]}>{children}</Text>}
   </Pressable>;
 }
 

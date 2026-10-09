@@ -16,10 +16,11 @@ try {
   const source = new URL('../packages/app/src/', import.meta.url);
   for (const name of readdirSync(source).filter(name => name.endsWith('.ts'))) {
     const result = ts.transpileModule(readFileSync(new URL(name, source), 'utf8'), {
-      fileName: name, compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022},
+      fileName: name, compilerOptions: {module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022},
     });
     writeFileSync(join(output, name.replace(/\.ts$/, '.js')), result.outputText);
   }
+  writeFileSync(join(output, 'shortcut-defaults.json'), readFileSync(new URL('shortcut-defaults.json', source)));
   const tests = names.map(name => {
     const path = join(stage, 'tests', name);
     const source = readFileSync(new URL(name, directory), 'utf8')
