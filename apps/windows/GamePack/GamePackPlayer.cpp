@@ -19,6 +19,8 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   Grid root;
   MediaPlayerElement element;
   Canvas overlay;
+  ScaleTransform zoomTransform;
+  RectangleGeometry viewportClip;
   Windows::Media::Playback::MediaPlayer player;
   DispatcherTimer timer;
   Microsoft::ReactNative::ReactContext context;
@@ -30,7 +32,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   bool paused{true}, pauseOnDrawing{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{};
   uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
   int64_t pendingSeekTarget{}, stepFrames{1};
-  double frameRate{}, rate{1};
+  double frameRate{}, rate{1}, zoom{1};
   bool reverseSeek{};
   std::chrono::steady_clock::time_point reverseTick{};
   event_token seekCompletedToken{};
@@ -42,6 +44,8 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     root.Children().Append(overlay);
     element.AreTransportControlsEnabled(false);
     element.Stretch(Stretch::Uniform);
+    element.RenderTransform(zoomTransform);
+    root.Clip(viewportClip);
     player.AutoPlay(false);
     player.IsVideoFrameServerEnabled(false);
     element.SetMediaPlayer(player);
@@ -55,8 +59,20 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     auto session = player.PlaybackSession();
     double vw = session.NaturalVideoWidth(), vh = session.NaturalVideoHeight();
     if (vw <= 0 || vh <= 0 || w <= 0 || h <= 0) return Rect{0, 0, 0, 0};
-    double fit = std::min(w / vw, h / vh);
+    double fit = std::min(w / vw, h / vh) * zoom;
     return Rect{static_cast<float>((w-vw*fit)/2), static_cast<float>((h-vh*fit)/2), static_cast<float>(vw*fit), static_cast<float>(vh*fit)};
+  }
+  void UpdateViewport() {
+    double width=root.ActualWidth(), height=root.ActualHeight();
+    zoomTransform.CenterX(width/2); zoomTransform.CenterY(height/2);
+    zoomTransform.ScaleX(zoom); zoomTransform.ScaleY(zoom);
+    viewportClip.Rect(Rect{0,0,static_cast<float>(width),static_cast<float>(height)});
+  }
+  void SetZoom(double value, bool notify=false) {
+    value=std::isfinite(value) ? std::clamp(value,1.0,4.0) : 1;
+    if (std::abs(value-zoom)<0.00001) return;
+    Finish(); zoom=value; UpdateViewport(); Render();
+    if (notify) context.DispatchEvent(root,L"topZoom",JSValueObject{{"zoom",zoom}});
   }
   void ResetSeek() {
     ++seekGeneration;
@@ -151,10 +167,12 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
         if (auto p = weak.lock(); p && !p->disposed) p->Emit(true, "Windows could not decode this video: " + message);
       });
     }});
-    root.SizeChanged([weak](auto const&, auto const&) { if (auto self = weak.lock()) self->Render(); });
+    root.SizeChanged([weak](auto const&, auto const&) { if (auto self = weak.lock()) { self->UpdateViewport(); self->Render(); } });
     overlay.PointerPressed([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
-      if (auto self = weak.lock(); self && self->tool == L"pointer") {
-        auto p = args.GetCurrentPoint(self->overlay).Position();
+      if (auto self = weak.lock(); self && (self->tool == L"pointer" || self->tool == L"laser")) {
+        auto point = args.GetCurrentPoint(self->overlay);
+        if (!point.Properties().IsLeftButtonPressed() && point.PointerDevice().PointerDeviceType() == Windows::Devices::Input::PointerDeviceType::Mouse) return;
+        auto p = point.Position();
         self->context.DispatchEvent(self->root,L"topPointer",JSValueObject{{"x",p.X/std::max(1.0,self->root.ActualWidth())},{"y",p.Y/std::max(1.0,self->root.ActualHeight())}});
         args.Handled(true); return;
       }
@@ -185,6 +203,14 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     }});
     overlay.PointerCanceled([weak](auto const&, auto const&) { if (auto self=weak.lock()) self->Finish(); });
     overlay.PointerCaptureLost([weak](auto const&, auto const&) { if (auto self=weak.lock()) self->Finish(); });
+    overlay.PointerWheelChanged([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+      if (auto self=weak.lock(); self && !self->source.empty()) {
+        auto properties=args.GetCurrentPoint(self->overlay).Properties();
+        if (properties.IsHorizontalMouseWheel()) return;
+        self->SetZoom(self->zoom*std::pow(1.1,properties.MouseWheelDelta()/120.0),true);
+        args.Handled(true);
+      }
+    });
     root.Loaded([weak](auto const&, auto const&) { if (auto self=weak.lock()) self->timer.Start(); });
     root.Unloaded([weak](auto const&, auto const&) { if (auto self=weak.lock()) { self->timer.Stop(); self->Finish(); self->player.Pause(); } });
     timer.Start();
@@ -323,7 +349,7 @@ FrameworkElement PlayerManager::CreateView() noexcept {
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
-  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"pauseOnDrawing",T::Boolean},{L"rate",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String},{L"captureToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
+  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"pauseOnDrawing",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"strokeColor",T::String},{L"captureToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
   auto it=players.find(ViewKey(view)); if (it==players.end()) return;
@@ -356,6 +382,7 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
     }
     if (auto v=props.find("tool");v!=props.end()) { auto tool=to_hstring(v->second.AsString()); if (tool!=p->tool) p->Finish(); p->tool=tool; p->overlay.IsHitTestVisible(true); }
     if (auto v=props.find("strokeColor");v!=props.end()) p->color=to_hstring(v->second.AsString());
+    if (auto v=props.find("zoom");v!=props.end()) p->SetZoom(v->second.AsDouble());
     if (auto v=props.find("reviewEndUs");v!=props.end()) p->reviewEnd=v->second.AsInt64();
     if (auto v=props.find("stepFrames");v!=props.end()) p->stepFrames=v->second.AsInt64();
     if (auto v=props.find("stepToken");v!=props.end() && v->second.AsInt64()>0) {
@@ -388,7 +415,7 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
 }
 ConstantProviderDelegate PlayerManager::ExportedCustomDirectEventTypeConstants() noexcept {
   return [](IJSValueWriter const& writer) noexcept {
-    WriteValue(writer,JSValueObject{{"topDrawingStart",JSValueObject{{"registrationName","onDrawingStart"}}},{"topPointer",JSValueObject{{"registrationName","onPointer"}}},{"topTime",JSValueObject{{"registrationName","onTime"}}},{"topDrawing",JSValueObject{{"registrationName","onDrawing"}}},{"topCaptureFinished",JSValueObject{{"registrationName","onCaptureFinished"}}}});
+    WriteValue(writer,JSValueObject{{"topDrawingStart",JSValueObject{{"registrationName","onDrawingStart"}}},{"topPointer",JSValueObject{{"registrationName","onPointer"}}},{"topZoom",JSValueObject{{"registrationName","onZoom"}}},{"topTime",JSValueObject{{"registrationName","onTime"}}},{"topDrawing",JSValueObject{{"registrationName","onDrawing"}}},{"topCaptureFinished",JSValueObject{{"registrationName","onCaptureFinished"}}}});
   };
 }
 void PlayerManager::OnDropViewInstance(FrameworkElement const& view) noexcept {

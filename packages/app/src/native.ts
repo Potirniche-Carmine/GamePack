@@ -5,6 +5,7 @@ type NativeBridge = {
   command(request: string): Promise<string>;
   chooseVideo(): Promise<string | null>;
   dataDirectory(): Promise<string>;
+  thumbnails(path: string, mediaId: string): Promise<string[]>;
   configureShortcuts(chords: string[], recording: boolean, typingShortcut: string): void;
   setAppearance(theme: ThemeChoice): void;
   setFullScreen(enabled: boolean): void;
@@ -18,6 +19,9 @@ function bridge(): NativeBridge {
 
 export async function dataDirectory(): Promise<string> { return bridge().dataDirectory(); }
 export async function chooseVideo(): Promise<string | null> { return bridge().chooseVideo(); }
+export async function videoThumbnails(path: string, mediaId: string): Promise<string[]> {
+  try { return await bridge().thumbnails(path, mediaId); } catch { return []; }
+}
 export function setAppearance(theme: ThemeChoice): void { bridge().setAppearance(theme); }
 export function setFullScreen(enabled: boolean): void { bridge().setFullScreen(enabled); }
 export async function command<T>(_root: string, name: string, fields: Record<string, unknown> = {}): Promise<T> {
@@ -29,7 +33,7 @@ export async function command<T>(_root: string, name: string, fields: Record<str
 }
 
 export type PlayerProps = ViewProps & {
-  source: string; paused: boolean; pauseOnDrawing: boolean; rate: number; seekUs: number; seekToken: number;
+  source: string; paused: boolean; pauseOnDrawing: boolean; rate: number; zoom: number; seekUs: number; seekToken: number;
   reviewEndUs: number; sceneJson: string; tool: DrawingTool; strokeColor: string;
   captureToken: number; stepToken: number; stepFrames: number;
   onCaptureFinished: (event: NativeSyntheticEvent<CaptureFinished>) => void;
@@ -37,6 +41,7 @@ export type PlayerProps = ViewProps & {
   onDrawing: (event: NativeSyntheticEvent<{drawingJson: string}>) => void;
   onDrawingStart: (event: NativeSyntheticEvent<{time_us: number; paused: boolean}>) => void;
   onPointer: (event: NativeSyntheticEvent<{x: number; y: number}>) => void;
+  onZoom: (event: NativeSyntheticEvent<{zoom: number}>) => void;
 };
 export const GamePackPlayer = requireNativeComponent<PlayerProps>('GamePackPlayer');
 

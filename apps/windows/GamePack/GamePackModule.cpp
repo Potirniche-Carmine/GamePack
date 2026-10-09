@@ -2,6 +2,11 @@
 #include "GamePackModule.h"
 #include "GamePackPlayer.h"
 #include <fstream>
+#include <regex>
+#include <shlwapi.h>
+#include <winrt/Windows.Media.Editing.h>
+#include <winrt/Windows.Graphics.Imaging.h>
+#include <winrt/Windows.Storage.Streams.h>
 #include "gamepack-core/src/lib.rs.h"
 
 using namespace winrt;
@@ -133,6 +138,69 @@ void GamePackModule::SetFullScreen(bool enabled) noexcept {
     fullScreen=enabled;
     shortcutContext.EmitJSEvent(L"RCTDeviceEventEmitter",L"GamePackWindowState",JSValueObject{{"fullScreen",enabled}});
   });
+}
+static std::mutex thumbnailMutex;
+static std::string ThumbnailUri(std::filesystem::path const& path) {
+  std::wstring url(32768, L'\0');
+  DWORD length = static_cast<DWORD>(url.size());
+  check_hresult(UrlCreateFromPathW(path.c_str(), url.data(), &length, 0));
+  url.resize(length);
+  return to_string(url);
+}
+static fire_and_forget GenerateThumbnails(std::string source, std::string mediaId, ReactPromise<std::vector<std::string>> promise) {
+  co_await resume_background();
+  try {
+    static std::regex const identifier("^blake3:([0-9a-f]{64}):([0-9]{1,20})$");
+    std::smatch match;
+    if (!std::regex_match(mediaId, match, identifier)) { promise.Resolve({}); co_return; }
+    std::lock_guard lock(thumbnailMutex);
+    auto directory = std::filesystem::path(to_hstring(DataDirectory()).c_str()) / L"thumbnails" / to_hstring(match[1].str() + "-" + match[2].str()).c_str();
+    std::filesystem::create_directories(directory);
+    constexpr int count = 12;
+    std::vector<std::filesystem::path> cached(count);
+    bool complete = true;
+    for (int index = 0; index < count; ++index) {
+      auto name = std::wstring(L"frame-") + (index < 10 ? L"0" : L"") + std::to_wstring(index);
+      for (auto extension : {L".jpg", L".png"}) {
+        auto path = directory / (name + extension);
+        if (std::filesystem::is_regular_file(path) && std::filesystem::file_size(path) > 0) { cached[index] = path; break; }
+      }
+      if (cached[index].empty()) complete = false;
+    }
+    if (!complete) {
+      auto file = Windows::Storage::StorageFile::GetFileFromPathAsync(to_hstring(source)).get();
+      auto clip = Windows::Media::Editing::MediaClip::CreateFromFileAsync(file).get();
+      Windows::Media::Editing::MediaComposition composition;
+      composition.Clips().Append(clip);
+      auto duration = composition.Duration().count();
+      if (duration <= 0) { promise.Resolve({}); co_return; }
+      auto folder = Windows::Storage::StorageFolder::GetFolderFromPathAsync(directory.wstring()).get();
+      for (int index = 0; index < count; ++index) {
+        if (!cached[index].empty()) continue;
+        auto at = Windows::Foundation::TimeSpan{static_cast<int64_t>(static_cast<double>(duration) * (index + 0.5) / count)};
+        auto image = composition.GetThumbnailAsync(at, 320, 0, Windows::Media::Editing::VideoFramePrecision::NearestFrame).get();
+        auto type = image.ContentType();
+        if (type != L"image/jpeg" && type != L"image/png") { image.Close(); promise.Resolve({}); co_return; }
+        auto name = std::wstring(L"frame-") + (index < 10 ? L"0" : L"") + std::to_wstring(index) + (type == L"image/png" ? L".png" : L".jpg");
+        auto temporaryName = name + L".partial";
+        auto output = folder.CreateFileAsync(temporaryName, Windows::Storage::CreationCollisionOption::ReplaceExisting).get();
+        auto stream = output.OpenAsync(Windows::Storage::FileAccessMode::ReadWrite).get();
+        Windows::Storage::Streams::RandomAccessStream::CopyAndCloseAsync(image.GetInputStreamAt(0), stream.GetOutputStreamAt(0)).get();
+        stream.Close(); image.Close();
+        auto temporary = directory / temporaryName;
+        auto destination = directory / name;
+        if (!MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) throw hresult_error(HRESULT_FROM_WIN32(GetLastError()));
+        cached[index] = destination;
+      }
+    }
+    std::vector<std::string> urls;
+    urls.reserve(count);
+    for (auto const& path : cached) urls.push_back(ThumbnailUri(path));
+    promise.Resolve(std::move(urls));
+  } catch (...) { promise.Resolve({}); }
+}
+void GamePackModule::Thumbnails(std::string path, std::string mediaId, ReactPromise<std::vector<std::string>> promise) noexcept {
+  GenerateThumbnails(std::move(path), std::move(mediaId), promise);
 }
 void GamePackModule::ChooseVideo(ReactPromise<JSValue> promise) noexcept {
   context.UIDispatcher().Post([promise]() {

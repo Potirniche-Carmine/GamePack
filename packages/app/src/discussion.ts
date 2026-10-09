@@ -44,3 +44,17 @@ export function toggleDiscussion(comments: Comment[], commentId: string, current
   }
   return next;
 }
+
+/** Resolve the visible root for an inline reply, including imported conversations. */
+export function conversationRoot(comments: readonly Comment[], id: string): Comment | undefined {
+  const byId = new Map(comments.map(comment => [comment.comment_id, comment]));
+  const seen = new Set<string>();
+  let current = byId.get(id);
+  while (current?.parent_comment_id && !seen.has(current.comment_id)) {
+    seen.add(current.comment_id);
+    const parent = byId.get(current.parent_comment_id);
+    if (!parent || seen.has(parent.comment_id)) break;
+    current = parent;
+  }
+  return current;
+}

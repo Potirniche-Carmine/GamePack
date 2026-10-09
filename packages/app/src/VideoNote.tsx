@@ -1,123 +1,109 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useMemo, useState, type ReactNode} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {Avatar} from './Avatar';
 import {anchorLabel, anchorStart, Button} from './components';
 import {discussionReplies} from './discussion';
-import {Icon} from './Icon';
 import {useTheme} from './theme';
+import {DragHandle, SpatialCard} from './SpatialCard';
+import {cardAvailableHeight, layoutNotePositions, notePosition, type Point, type Rect, type Size} from './spatial';
 import type {Comment} from './types';
 
 export type VideoNoteProps = {
-  notes: Comment[]; comments?: Comment[]; colors: ReadonlyMap<string, string>; large: boolean; paused: boolean; disabled: boolean;
-  profileName?: string; onPause: () => void; onReply: (comment: Comment) => void;
+  notes: Comment[]; comments: Comment[]; colors: ReadonlyMap<string, string>; disabled: boolean;
+  viewport: Size; rect: Rect; topInset?: number; expanded: ReadonlySet<string>;
+  replyParent?: string | null; composer?: ReactNode; profileName: string;
+  onPause: () => void; onReply: (comment: Comment) => void; onToggle: (comment: Comment) => void;
+  onMove: (comment: Comment, position: Point) => void;
 };
 
-export function VideoNote({notes, comments = notes, colors, large, paused, disabled, profileName, onPause, onReply}: VideoNoteProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+export function VideoNote({notes, comments, colors, disabled, viewport, rect, topInset, expanded, replyParent, composer, profileName, onPause, onReply, onToggle, onMove}: VideoNoteProps) {
   const numbers = useMemo(() => new Map(comments.filter(comment => !comment.parent_comment_id)
     .sort((a, b) => anchorStart(a.anchor) - anchorStart(b.anchor) || a.comment_id.localeCompare(b.comment_id))
     .map((comment, index) => [comment.comment_id, index + 1])), [comments]);
-  useEffect(() => {
-    if (expandedId && !notes.some(note => note.comment_id === expandedId)) setExpandedId(null);
-  }, [notes, expandedId]);
-  if (!notes.length) return null;
-
-  return <View pointerEvents="box-none" style={[local.notes, large && local.notesLarge]}>
-    <ScrollView pointerEvents="box-none" style={local.scroll} contentContainerStyle={local.noteList}
-      keyboardShouldPersistTaps="handled" onScrollBeginDrag={onPause}>
-      {notes.map(note => <NoteCard key={note.comment_id} note={note} comments={comments}
-        expanded={expandedId === note.comment_id} color={colors.get(note.comment_id)} number={numbers.get(note.comment_id)} disabled={disabled}
-        profileName={profileName} onReply={onReply} onToggle={() => {
-          if (!paused) onPause();
-          setExpandedId(previous => previous === note.comment_id ? null : note.comment_id);
-        }} />)}
-    </ScrollView>
+  const positions = useMemo(() => layoutNotePositions(notes, rect, viewport, topInset), [notes, rect, viewport, topInset]);
+  return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+    {notes.map((note, index) => <Note key={note.comment_id} note={note} comments={comments} number={numbers.get(note.comment_id) ?? index + 1}
+      color={colors.get(note.comment_id) ?? '#388AF3'} expanded={expanded.has(note.comment_id)} disabled={disabled}
+      position={positions.get(note.comment_id) ?? notePosition(note, index)} viewport={viewport} rect={rect} topInset={topInset}
+      replyParent={replyParent} composer={composer} profileName={profileName} onPause={onPause} onReply={onReply}
+      onToggle={() => onToggle(note)} onMove={position => onMove(note, position)} />)}
   </View>;
 }
 
-function NoteCard({note, comments, expanded, color, number, disabled, profileName, onToggle, onReply}: {
-  note: Comment; comments: Comment[]; expanded: boolean; color?: string; number?: number; disabled: boolean;
-  profileName?: string; onToggle: () => void; onReply: (comment: Comment) => void;
+function Note({note, comments, number, color, expanded, disabled, position, viewport, rect, topInset, replyParent, composer, profileName, onPause, onReply, onToggle, onMove}: {
+  note: Comment; comments: Comment[]; number: number; color: string; expanded: boolean; disabled: boolean;
+  position: Point; viewport: Size; rect: Rect; topInset?: number; replyParent?: string | null; composer?: ReactNode; profileName: string;
+  onPause: () => void; onReply: (comment: Comment) => void; onToggle: () => void; onMove: (point: Point) => void;
 }) {
-  const {colors, styles: shared, dark} = useTheme();
+  const {colors, dark} = useTheme();
   const replies = useMemo(() => discussionReplies(comments, note.comment_id), [comments, note.comment_id]);
-  const [hovered, setHovered] = useState(false);
+  const replying = replyParent === note.comment_id || replies.some(reply => reply.comment.comment_id === replyParent);
+  const open = expanded || replying;
   const [focused, setFocused] = useState(false);
-  const replyLabel = replies.length ? `, ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}` : '';
-  return <View style={[local.card, {backgroundColor: colors.panel, borderColor: hovered || expanded ? colors.line : colors.separator}, disabled && {opacity: 0.6}]}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`Comment by ${note.name_at_posting} at ${anchorLabel(note.anchor)}${replyLabel}: ${note.text || 'Drawing'}`}
-      accessibilityState={{expanded, disabled}} disabled={disabled}
-      onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
-      onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-      onPress={event => { event.stopPropagation(); onToggle(); }}
-      style={({pressed}) => [local.noteBody, pressed && {opacity: 0.7}, focused && shared.focusRing]}>
-      <View style={local.noteHeader}>
-        {number ? <View style={[local.numberBadge, {backgroundColor: color || colors.accentText}]}>
-          <Text style={[local.number, {color: dark ? colors.bg : '#ffffff'}]}>{number}</Text>
-        </View> : <Avatar name={note.name_at_posting} size={30} />}
-        <View style={local.noteIdentity}>
-          <Text numberOfLines={1} style={[local.author, {color: colors.text}]}>{note.name_at_posting}</Text>
-          <Text style={[local.time, {color: colors.muted}]}>{anchorLabel(note.anchor)}</Text>
-        </View>
-        <View accessible={false} style={local.disclosure}>
-          {!!replies.length && <View style={[local.dot, {backgroundColor: color || colors.accentText}]} />}
-          <Icon name={expanded ? 'chevronDown' : 'chevronRight'} color={colors.muted} />
-        </View>
-      </View>
-      {!!note.text && <Text numberOfLines={expanded ? undefined : 3} style={[local.noteText, {color: colors.text}]}>{note.text}</Text>}
-    </Pressable>
-    {expanded && <>
-      {!!replies.length && <View style={[local.replies, {borderTopColor: colors.separator}]}>
-        {replies.map(({comment, depth}) => <View key={comment.comment_id} style={[local.reply, {marginLeft: Math.min(depth, 2) * 12}]}>
-          <View style={local.replyAvatar}><Avatar name={comment.name_at_posting} size={28} /></View>
-          <View style={local.replyContent}>
-            <View style={local.replyHeader}>
-              <Text numberOfLines={1} style={[local.replyAuthor, {color: colors.text}]}>{comment.name_at_posting}</Text>
-              <Text style={[local.replyTime, {color: colors.muted}]}>{anchorLabel(comment.anchor)}</Text>
-              <Button quiet compact icon="reply" label={`Reply to ${comment.name_at_posting}`} disabled={disabled} onPress={() => onReply(comment)} />
-            </View>
-            {!!comment.text && <Text selectable style={[local.replyText, {color: colors.muted}]}>{comment.text}</Text>}
+  const [hovered, setHovered] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(62);
+  const [footerHeight, setFooterHeight] = useState(56);
+  const availableHeight = cardAvailableHeight(viewport, rect, topInset);
+  const cardWidth = Math.max(1, Math.min(open ? 350 : 240, viewport.width - 100));
+  const label = `Comment ${number} by ${note.name_at_posting} at ${anchorLabel(note.anchor)}${replies.length ? `, ${replies.length} replies` : ''}: ${note.text || 'Drawing'}`;
+  return <SpatialCard position={position} viewport={viewport} rect={rect} width={cardWidth} topInset={topInset} active={open} disabled={disabled} onGrab={onPause} onMove={onMove}>
+    <View style={[local.card, {maxHeight: availableHeight, backgroundColor: colors.panel, borderColor: focused ? colors.text : hovered || open ? colors.line : colors.separator}]}>
+      <DragHandle onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)} accessible accessibilityRole="button" accessibilityLabel={label} accessibilityHint="Click to expand. Drag to reposition."
+        accessibilityState={{expanded: open, disabled}} onPress={onToggle}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
+        style={local.body}>
+        <View style={[local.header, !open && {marginBottom: 8}]}>
+          <View style={[local.numberBadge, {backgroundColor: color}]}><Text style={[local.number, {color: dark ? '#18181a' : '#ffffff'}]}>{number}</Text></View>
+          <View style={{flex: 1, gap: 2}}>
+            <Text style={[local.time, {color: colors.muted}]}>{anchorLabel(note.anchor)}</Text>
+            {open && <Text numberOfLines={1} style={[local.author, {color: colors.muted}]}>{note.name_at_posting}</Text>}
           </View>
-        </View>)}
-      </View>}
-      <View style={[local.footer, {borderTopColor: colors.separator}]}>
-        {!!profileName && <Avatar name={profileName} size={26} />}
-        <Pressable accessibilityRole="button" accessibilityLabel={`Reply to ${note.name_at_posting}`}
-          accessibilityState={{disabled}} disabled={disabled} onPress={event => { event.stopPropagation(); onReply(note); }}
-          style={({pressed}) => [local.replyField, {backgroundColor: colors.inset}, pressed && {opacity: 0.6}]}>
-          <Text style={[local.replyPlaceholder, {color: colors.muted}]}>Reply…</Text>
-          <Icon name="reply" color={colors.muted} />
-        </Pressable>
-      </View>
-    </>}
-  </View>;
+          {!!replies.length && <View style={[local.dot, {backgroundColor: color}]} />}
+        </View>
+        {!open && <Text numberOfLines={3} style={[local.text, {color: colors.text}]}>{note.text || 'Drawing'}</Text>}
+      </DragHandle>
+      {open && <>
+        <ScrollView style={{maxHeight: Math.max(0, availableHeight - headerHeight - footerHeight - 2), flexShrink: 1}} keyboardShouldPersistTaps="handled" contentContainerStyle={local.conversation}>
+          <Text selectable style={[local.text, {color: colors.text}]}>{note.text || 'Drawing'}</Text>
+          {!!replies.length && <View style={local.replies}>{replies.map(({comment, depth}) => <View key={comment.comment_id} style={[local.reply, {marginLeft: Math.min(depth, 2) * 10}]}>
+            <Avatar name={comment.name_at_posting} size={27} />
+            <View style={local.replyContent}>
+              <Text style={[local.replyAuthor, {color: colors.muted}]}>{comment.name_at_posting}</Text>
+              <Text selectable style={[local.replyText, {color: colors.text}]}>{comment.text || 'Drawing'}</Text>
+            </View>
+            <Button quiet compact icon="reply" label={`Reply to ${comment.name_at_posting}`} disabled={disabled} onPress={() => onReply(comment)} />
+          </View>)}</View>}
+        </ScrollView>
+        {replying ? <ScrollView style={{maxHeight: availableHeight * .55, flexShrink: 0}} keyboardShouldPersistTaps="handled"
+          onLayout={event => setFooterHeight(event.nativeEvent.layout.height)}>{composer}</ScrollView>
+          : <View onLayout={event => setFooterHeight(event.nativeEvent.layout.height)} style={[local.footer, {borderTopColor: colors.separator}]}>
+          <Avatar name={profileName} size={26} />
+          <Pressable accessibilityRole="button" accessibilityLabel={`Reply to ${note.name_at_posting}`} disabled={disabled} onPress={() => onReply(note)} {...{enableFocusRing: false}}
+            style={({pressed}) => [local.replyField, {backgroundColor: colors.inset}, pressed && {opacity: .7}]}>
+            <Text style={[local.placeholder, {color: colors.muted}]}>Add a reply…</Text>
+          </Pressable>
+        </View>}
+      </>}
+    </View>
+  </SpatialCard>;
 }
-
 const local = StyleSheet.create({
-  notes: {position: 'absolute', top: 20, right: 20, bottom: 108, width: 324, maxWidth: '66%'},
-  notesLarge: {top: 88, right: 28, width: 366, bottom: 112},
-  scroll: {flexGrow: 0},
-  noteList: {gap: 10, padding: 2},
-  card: {borderRadius: 16, borderWidth: 1},
-  noteBody: {padding: 14, borderRadius: 15},
-  noteHeader: {flexDirection: 'row', alignItems: 'center', gap: 9},
-  noteIdentity: {minWidth: 0, flex: 1, gap: 3},
-  numberBadge: {height: 28, width: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center'},
+  card: {borderRadius: 13, borderWidth: 1, overflow: 'hidden'},
+  body: {padding: 13, paddingBottom: 14},
+  header: {flexDirection: 'row', alignItems: 'center', gap: 9},
+  numberBadge: {height: 26, width: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center'},
   number: {fontSize: 13, fontWeight: '700'},
-  author: {fontSize: 12, fontWeight: '600'},
-  time: {fontSize: 10, lineHeight: 12, fontVariant: ['tabular-nums']},
-  disclosure: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  dot: {width: 5, height: 5, borderRadius: 3},
-  noteText: {fontSize: 13, lineHeight: 20, fontWeight: '500', marginTop: 11},
-  replies: {paddingTop: 14, paddingHorizontal: 14, borderTopWidth: StyleSheet.hairlineWidth},
-  reply: {flexDirection: 'row', gap: 9, marginBottom: 12},
-  replyAvatar: {paddingTop: 1},
-  replyContent: {minWidth: 0, flex: 1},
-  replyHeader: {flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 5},
-  replyAuthor: {fontSize: 11, fontWeight: '600', flex: 1},
-  replyTime: {fontSize: 10, fontVariant: ['tabular-nums']},
+  time: {fontSize: 11, lineHeight: 15, fontVariant: ['tabular-nums']},
+  author: {fontSize: 10, lineHeight: 14},
+  dot: {width: 5, height: 5, borderRadius: 3, marginRight: 3},
+  text: {fontSize: 13, lineHeight: 19, fontWeight: '500'},
+  conversation: {paddingHorizontal: 13, paddingBottom: 14},
+  replies: {paddingTop: 18, gap: 14},
+  reply: {flexDirection: 'row', alignItems: 'flex-start', gap: 9},
+  replyContent: {flex: 1, minWidth: 0},
+  replyAuthor: {fontSize: 10, lineHeight: 14, marginBottom: 3},
   replyText: {fontSize: 12, lineHeight: 18},
-  footer: {flexDirection: 'row', alignItems: 'center', gap: 9, padding: 12, borderTopWidth: StyleSheet.hairlineWidth},
-  replyField: {flex: 1, minHeight: 34, borderRadius: 17, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
-  replyPlaceholder: {fontSize: 12},
+  footer: {padding: 11, flexDirection: 'row', gap: 9, alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth},
+  replyField: {minHeight: 32, borderRadius: 16, paddingHorizontal: 12, flex: 1, justifyContent: 'center'},
+  placeholder: {fontSize: 12, lineHeight: 16},
 });

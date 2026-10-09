@@ -5,7 +5,7 @@ export type ShortcutEvent = {chord: string; repeat: boolean; text?: string};
 /** New defaults must not take a key already assigned in an older library. */
 export function migrateReviewBindings(overrides: Keybindings): Keybindings {
   const next = {...overrides};
-  for (const id of ['present', 'onVideoNotes', 'allReplies']) {
+  for (const id of ['present', 'onVideoNotes', 'allReplies', 'laser', 'zoomIn', 'zoomOut', 'zoomReset']) {
     const chord = shortcuts.find(item => item.id === id)?.key;
     if (chord && !Object.prototype.hasOwnProperty.call(next, id) && Object.values(overrides).includes(chord)) next[id] = null;
   }
@@ -14,8 +14,19 @@ export function migrateReviewBindings(overrides: Keybindings): Keybindings {
 export function binding(id: string, overrides: Keybindings): string | null {
   return Object.prototype.hasOwnProperty.call(overrides, id) ? overrides[id] : shortcuts.find(item => item.id === id)?.key ?? null;
 }
+function hasZoomInAlias(overrides: Keybindings): boolean {
+  return binding('zoomIn', overrides) === '=' && !shortcuts.some(item => item.id !== 'zoomIn' && binding(item.id, overrides) === 'Shift+=');
+}
+/** Accept the printed + key as well as = without taking a custom assignment. */
+export function effectiveShortcutChords(overrides: Keybindings): string[] {
+  const chords = shortcuts.map(item => binding(item.id, overrides)).filter((chord): chord is string => !!chord);
+  if (hasZoomInAlias(overrides)) chords.push('Shift+=');
+  return [...new Set(chords)];
+}
 export function shortcutAction(event: ShortcutEvent, overrides: Keybindings): string | undefined {
-  return shortcuts.find(item => binding(item.id, overrides) === event.chord && (!event.repeat || item.repeat))?.id;
+  const item = shortcuts.find(item => binding(item.id, overrides) === event.chord);
+  if (item) return !event.repeat || item.repeat ? item.id : undefined;
+  return event.chord === 'Shift+=' && hasZoomInAlias(overrides) ? 'zoomIn' : undefined;
 }
 export function shortcutLabel(chord: string | null, mac: boolean): string {
   if (!chord) return 'Unassigned';

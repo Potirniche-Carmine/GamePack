@@ -1,22 +1,24 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions} from 'react-native';
-import {anchorLabel, anchorStart, Button, Dialog, Empty, parseTime, ShortcutContext, Timeline, timeLabel} from './components';
+import {ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, StyleSheet, useWindowDimensions} from 'react-native';
+import {anchorLabel, anchorStart, Button, Dialog, Empty, parseTime, ShortcutContext, TextField, Timeline, timeLabel} from './components';
 import {chooseVideo, command, configureShortcuts, dataDirectory, GamePackPlayer, listenShortcuts, listenWindowState, setAppearance, setFullScreen} from './native';
-import {beginLiveDraft, capturedDraft, commentThreads, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings, replyBranches, visibleThreads} from './review';
-import {activeCommentIds, annotationScene, coloredReview, commentColorMap} from './playback';
+import {beginLiveDraft, capturedDraft, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings} from './review';
+import {annotationScene, coloredReview, commentColorMap} from './playback';
 import {Icon} from './Icon';
 import {VideoNote} from './VideoNote';
 import {PointerPulse} from './PointerPulse';
-import {adjacentNote, notesAtTime, noteWindow} from './presentation';
+import {adjacentNote, conversationTarget, notesAtTime} from './presentation';
 import {SettingsPage} from './SettingsPage';
 import {Avatar} from './Avatar';
-import {CommentCard} from './CommentCard';
-import {toggleDiscussion} from './discussion';
+import {MotionPressable} from './motion';
+import {DragHandle, SpatialCard} from './SpatialCard';
+import {cardAvailableHeight, contentRect, normalizedPoint, notePosition, type Point} from './spatial';
+import {conversationRoot} from './discussion';
 import {resumableDraft} from './drafts';
 import {LibraryBrowser} from './LibraryBrowser';
 import {libraryContents, videoTitle} from './library';
 import {ReviewTimeline} from './ReviewTimeline';
-import {binding, bindingError, migrateReviewBindings, shortcutAction, shortcuts, type ShortcutEvent} from './shortcuts';
+import {binding, bindingError, effectiveShortcutChords, migrateReviewBindings, shortcutAction, type ShortcutEvent} from './shortcuts';
 import {ThemeContext, useTheme, useThemeChoice} from './theme';
 import type {Anchor, Bootstrap, CaptureFinished, Comment, Draft, Drawing, DrawingTool, PlayerTime, Profile, Project, Folder, Settings, ThemeChoice, Video} from './types';
 
@@ -45,6 +47,14 @@ export default function App() {
   const [folderTitle, setFolderTitle] = useState('');
   const [moveTarget, setMoveTarget] = useState<Video | null>(null);
   const [brandFocused, setBrandFocused] = useState(false);
+  const [settingsAnimate, setSettingsAnimate] = useState(true);
+  const [zoom, setZoom] = useState(1);
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const [speedOpen, setSpeedOpen] = useState(false);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const focusParent = useRef<string | null>(null);
+  const [playerSize, setPlayerSize] = useState({width: 1, height: 1});
+  const [lastPointer, setLastPointer] = useState<Point | null>(null);
   const [avatarFocused, setAvatarFocused] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -69,19 +79,12 @@ export default function App() {
   const displayTheme = presenting ? videoTheme : theme;
   const {colors, styles: s} = displayTheme;
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [discussionOpen, setDiscussionOpen] = useState(false);
-  const [fullLibraryOpen, setFullLibraryOpen] = useState(false);
-  const [fullDiscussionOpen, setFullDiscussionOpen] = useState(false);
-  const libraryVisible = presenting ? fullLibraryOpen : libraryOpen;
-  const discussionVisible = presenting ? fullDiscussionOpen : discussionOpen;
-  const setLibraryVisible = presenting ? setFullLibraryOpen : setLibraryOpen;
-  const setDiscussionVisible = presenting ? setFullDiscussionOpen : setDiscussionOpen;
+  const [libraryMenuOpen, setLibraryMenuOpen] = useState(false);
+  const setLibraryVisible = setLibraryOpen;
   const [pointerPulse, setPointerPulse] = useState<{x: number; y: number; token: number} | null>(null);
   const [notesVisible, setNotesVisible] = useState(true);
   const [timingOpen, setTimingOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(true);
-  const commentsScroll = useRef<ScrollView>(null);
-  const commentOffsets = useRef(new Map<string, number>());
   const [recording, setRecording] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{kind: 'video' | 'project' | 'folder'; id: string; title: string} | null>(null);
@@ -117,10 +120,7 @@ export default function App() {
   const selected = data?.comments.find(item => item.comment_id === commentId) ?? null;
   const videoComments = useMemo(() => data?.comments.filter(item => item.video_id === videoId) ?? [], [data?.comments, videoId]);
   const originalComments = useMemo(() => videoComments.filter(item => !item.parent_comment_id), [videoComments]);
-  const threadRoots = useMemo(() => commentThreads(videoComments), [videoComments]);
-  const branches = useMemo(() => replyBranches(threadRoots), [threadRoots]);
-  const allRepliesExpanded = branches.size > 0 && [...branches].every(id => expanded.has(id));
-  const threads = useMemo(() => visibleThreads(threadRoots, expanded), [threadRoots, expanded]);
+  const allRepliesExpanded = originalComments.length > 0 && originalComments.every(item => expanded.has(item.comment_id));
   const projectVideos = data ? libraryContents(data.projects, data.folders, data.videos, projectId, folderId).videos : [];
   const activeScene = draft ?? selected;
   const isLive = !!draft && liveId === draft.id;
@@ -138,13 +138,23 @@ export default function App() {
     const scene = draft ? (showScene ? draftScene : null) : annotationsVisible ? (isolatedReview ? selectedScene : aggregateScene) : null;
     return scene ? JSON.stringify(scene) : '';
   }, [!!draft, draftScene, showScene, annotationsVisible, isolatedReview, selectedScene, aggregateScene]);
-  const onVideoNotes = useMemo(() => notesAtTime(isolatedReview && selected ? [selected] : videoComments, time, duration), [isolatedReview, selected, videoComments, time, duration]);
+  const onVideoNotes = useMemo(() => {
+    const notes = notesAtTime(videoComments, time, duration);
+    const root = draft?.parent_comment_id ? conversationRoot(videoComments, draft.parent_comment_id) : undefined;
+    if (root && !notes.some(note => note.comment_id === root.comment_id)) notes.push(root);
+    return notes;
+  }, [videoComments, time, duration, draft?.parent_comment_id]);
+  const videoRect = contentRect(playerSize, video ?? {width: 0, height: 0}, zoom);
   const previousNote = adjacentNote(videoComments, commentId, time, duration, -1);
   const nextNote = adjacentNote(videoComments, commentId, time, duration, 1);
-  const activeIds = useMemo(() => activeCommentIds(videoComments, time, duration), [videoComments, time, duration]);
   const reviewEnd = !isLive && (reviewing || (!!draft)) && activeScene?.anchor.kind === 'interval' ? activeScene.anchor.end_us : -1;
   const dialogOpen = profileOpen || projectOpen || discardOpen || !!deleteTarget || !!folderDialog || !!moveTarget;
 
+  useEffect(() => {
+    if (!draft || !composerOpen || focusParent.current === null || (draft.parent_comment_id ?? '') !== focusParent.current) return;
+    const frame = requestAnimationFrame(() => { commentInput.current?.focus(); focusParent.current = null; });
+    return () => cancelAnimationFrame(frame);
+  }, [draft?.id, composerOpen, focusRequest]);
   useEffect(() => {
     if (presenting && !video && !loading) { setPresenting(false); setFullScreen(false); }
   }, [presenting, !!video, loading]);
@@ -161,19 +171,10 @@ export default function App() {
   useEffect(() => { const listener = listenShortcuts(event => shortcutHandler.current(event)); return () => listener.remove(); }, []);
   useEffect(() => {
     const bindings = data?.settings.keybindings ?? {};
-    const chords = !data || busy ? [] : dialogOpen ? ['Escape'] : settingsOpen ? [binding('settings', bindings), 'Escape'] : [...shortcuts.map(item => binding(item.id, bindings)), ...(presenting ? ['PageUp', 'PageDown'] : []), 'Escape'];
+    const chords = !data || busy || libraryMenuOpen ? [] : dialogOpen ? ['Escape'] : settingsOpen ? [binding('settings', bindings), 'Escape'] : [...effectiveShortcutChords(bindings), ...(presenting ? ['PageUp', 'PageDown'] : []), 'Escape'];
     configureShortcuts(chords.filter((chord): chord is string => !!chord), !!recording && !busy, !dialogOpen && !settingsOpen ? binding('submit', bindings) ?? '' : '');
-  }, [data?.settings.keybindings, !!data, busy, dialogOpen, settingsOpen, recording, presenting]);
+  }, [data?.settings.keybindings, !!data, busy, dialogOpen, settingsOpen, recording, presenting, libraryMenuOpen]);
   useEffect(() => { if (data) { try { setAppearance(themeChoice); } catch (cause) { setError(message(cause)); } } }, [themeChoice, !!data]);
-  useEffect(() => {
-    if (!discussionVisible || !commentId) return;
-    const frame = requestAnimationFrame(() => {
-      const offset = commentOffsets.current.get(commentId);
-      if (offset !== undefined) commentsScroll.current?.scrollTo({y: Math.max(0, offset - 12), animated: false});
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [discussionVisible, commentId]);
-
   const seek = useCallback((us: number) => {
     const target = Math.max(0, Math.round(us));
     setSeekState(previous => ({us: target, token: previous.token + 1}));
@@ -270,13 +271,15 @@ export default function App() {
   };
   const restoreDraftNow = (pending: Draft) => {
     activeDraftRef.current = pending.id; setDraftId(pending.id); setCommentId(null); setLive(null);
-    setComposerOpen(true); setDiscussionVisible(!presenting); setLibraryVisible(false); setTimingOpen(false);
+    setComposerOpen(true); setLibraryVisible(false); setTimingOpen(false);
     setPaused(true); setReviewing(false); setIsolatedReview(false); setShowScene(true); setTool('pointer'); setRedo([]);
-    seek(anchorStart(pending.anchor));
+    const parent = data?.comments.find(item => item.comment_id === pending.parent_comment_id);
+    const pendingDuration = data?.videos.find(item => item.id === pending.video_id)?.duration_us || duration;
+    seek(parent ? conversationTarget(data?.comments ?? [], parent, pendingDuration).time : anchorStart(pending.anchor));
   };
   const openVideoNow = async (item: Video) => {
     const generation = ++sourceGeneration.current;
-    setPaused(true); setRate(1); clearEditing(); setShowScene(true); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false); setDiscussionOpen(false);
+    setPaused(true); setRate(1); clearEditing(); setShowScene(true); setLastPointer(null); setZoomOpen(false); setSpeedOpen(false); setZoom(1); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false);
     setCommentId(null); setExpanded(new Set()); setDuration(item.duration_us); seek(0);
     const pending = resumableDraft(draftsRef.current, item.id);
     if (pending) restoreDraftNow(pending);
@@ -286,7 +289,7 @@ export default function App() {
         setError('This managed video failed its integrity check. Re-add the original video.');
     } catch (cause) { if (generation === sourceGeneration.current) setError(message(cause)); }
   };
-  const openVideo = (item: Video) => leaveDraft(() => { setFullLibraryOpen(false); return openVideoNow(item); });
+  const openVideo = (item: Video) => leaveDraft(() => { setLibraryOpen(false); return openVideoNow(item); });
   const importVideoNow = async () => {
     if (!projectId || busy) return;
     setBusy('Adding video…'); setError('');
@@ -301,9 +304,9 @@ export default function App() {
     finally { setBusy(''); }
   };
   const importVideo = () => leaveDraft(importVideoNow);
-  const newDraftNow = (parent?: Comment, revealComposer = true) => {
+  const newDraftNow = (parent?: Comment, revealComposer = true, position?: Point) => {
     if (!video || busy) return;
-    if (revealComposer) { setComposerOpen(true); setDiscussionVisible(!presenting); setLibraryVisible(false); }
+    if (revealComposer) { setComposerOpen(true); setLibraryVisible(false); }
     if (draft && !parent) return draft;
     const pending = resumableDraft(draftsRef.current, video.id, parent?.comment_id ?? null);
     if (pending) { restoreDraftNow(pending); return pending; }
@@ -311,13 +314,13 @@ export default function App() {
     try {
       let value: Draft = {id: uuid(), project_id: video.project_id, video_id: video.id, text: '',
         anchor: parent?.anchor ?? {kind: 'point', at_us: Math.min(time, duration || time)},
-        parent_comment_id: parent?.comment_id ?? null, drawings: []};
+        parent_comment_id: parent?.comment_id ?? null, drawings: [], position: parent?.position ?? position ?? (revealComposer ? {x: .4, y: .26} : undefined)};
       const live = !paused && !parent;
       if (live) value = beginLiveDraft(value, duration);
       replaceDraft(value); activeDraftRef.current = value.id; setDraftId(value.id); setCommentId(null);
       setLive(live ? value.id : null); setReviewing(false); setShowScene(true); setTool('pointer'); setRedo([]);
       if (live) furthest.current.set(value.id, time);
-      else { setPaused(true); seek(anchorStart(value.anchor)); }
+      else { setPaused(true); seek(parent ? conversationTarget(data?.comments ?? [], parent, duration).time : anchorStart(value.anchor)); }
       return value;
     } catch (cause) { setError(message(cause)); }
   };
@@ -326,10 +329,9 @@ export default function App() {
     else newDraftNow();
   };
   const selectCommentNow = (item: Comment) => {
-    clearEditing(); setIsolatedReview(!item.parent_comment_id); setCommentId(item.comment_id); setPaused(true); setShowScene(true); seek(noteWindow(item, duration).start);
-    setExpanded(previous => expandedAncestors(data?.comments ?? [], item.comment_id, previous));
-    const offset = commentOffsets.current.get(item.comment_id);
-    if (offset !== undefined) commentsScroll.current?.scrollTo({y: Math.max(0, offset - 12), animated: false});
+    const target = conversationTarget(data?.comments ?? [], item, duration);
+    clearEditing(); setIsolatedReview(false); setCommentId(target.comment.comment_id); setPaused(true); setShowScene(true); seek(target.time);
+    setExpanded(previous => new Set(expandedAncestors(data?.comments ?? [], item.comment_id, previous)).add(target.comment.comment_id));
   };
   const selectComment = (item: Comment) => leaveDraft(() => selectCommentNow(item));
   const dismissSelectionNow = () => { clearEditing(); setCommentId(null); setShowScene(true); };
@@ -347,17 +349,17 @@ export default function App() {
   const play = () => {
     if (!video || busy) return;
     if (!paused) { setPaused(true); return; }
-    setFullLibraryOpen(false); setFullDiscussionOpen(false);
+    setLibraryOpen(false);
     if (!draft) { setCommentId(null); setIsolatedReview(false); setReviewing(false); setShowScene(true); }
     if (draft && draft.anchor.kind === 'point') { startLive(); return; }
-    if (!draft) setTool('pointer');
+    if (!draft) setTool(previous => previous === 'laser' ? 'laser' : 'pointer');
     if (isLive && time >= duration) seek(anchorStart(draft!.anchor));
     else if (!isLive && draft?.anchor.kind === 'interval' && (time < draft.anchor.start_us || time >= draft.anchor.end_us)) seek(draft.anchor.start_us);
     else if (duration && time >= duration) seek(0);
     setPaused(false);
   };
   const playReview = (item: Comment) => {
-    setTool('pointer'); setShowScene(true); setIsolatedReview(!item.parent_comment_id); seek(anchorStart(item.anchor));
+    setTool('pointer'); setShowScene(true); setIsolatedReview(false); seek(anchorStart(item.anchor));
     if (item.anchor.kind === 'point') { setPaused(true); setReviewing(false); }
     else { setReviewing(true); setPaused(false); }
   };
@@ -397,13 +399,13 @@ export default function App() {
     try {
       const drawings = mergeDrawings(current.drawings, [parseDrawing(json)]);
       if (drawings.length === current.drawings.length) return;
-      let next = {...current, drawings};
+      let next: Draft = {...current, drawings, position: current.position ?? notePosition({drawings})};
       if (!current.drawings.length) furthest.current.set(current.id, time);
       if (liveRef.current === current.id || captureRequest.current?.live)
         next = finalizeLiveDraft(next, time, duration, furthest.current.get(current.id) ?? time);
       else if (savingDraftId.current === current.id && next.anchor.kind === 'interval')
         next = finalizeLiveDraft(next, next.anchor.end_us, duration, next.anchor.end_us);
-      replaceDraft(next); setRedo([]);
+      replaceDraft(next); setRedo([]); setComposerOpen(true); setTool('pointer'); setNotesVisible(true);
       if (data?.settings.pause_after_drawing) setPaused(true);
     } catch (cause) { setError(message(cause)); }
   };
@@ -417,7 +419,8 @@ export default function App() {
   };
   const chooseTool = (value: DrawingTool) => {
     if (!video || busy) return;
-    if (value === 'pointer' || tool === value) { setTool('pointer'); return; }
+    setZoomOpen(false); setSpeedOpen(false);
+    if (value === 'pointer' || value === 'laser' || tool === value) { setTool(tool === value ? 'pointer' : value); return; }
     if (!draft) { newDraftNow(undefined, false); setTool(value); setComposerOpen(false); return; }
     setComposerOpen(false);
     setShowScene(true); setTool(value);
@@ -544,12 +547,12 @@ export default function App() {
 
   const browse = (nextProjectId: string | null, nextFolderId: string | null = null) => leaveDraft(() => {
     ++sourceGeneration.current; setProjectId(nextProjectId); setFolderId(nextFolderId); setVideoId(null);
-    setPaused(true); setDuration(0); seek(0); dismissSelectionNow(); setLibraryOpen(false); setDiscussionOpen(false);
+    setPaused(true); setDuration(0); seek(0); dismissSelectionNow(); setLibraryOpen(false);
     if (presenting) { setPresenting(false); setFullScreen(false); }
   });
   const openProject = (project: Project) => browse(project.id);
-  const openSettings = (tab: 'profile' | 'appearance' = 'appearance') => leaveDraft(() => {
-    setPaused(true); setSettingsError(''); setSettingsTab(tab);
+  const openSettings = (tab: 'profile' | 'appearance' = 'appearance', animate = true) => leaveDraft(() => {
+    setPaused(true); setSettingsError(''); setSettingsTab(tab); setSettingsAnimate(animate); setLibraryOpen(false); setZoomOpen(false); setSpeedOpen(false);
     if (presenting) { setPresenting(false); setFullScreen(false); }
     setSettingsOpen(true);
   });
@@ -618,14 +621,13 @@ export default function App() {
     } catch (cause) { setError(`Could not delete: ${message(cause)}`); }
     finally { setBusy(''); }
   };
-  const focusComment = () => { if (busy) return; setComposerOpen(true); setDiscussionVisible(!presenting); setLibraryVisible(false); newDraft(); setPaused(true); requestAnimationFrame(() => commentInput.current?.focus()); };
-  const toggleAllReplies = () => setExpanded(allRepliesExpanded ? new Set() : new Set(branches));
+  const focusComment = () => { if (busy) return; focusParent.current = ''; setFocusRequest(value => value + 1); setZoomOpen(false); setSpeedOpen(false); setComposerOpen(true); setLibraryVisible(false); newDraftNow(undefined, true, lastPointer ?? undefined); setTool('pointer'); setNotesVisible(true); setPaused(true); };
+  const toggleAllReplies = () => setExpanded(allRepliesExpanded ? new Set() : new Set(originalComments.map(item => item.comment_id)));
   const togglePresentation = () => leaveDraft(() => {
-    setFullDiscussionOpen(false); setFullLibraryOpen(false); setPresenting(!presenting); setFullScreen(!presenting);
+     setLibraryOpen(false); setPresenting(!presenting); setFullScreen(!presenting);
   });
   const replyToNote = (item: Comment) => {
-    setPaused(true); newDraft(item); setComposerOpen(true);
-    requestAnimationFrame(() => commentInput.current?.focus());
+    focusParent.current = item.comment_id; setFocusRequest(value => value + 1); setNotesVisible(true); setPaused(true); newDraft(item); setComposerOpen(true);
   };
   const navigateNote = (direction: -1 | 1) => {
     const item = direction === 1 ? nextNote : previousNote;
@@ -658,14 +660,14 @@ export default function App() {
       else if (projectOpen) setProjectOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
       else if (commentInput.current?.isFocused()) { commentInput.current.blur(); }
-      else if (presenting && (fullDiscussionOpen || fullLibraryOpen)) { setFullDiscussionOpen(false); setFullLibraryOpen(false); }
+      else if (libraryOpen || zoomOpen || speedOpen) { setLibraryOpen(false); setZoomOpen(false); setSpeedOpen(false); }
       else if (presenting) { setPresenting(false); setFullScreen(false); }
       else { setTool('pointer'); commentInput.current?.blur(); }
       return;
     }
     if (dialogOpen) return;
     const action = shortcutAction(event, data.settings.keybindings);
-    if (action === 'settings') { if (settingsOpen) setSettingsOpen(false); else openSettings(); return; }
+    if (action === 'settings') { if (settingsOpen) setSettingsOpen(false); else openSettings('appearance', false); return; }
     if (settingsOpen) return;
     if (action?.startsWith('project') && /^project[1-9]$/.test(action)) { const item = data.projects[Number(action.slice(-1)) - 1]; if (item) openProject(item); return; }
     if (action === 'nextProject' || action === 'previousProject') { const index = data.projects.findIndex(item => item.id === projectId); const item = data.projects[index + (action === 'nextProject' ? 1 : -1)]; if (item) openProject(item); return; }
@@ -678,7 +680,7 @@ export default function App() {
     switch (action) {
       case 'present': togglePresentation(); break;
       case 'onVideoNotes': setNotesVisible(value => !value); break;
-      case 'allReplies': setDiscussionVisible(true); setFullLibraryOpen(false); setPaused(true); toggleAllReplies(); break;
+      case 'allReplies': setNotesVisible(true); setPaused(true); toggleAllReplies(); break;
       case 'play': play(); break;
       case 'pause': setPaused(true); break;
       case 'forward': setTool('pointer'); setRate(!paused && rate > 0 ? Math.min(4, rate * 2) : 1); setPaused(false); break;
@@ -700,6 +702,10 @@ export default function App() {
         break;
       case 'pen': case 'arrow': case 'ellipse': chooseTool(action); break;
       case 'pointer': chooseTool('pointer'); break;
+      case 'laser': chooseTool('laser'); break;
+      case 'zoomIn': setZoom(value => Math.min(4, value + .25)); break;
+      case 'zoomOut': setZoom(value => Math.max(1, value - .25)); break;
+      case 'zoomReset': setZoom(1); break;
       case 'undo': undoDrawing(); break;
       case 'redo': redoDrawing(); break;
       case 'annotations': setAnnotationsVisible(value => !value); break;
@@ -711,142 +717,134 @@ export default function App() {
   if (loading) return <ThemeContext.Provider value={displayTheme}><View style={[s.root, s.loading]}><ActivityIndicator color={colors.accentText} /><Text style={s.status}>Opening library…</Text></View></ThemeContext.Provider>;
   if (!data) return <ThemeContext.Provider value={displayTheme}><View style={s.root}><Empty title="Library could not open" action={<Button primary onPress={() => void load()}>Retry</Button>}>{error}</Empty></View></ThemeContext.Provider>;
 
-  const cs = presenting ? vs : s;
-  const compactPlayer = !presenting && width - (libraryVisible ? 266 : 0) - (discussionVisible ? 356 : 0) < 560;
-  const composer = draft ? <View style={presenting ? [cs.composer, !composerOpen && cs.composerCollapsed] : s.composerDock}>
-                <View style={cs.draftHeader}>
-                  <Button quiet compact icon={composerOpen ? 'chevronDown' : 'chevronRight'} expanded={composerOpen} label={composerOpen ? 'Minimize composer' : 'Open composer'} onPress={() => setComposerOpen(value => !value)}>{draft.parent_comment_id ? 'Reply' : 'Comment'}</Button>
-                  <View style={{flex: 1}} /><Button quiet compact disabled={!!busy || dialogOpen} label="Close comment" icon="close" onPress={() => { setPaused(true); if (draft.text.trim() || draft.drawings.length) setDiscardOpen(true); else void discard(); }} />
-                </View>
-                {composerOpen && <ScrollView style={{maxHeight: Math.max(170, height - 330)}} keyboardShouldPersistTaps="handled">
-                  <TextInput ref={commentInput} accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Write a reply…' : 'Write a comment…'} placeholderTextColor={colors.faint} multiline editable={!busy && !dialogOpen} style={[cs.input, cs.textArea, {marginTop: 8}]} value={draft.text} onFocus={() => setPaused(true)} accessibilityHint="Escape returns to the video" onChangeText={text => updateDraft({text})} maxLength={16000} />
-                  <Button quiet compact icon="clock" expanded={timingOpen} style={{alignSelf: 'flex-start', marginTop: 8}} disabled={!!busy || dialogOpen} onPress={() => setTimingOpen(value => !value)}>{anchorLabel(draft.anchor)}</Button>
-                  {timingOpen && <>
-                    <AnchorEditor anchor={draft.anchor} live={isLive} time={time} duration={duration} locked={!!draft.drawings.length} disabled={!!busy || dialogOpen} onChange={changeAnchor} onError={setError} />
-                    {!!draft.drawings.length && !isLive && <VisibilityEditor key={`${draft.id}-${draft.drawings.length}`} draft={draft} disabled={!!busy || dialogOpen} onChange={drawings => updateDraft({drawings})} onError={setError} />}
-                  </>}
-                  <View style={cs.draftActions}>
-                    {failedDrafts.has(draft.id) && <Button compact disabled={!!busy || dialogOpen} onPress={() => void flushLatest(draft.id).catch(() => undefined)}>Retry</Button>}
-                    <View style={{flex: 1}} /><Button style={cs.composerAction} disabled={!!busy || dialogOpen} onPress={() => void discard()}>Discard</Button>
-                    <Button primary style={cs.composerAction} shortcut="submit" disabled={!!busy || (!draft.text.trim() && !draft.drawings.length)} onPress={() => requestCapture('save')}>{busy === 'Saving…' ? 'Saving…' : 'Post'}</Button>
-                  </View>
-                </ScrollView>}
-              </View> : null;
+  const composer = draft ? <View style={{padding: 13, backgroundColor: colors.panel, borderRadius: 13}}>
+    <DragHandle style={{flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 9}}>
+      <Avatar name={data.profile.name} size={26} />
+      <Button quiet compact icon="clock" expanded={timingOpen} disabled={!!busy || dialogOpen} onPress={() => setTimingOpen(value => !value)}>{anchorLabel(draft.anchor)}</Button>
+      <View style={{flex: 1}} />
+      <Button quiet compact disabled={!!busy || dialogOpen} label="Close comment" icon="close" onPress={() => { setPaused(true); if (draft.text.trim() || draft.drawings.length) setDiscardOpen(true); else void discard(); }} />
+    </DragHandle>
+    <TextField ref={commentInput} accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Add a reply…' : 'Add a comment…'}
+      multiline editable={!busy && !dialogOpen} style={{minHeight: 76, maxHeight: 130, borderWidth: 0, backgroundColor: colors.panel, paddingHorizontal: 0, paddingVertical: 0, fontSize: 13, lineHeight: 19}}
+      value={draft.text} onFocus={() => setPaused(true)} onChangeText={text => updateDraft({text})} maxLength={16000} />
+    {timingOpen && <><AnchorEditor anchor={draft.anchor} live={isLive} time={time} duration={duration} locked={!!draft.drawings.length} disabled={!!busy || dialogOpen} onChange={changeAnchor} onError={setError} />
+      {!!draft.drawings.length && !isLive && <VisibilityEditor key={`${draft.id}-${draft.drawings.length}`} draft={draft} disabled={!!busy || dialogOpen} onChange={drawings => updateDraft({drawings})} onError={setError} />}</>}
+    <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 8}}>
+      {failedDrafts.has(draft.id) && <Button compact disabled={!!busy || dialogOpen} onPress={() => void flushLatest(draft.id).catch(() => undefined)}>Retry</Button>}
+      <View style={{flex: 1}} /><Button primary compact shortcut="submit" disabled={!!busy || (!draft.text.trim() && !draft.drawings.length)} onPress={() => requestCapture('save')}>{busy === 'Saving…' ? 'Saving…' : 'Post'}</Button>
+    </View>
+  </View> : null;
   const currentProject = data.projects.find(item => item.id === projectId);
   const currentFolder = data.folders?.find(item => item.id === folderId);
   const startProject = () => leaveDraft(() => { setPaused(true); setProjectTitle(''); setError(''); setProjectOpen(true); });
   const header = <View style={presenting ? vs.videoHeader : s.workspaceHeader}>
-    <Pressable accessibilityRole="button" accessibilityLabel="All projects" onFocus={() => setBrandFocused(true)} onBlur={() => setBrandFocused(false)} onPress={() => browse(null)} disabled={!!busy || dialogOpen}
+    <MotionPressable accessibilityRole="button" accessibilityLabel="All projects" onFocus={() => setBrandFocused(true)} onBlur={() => setBrandFocused(false)} onPress={() => browse(null)} disabled={!!busy || dialogOpen}
       style={({pressed}) => [s.brandButton, pressed && {opacity: .65}, brandFocused && {backgroundColor: colors.selected}]}>
       <View style={s.brandMark}><Icon name="play" color={colors.primaryText} /></View>
-      {width > 1000 && <Text style={s.brand}>GamePack</Text>}
-    </Pressable>
+      {width > 820 && <Text style={s.brand}>GamePack</Text>}
+    </MotionPressable>
     <View style={s.breadcrumb}>
       {!!currentProject && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact disabled={!!busy || dialogOpen} style={s.breadcrumbPart} label={`Browse project ${currentProject.title}`} onPress={() => browse(projectId)}>{currentProject.title}</Button></>}
       {!!currentFolder && width > 850 && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact disabled={!!busy || dialogOpen} style={s.breadcrumbPart} label={`Browse folder ${currentFolder.title}`} onPress={() => browse(projectId, folderId)}>{currentFolder.title}</Button></>}
-      {!!video && <><Text style={s.breadcrumbSlash}>/</Text><Text numberOfLines={1} style={[s.title, {flex: 1}]}>{videoTitle(video)}</Text></>}
+      {!!video && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact icon="chevronDown" label={`Choose video: ${videoTitle(video)}`} expanded={libraryOpen} disabled={!!busy || dialogOpen} onPress={() => { setLibraryOpen(value => !value); setPaused(true); }}>{videoTitle(video)}</Button></>}
     </View>
-    {!!video && <>
-      <Button quiet compact icon="library" label={libraryVisible ? 'Hide library' : 'Show library'} active={libraryVisible} onPress={() => { setLibraryVisible(value => !value); setDiscussionVisible(false); setPaused(true); }} />
-      <Button quiet compact icon={notesVisible ? 'comment' : 'eyeOff'} shortcut="onVideoNotes" active={notesVisible} label="Comments on video" disabled={!!busy || dialogOpen} onPress={() => setNotesVisible(value => !value)} />
-      <Button quiet compact icon="discussion" label={discussionVisible ? 'Hide discussion' : 'Show discussion'} active={discussionVisible} onPress={() => { setDiscussionVisible(value => !value); setLibraryVisible(false); setPaused(true); }}>{width > 1000 ? 'Comments' : undefined}</Button>
-      <View style={s.headerDivider} />
-    </>}
     <Button quiet compact shortcut="settings" icon="settings" label="Settings" disabled={!!busy || dialogOpen} onPress={() => openSettings()} />
-    <Pressable accessibilityRole="button" accessibilityLabel={data.profile.name ? `Profile: ${data.profile.name}` : 'Set your name'} onFocus={() => setAvatarFocused(true)} onBlur={() => setAvatarFocused(false)} disabled={!!busy || dialogOpen} onPress={() => openSettings('profile')}
-      style={({pressed}) => [s.avatarButton, pressed && {opacity: .65}, avatarFocused && {borderColor: colors.text}]}><Avatar name={data.profile.name} size={30} /></Pressable>
+    <MotionPressable accessibilityRole="button" accessibilityLabel={data.profile.name ? `Profile: ${data.profile.name}` : 'Set your name'} onFocus={() => setAvatarFocused(true)} onBlur={() => setAvatarFocused(false)} disabled={!!busy || dialogOpen} onPress={() => openSettings('profile')}
+      style={({pressed}) => [s.avatarButton, pressed && {opacity: .65}, avatarFocused && {borderColor: colors.text}]}><Avatar name={data.profile.name} size={30} /></MotionPressable>
   </View>;
   const libraryProps = {
-    projects: data.projects, folders: data.folders ?? [], videos: data.videos, projectId, folderId, videoId, disabled: !!busy || dialogOpen,
+    onMenuOpenChange: setLibraryMenuOpen, projects: data.projects, folders: data.folders ?? [], videos: data.videos, projectId, folderId, videoId, disabled: !!busy || dialogOpen,
     onOpenProject: openProject, onOpenFolder: (folder: Folder) => browse(folder.project_id, folder.id), onOpenRoot: () => browse(projectId), onOpenVideo: openVideo,
     onNewProject: startProject, onImport: () => { void importVideo(); }, onCreateFolder: () => editFolder('create'),
     onRenameProject: (project: Project) => editFolder('renameProject', project), onDeleteProject: (project: Project) => askDelete('project', project),
     onRenameFolder: (folder: Folder) => editFolder('renameFolder', folder), onDeleteFolder: (folder: Folder) => askDelete('folder', folder),
     onMoveVideo: (item: Video) => leaveDraft(() => { setMoveTarget(item); setError(''); setPaused(true); }), onDeleteVideo: (item: Video) => askDelete('video', item),
   };
-  const libraryPanel = <View style={presenting ? [s.libraryPopover, {maxHeight: height - 100}] : s.libraryDock}>
-    <View style={s.popoverHeader}><Text style={s.railTitle}>Library</Text><Button quiet compact icon="close" label="Close library" onPress={() => setLibraryVisible(false)} /></View>
+  const libraryPanel = <View style={[s.libraryPopover, {top: presenting ? 66 : 62, left: Math.min(240, width * .18), width: 350, bottom: undefined, height: Math.min(460, height - 160)}]}>
     <LibraryBrowser {...libraryProps} compact />
   </View>;
-  const discussionPanel = <View style={presenting ? [s.discussionPopover, {maxHeight: height - 260, width: Math.min(420, width - 32)}] : s.discussionDock}>
-        <View style={s.railHeader}><Text style={s.railTitle}>Comments</Text><View style={{flex: 1}} />
-          {!!branches.size && <Button quiet compact shortcut="allReplies" icon={allRepliesExpanded ? 'collapse' : 'expand'} expanded={allRepliesExpanded} disabled={!!busy || dialogOpen} onPress={toggleAllReplies}>{allRepliesExpanded ? 'Collapse all' : 'Expand all'}</Button>}
-          <Button quiet compact icon="close" label="Close discussion" onPress={() => setDiscussionVisible(false)} />
-        </View>
-        {!presenting && composer}
-        <ScrollView ref={commentsScroll} style={{flex: 1}} contentContainerStyle={s.railContent} keyboardShouldPersistTaps="handled" removeClippedSubviews={false}>
-          {threads.map(({node, depth}) => <View key={node.comment.comment_id} collapsable={false} onLayout={event => { commentOffsets.current.set(node.comment.comment_id, event.nativeEvent.layout.y); }} style={depth ? [s.threadRow, {marginLeft: 18 + Math.min(depth - 1, 3) * 12}] : undefined}>
-            <CommentCard item={node.comment} selected={node.comment.comment_id === commentId} replyCount={node.children.length} expanded={expanded.has(node.comment.comment_id)}
-              activeColor={annotationsVisible && activeIds.has(node.comment.comment_id) ? railColors.get(node.comment.comment_id) : undefined}
-              onToggle={() => setExpanded(previous => toggleDiscussion(videoComments, node.comment.comment_id, previous))}
-              onSelect={() => selectComment(node.comment)} onPlay={() => leaveDraft(() => { setFullDiscussionOpen(false); selectCommentNow(node.comment); playReview(node.comment); })} onReply={() => replyToNote(node.comment)} disabled={!!busy || dialogOpen} />
-          </View>)}
-          {!videoComments.length && <View style={s.emptyComments}><Icon name="comment" color={colors.faint} /><Text style={[s.emptyCommentsText, {marginTop: 12}]}>No comments yet</Text><Button quiet onPress={focusComment} disabled={!!busy || dialogOpen}>Add comment</Button></View>}
-        </ScrollView>
-      </View>;
+  const moveComment = (item: Comment, position: Point) => {
+    setData(previous => previous ? {...previous, comments: previous.comments.map(comment => comment.comment_id === item.comment_id ? {...comment, position} : comment)} : previous);
+    void command<Comment>(root, 'move_comment', {comment_id: item.comment_id, position}).catch(cause => {
+      setData(previous => previous ? {...previous, comments: previous.comments.map(comment => comment.comment_id === item.comment_id ? {...comment, position: item.position} : comment)} : previous);
+      setError(`Could not move comment: ${message(cause)}`);
+    });
+  };
 
   return <ThemeContext.Provider value={displayTheme}><ShortcutContext.Provider value={data.settings.keybindings}><View style={s.root}>
-    {!!error && <View pointerEvents={dialogOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen} importantForAccessibility={dialogOpen ? 'no-hide-descendants' : 'auto'} style={s.errorBar} accessibilityRole="alert"><Text selectable style={s.errorText}>{error}</Text><Button compact onPress={() => setError('')}>Dismiss</Button></View>}
-    {!settingsOpen && !presenting && <View pointerEvents={dialogOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen} importantForAccessibility={dialogOpen ? 'no-hide-descendants' : 'auto'}>{header}</View>}
-    <View pointerEvents={dialogOpen || settingsOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen} importantForAccessibility={dialogOpen ? 'no-hide-descendants' : 'auto'} style={[s.workspace, presenting && {paddingHorizontal: 0, paddingBottom: 0, gap: 0}, settingsOpen && {display: 'none'}]}>
-      {!presenting && !!video && libraryVisible && libraryPanel}
+    {!!error && <View pointerEvents={dialogOpen || settingsOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen || settingsOpen} importantForAccessibility={dialogOpen || settingsOpen ? 'no-hide-descendants' : 'auto'} style={s.errorBar} accessibilityRole="alert"><Text selectable style={s.errorText}>{error}</Text><Button compact onPress={() => setError('')}>Dismiss</Button></View>}
+    {!presenting && <View pointerEvents={dialogOpen || settingsOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen || settingsOpen} importantForAccessibility={dialogOpen || settingsOpen ? 'no-hide-descendants' : 'auto'}>{header}</View>}
+    <View pointerEvents={dialogOpen || settingsOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen || settingsOpen} importantForAccessibility={dialogOpen || settingsOpen ? 'no-hide-descendants' : 'auto'} style={[s.workspace, presenting && {paddingHorizontal: 0, paddingBottom: 0, gap: 0}]}>
       <View style={s.stage}>
         {!video ? <LibraryBrowser {...libraryProps} /> : <>
         <ThemeContext.Provider value={videoTheme}>
-          <View style={[vs.playerArea, s.playerFrame, presenting && vs.playerPresent]}>
-            {video ? <GamePackPlayer key={video.id} style={vs.nativePlayer} source={video.path} paused={paused} pauseOnDrawing={data.settings.pause_after_drawing} rate={rate}
+          <View onLayout={event => setPlayerSize(event.nativeEvent.layout)} style={[vs.playerArea, s.playerFrame, presenting && vs.playerPresent]}>
+            {video ? <GamePackPlayer key={video.id} style={vs.nativePlayer} source={video.path} zoom={zoom} onZoom={event => setZoom(event.nativeEvent.zoom)} paused={paused} pauseOnDrawing={data.settings.pause_after_drawing} rate={rate}
               seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson}
               captureToken={captureToken} stepToken={step.token} stepFrames={step.frames} onCaptureFinished={event => void onCaptureFinished(event.nativeEvent)}
-              tool={(!busy || !!captureRequest.current) && (draft || tool === 'pointer') ? tool : 'none'} strokeColor={strokeColor}
+              tool={(!busy || !!captureRequest.current) && (draft || tool === 'pointer' || tool === 'laser') ? tool : 'none'} strokeColor={strokeColor}
               onDrawingStart={event => { setTime(event.nativeEvent.time_us); if (event.nativeEvent.paused) setPaused(true); if (presenting) setComposerOpen(false); }}
-              onPointer={event => setPointerPulse({...event.nativeEvent, token: Date.now()})}
+              onPointer={event => { setLastPointer(normalizedPoint({x: event.nativeEvent.x * playerSize.width, y: event.nativeEvent.y * playerSize.height}, videoRect)); setZoomOpen(false); setSpeedOpen(false); if (tool === 'laser') setPointerPulse({...event.nativeEvent, token: Date.now()}); else { commentInput.current?.blur(); play(); } }}
               onTime={event => onTime(event.nativeEvent)} onDrawing={event => onDrawing(event.nativeEvent.drawingJson)} /> :
               <ThemeContext.Provider value={displayTheme}><Empty title="No videos" action={<Button primary disabled={!!busy || dialogOpen} onPress={() => projectId ? importVideo() : setProjectOpen(true)}>{projectId ? 'Add video' : 'New project'}</Button>} /></ThemeContext.Provider>}
             {presenting && header}
             {!!video && <>
-              {notesVisible && !draft && !discussionVisible && !(presenting && libraryVisible) && <ThemeContext.Provider value={displayTheme}><VideoNote notes={onVideoNotes} comments={videoComments} profileName={data.profile.name} colors={railColors} large={presenting} paused={paused} disabled={!!busy || dialogOpen} onPause={() => setPaused(true)} onReply={replyToNote} /></ThemeContext.Provider>}
-              {presenting && composer}
-              <PointerPulse point={pointerPulse} />
+              <ThemeContext.Provider value={displayTheme}>
+                {notesVisible && <VideoNote notes={onVideoNotes} comments={videoComments} profileName={data.profile.name} colors={railColors} expanded={expanded}
+                  viewport={playerSize} rect={videoRect} topInset={presenting ? 76 : 16} disabled={!!busy || dialogOpen || settingsOpen}
+                  replyParent={draft?.parent_comment_id} composer={draft?.parent_comment_id ? composer : null}
+                  onPause={() => setPaused(true)} onReply={replyToNote} onMove={moveComment}
+                  onToggle={item => { setPaused(true); setExpanded(previous => previous.has(item.comment_id) ? new Set() : new Set([item.comment_id])); }} />}
+                {!!draft && !draft.parent_comment_id && composerOpen && <SpatialCard position={notePosition(draft)} viewport={playerSize} rect={videoRect} width={Math.min(320, playerSize.width - 100)} topInset={presenting ? 76 : 16} active disabled={!!busy || dialogOpen}
+                  onGrab={() => { setPaused(true); commentInput.current?.blur(); }} onMove={position => updateDraft({position})}>
+                  <View style={{borderRadius: 14, borderWidth: 1, borderColor: colors.line, overflow: 'hidden'}}><ScrollView keyboardShouldPersistTaps="handled" style={{maxHeight: cardAvailableHeight(playerSize, videoRect, presenting ? 76 : 16, 98)}}>{composer}</ScrollView></View>
+                </SpatialCard>}
+              </ThemeContext.Provider>
+              {tool === 'laser' && <PointerPulse point={pointerPulse} />}
               <View style={vs.videoControls}>
                 <View pointerEvents={busy ? 'none' : 'auto'} style={vs.transport}>
-                  <Timeline time={time} duration={duration} comments={originalComments} selectedId={commentId} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />
                   <View style={vs.transportRow}>
-                    <Button quiet compact shortcut="previousComment" disabled={!previousNote || !!busy || dialogOpen} label="Previous comment" icon="previous" onPress={() => navigateNote(-1)} />
                     <Button compact shortcut="play" disabled={!!busy || dialogOpen} style={vs.playButton} label={paused ? 'Play video' : 'Pause video'} icon={paused ? 'play' : 'pause'} onPress={play} />
-                    <Button quiet compact shortcut="nextComment" disabled={!nextNote || !!busy || dialogOpen} label="Next comment" icon="chevronRight" onPress={() => navigateNote(1)} />
-                    <Text style={vs.time}>{timeLabel(time)}{!compactPlayer && <Text style={{color: videoTheme.colors.faint}}> / {timeLabel(duration)}</Text>}</Text>
-                    <View style={vs.transportSpacer} />
-                    <Button quiet compact disabled={!!busy || dialogOpen} label="Playback speed" onPress={() => setRate(previous => previous === 0.5 ? 1 : previous === 1 ? 1.5 : previous === 1.5 ? 2 : 0.5)}>{rate}×</Button>
-                    <Button quiet compact shortcut="annotations" active={annotationsVisible} label={annotationsVisible ? 'Hide drawings' : 'Show drawings'} icon={annotationsVisible ? 'eye' : 'eyeOff'} disabled={!!busy || dialogOpen} onPress={() => setAnnotationsVisible(value => !value)} />
-                    <Button primary compact shortcut="comment" disabled={!!busy || dialogOpen} onPress={focusComment} icon="comment" label="Write comment">{compactPlayer ? undefined : 'Comment'}</Button>
+                    <Text style={vs.time}>{timeLabel(time)}<Text style={{color: videoTheme.colors.faint}}> / {timeLabel(duration)}</Text></Text>
+                    <View style={{flex: 1, marginHorizontal: 12}}><Timeline time={time} duration={duration} comments={[]} selectedId={commentId} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} /></View>
+                    <Button quiet compact disabled={!!busy || dialogOpen} label="Playback speed" expanded={speedOpen} onPress={() => { setSpeedOpen(value => !value); setZoomOpen(false); }}>{rate}×</Button>
+                    <Button quiet compact label="Video zoom" expanded={zoomOpen} disabled={!!busy || dialogOpen} onPress={() => { setZoomOpen(value => !value); setSpeedOpen(false); }}>{Math.round(zoom * 100)}%</Button>
                     <Button quiet compact icon={presenting ? 'minimize' : 'maximize'} label={presenting ? 'Exit full screen' : 'Enter full screen'} shortcut="present" disabled={!!busy || dialogOpen} onPress={togglePresentation} />
                   </View>
                 </View>
               </View>
+              {speedOpen && <View style={[vs.drawingPalette, {left: undefined, top: undefined, right: 74, bottom: 66, flexDirection: 'column', gap: 2}]}>
+                {[.5, 1, 1.5, 2].map(value => <Button quiet compact key={value} active={rate === value} label={`Playback speed ${value}×`} onPress={() => { setRate(value); setSpeedOpen(false); }}>{value}×</Button>)}
+              </View>}
+              {zoomOpen && <View style={[vs.drawingPalette, {left: undefined, top: undefined, right: 18, bottom: 66, flexDirection: 'column', gap: 2}]}>
+                {[1, 1.5, 2, 3, 4].map(value => <Button quiet compact key={value} active={zoom === value} label={`Zoom ${value * 100}%`} onPress={() => { setZoom(value); setZoomOpen(false); }}>{value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}
+              </View>}
               <ThemeContext.Provider value={displayTheme}>
                 <View style={[s.toolBar, presenting && {top: 76}]}>
                   <Button quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={!!busy || dialogOpen} onPress={() => { chooseTool('pointer'); setPaletteOpen(false); }} />
                   {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={!!busy || dialogOpen} onPress={() => chooseTool(value)} />)}
+                  <Button quiet compact shortcut="laser" icon="target" label="Laser pointer" active={tool === 'laser'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('laser')} />
                   <View style={{height: 1, width: 22, backgroundColor: colors.separator, marginVertical: 3}} />
                   <Button quiet compact shortcut="comment" icon="comment" label="Add comment" disabled={!!busy || dialogOpen} onPress={focusComment} />
-                  {tool !== 'pointer' && <Pressable accessibilityRole="button" accessibilityLabel="Drawing colors" accessibilityState={{expanded: paletteOpen}} onPress={() => setPaletteOpen(value => !value)} style={[s.swatch, {marginVertical: 3}]}><View style={[s.swatchFill, {backgroundColor: strokeColor}]} /></Pressable>}
-                  {!!draft && <><View style={{height: 1, width: 22, backgroundColor: colors.separator, marginVertical: 3}} /><Button quiet compact shortcut="undo" label="Undo drawing" disabled={!draft.drawings.length || !!busy || dialogOpen} icon="undo" onPress={undoDrawing} /><Button quiet compact shortcut="redo" label="Redo drawing" disabled={!redo.length || !!busy || dialogOpen} icon="redo" onPress={redoDrawing} /></>}
+                  {tool !== 'pointer' && tool !== 'laser' && <Pressable accessibilityRole="button" accessibilityLabel="Drawing colors" accessibilityState={{expanded: paletteOpen}} onPress={() => setPaletteOpen(value => !value)} style={[s.swatch, {marginVertical: 3}]}><View style={[s.swatchFill, {backgroundColor: strokeColor}]} /></Pressable>}
+                  {!!draft && (!!draft.drawings.length || !!redo.length) && <><View style={{height: 1, width: 22, backgroundColor: colors.separator, marginVertical: 3}} /><Button quiet compact shortcut="undo" label="Undo drawing" disabled={!draft.drawings.length || !!busy || dialogOpen} icon="undo" onPress={undoDrawing} /><Button quiet compact shortcut="redo" label="Redo drawing" disabled={!redo.length || !!busy || dialogOpen} icon="redo" onPress={redoDrawing} /></>}
                 </View>
-                {paletteOpen && tool !== 'pointer' && <View style={[s.drawingPalette, presenting && {top: 76}]}>{palette.map((color, index) => <Pressable key={color} disabled={!!busy || dialogOpen} accessibilityRole="button" accessibilityLabel={`Drawing color ${['Blue', 'White', 'Amber', 'Green'][index]}`} accessibilityState={{selected: strokeColor === color}}
+                {paletteOpen && tool !== 'pointer' && tool !== 'laser' && <View style={[s.drawingPalette, presenting && {top: 76}]}>{palette.map((color, index) => <Pressable key={color} disabled={!!busy || dialogOpen} accessibilityRole="button" accessibilityLabel={`Drawing color ${['Blue', 'White', 'Amber', 'Green'][index]}`} accessibilityState={{selected: strokeColor === color}}
                   onPress={() => { setStrokeColor(color); setPaletteOpen(false); }} style={[s.swatch, strokeColor === color && s.swatchSelected]}><View style={[s.swatchFill, {backgroundColor: color}]} /></Pressable>)}</View>}
               </ThemeContext.Provider>
             </>}
           </View>
         </ThemeContext.Provider>
-        {!presenting && <ReviewTimeline time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => leaveDraft(() => { setDiscussionVisible(true); setLibraryVisible(false); selectCommentNow(items[0]); })} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />}
+        {!presenting && <ReviewTimeline video={video} time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => leaveDraft(() => { setNotesVisible(true); const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectCommentNow(next); setIsolatedReview(false); setExpanded(new Set([next.comment_id])); })} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />}
         </>}
         {!!busy && <View style={s.statusRow}><Text style={s.status}>{busy}</Text></View>}
       </View>
-      {presenting && (libraryVisible || discussionVisible) && <Pressable accessibilityRole="button" accessibilityLabel="Close panel" style={s.popoverDismiss} onPress={() => { setFullLibraryOpen(false); setFullDiscussionOpen(false); }} />}
-      {presenting && libraryVisible && libraryPanel}
-      {!!video && discussionVisible && discussionPanel}
     </View>
-    {settingsOpen && <SettingsPage profile={data.profile} initialTab={settingsTab} onProfileSave={saveSettingsProfile} settings={data.settings} recording={recording} error={settingsError || error} busy={!!busy} onRecord={id => { setRecording(id); setSettingsError(''); }} onChange={settings => void savePreferences(settings)} onTheme={choice => void changeTheme(choice)} onClose={() => { setRecording(null); setSettingsOpen(false); }} />}
+    {libraryOpen && !settingsOpen && <><Pressable accessible={false} style={[StyleSheet.absoluteFill, {top: 64}]} onPress={() => setLibraryOpen(false)} />{libraryPanel}</>}
+    {settingsOpen && <View style={[StyleSheet.absoluteFill, {zIndex: 100, alignItems: 'center', justifyContent: 'center', padding: 24}]} accessibilityViewIsModal>
+      <Pressable accessible={false} style={[StyleSheet.absoluteFill, {backgroundColor: '#00000045'}]} onPress={() => { setRecording(null); setSettingsOpen(false); }} />
+      <SettingsPage animateEntrance={settingsAnimate} profile={data.profile} initialTab={settingsTab} onProfileSave={saveSettingsProfile} settings={data.settings} recording={recording} error={settingsError || error} busy={!!busy} onRecord={id => { setRecording(id); setSettingsError(''); }} onChange={settings => void savePreferences(settings)} onTheme={choice => void changeTheme(choice)} onClose={() => { setRecording(null); setSettingsOpen(false); }} />
+    </View>}
     <Dialog visible={!!deleteTarget} onDismiss={() => { if (!busy) setDeleteTarget(null); }}>
       <Text style={s.modalTitle}>Delete {deleteTarget?.kind}?</Text>
       <Text style={s.modalBody}>{deleteTarget?.kind === 'folder' ? `Remove “${deleteTarget.title}”? Its videos will return to the project.` : `“${deleteTarget?.title}” and its comments will be removed from your library.`}</Text>
@@ -855,7 +853,7 @@ export default function App() {
     </Dialog>
     <Dialog visible={!!folderDialog} onDismiss={() => { if (!busy) setFolderDialog(null); }}>
       <Text style={s.modalTitle}>{folderDialog?.kind === 'create' ? 'New folder' : folderDialog?.kind === 'renameProject' ? 'Rename project' : 'Rename folder'}</Text>
-      <TextInput autoFocus accessibilityLabel={folderDialog?.kind === 'renameProject' ? 'Project name' : 'Folder name'} placeholder={folderDialog?.kind === 'renameProject' ? 'Project name' : 'Folder name'} placeholderTextColor={colors.faint} style={s.input} value={folderTitle} onChangeText={setFolderTitle} maxLength={100} onSubmitEditing={() => void saveFolder()} />
+      <TextField autoFocus accessibilityLabel={folderDialog?.kind === 'renameProject' ? 'Project name' : 'Folder name'} placeholder={folderDialog?.kind === 'renameProject' ? 'Project name' : 'Folder name'} placeholderTextColor={colors.faint} style={s.input} value={folderTitle} onChangeText={setFolderTitle} maxLength={100} onSubmitEditing={() => void saveFolder()} />
       {!!error && <Text accessibilityRole="alert" style={[s.hint, {color: colors.danger}]}>{error}</Text>}
       <View style={s.modalActions}><Button disabled={!!busy} onPress={() => setFolderDialog(null)}>Cancel</Button><Button primary disabled={!folderTitle.trim() || !!busy} onPress={() => void saveFolder()}>{folderDialog?.kind === 'create' ? 'Create' : 'Save'}</Button></View>
     </Dialog>
@@ -870,13 +868,13 @@ export default function App() {
     </Dialog>
     <Dialog visible={profileOpen} onDismiss={closeProfile}>
       <Text style={s.modalTitle}>Your name</Text>
-      <Text style={s.fieldLabel}>Name</Text><TextInput autoFocus accessibilityLabel="Display name" placeholder="Your name" placeholderTextColor={colors.faint} style={s.input} value={profileName} onChangeText={setProfileName} maxLength={100} onSubmitEditing={() => void saveProfile()} />
+      <Text style={s.fieldLabel}>Name</Text><TextField autoFocus accessibilityLabel="Display name" placeholder="Your name" placeholderTextColor={colors.faint} style={s.input} value={profileName} onChangeText={setProfileName} maxLength={100} onSubmitEditing={() => void saveProfile()} />
 
       {!!error && <Text accessibilityRole="alert" style={[s.hint, {color: colors.danger}]}>{error}</Text>}
       <View style={s.modalActions}><Button disabled={!!busy} onPress={closeProfile}>Cancel</Button><Button primary disabled={!profileName.trim() || !!busy} onPress={() => void saveProfile()}>Save</Button></View>
     </Dialog>
     <Dialog visible={projectOpen} onDismiss={() => { if (!busy) setProjectOpen(false); }}>
-      <Text style={s.modalTitle}>New project</Text><TextInput autoFocus accessibilityLabel="Project name" placeholder="Project name" placeholderTextColor={colors.faint} style={s.input} value={projectTitle} onChangeText={setProjectTitle} maxLength={100} onSubmitEditing={() => void createProject()} />
+      <Text style={s.modalTitle}>New project</Text><TextField autoFocus accessibilityLabel="Project name" placeholder="Project name" placeholderTextColor={colors.faint} style={s.input} value={projectTitle} onChangeText={setProjectTitle} maxLength={100} onSubmitEditing={() => void createProject()} />
       {!!error && <Text accessibilityRole="alert" style={[s.hint, {color: colors.danger}]}>{error}</Text>}
       <View style={s.modalActions}><Button disabled={!!busy} onPress={() => setProjectOpen(false)}>Cancel</Button><Button primary disabled={!projectTitle.trim() || !!busy} onPress={() => void createProject()}>Create</Button></View>
     </Dialog>
@@ -909,7 +907,7 @@ function TimeField({label, value, disabled, onChange, onError}: {
   const [text, setText] = useState(timeLabel(value, true));
   useEffect(() => setText(timeLabel(value, true)), [value]);
   const commit = () => { const parsed = parseTime(text); if (parsed === null) onError('Enter a time such as 01:30 or 01:30.250.'); else if (parsed !== value) onChange(parsed); setText(timeLabel(value, true)); };
-  return <View style={s.anchorField}><Text style={s.fieldLabel}>{label}</Text><TextInput accessibilityLabel={label} style={[s.input, s.anchorInput, disabled && {color: colors.muted}]} editable={!disabled}
+  return <View style={s.anchorField}><Text style={s.fieldLabel}>{label}</Text><TextField accessibilityLabel={label} style={[s.input, s.anchorInput, disabled && {color: colors.muted}]} editable={!disabled}
     value={text} onChangeText={setText} onEndEditing={commit} selectTextOnFocus /></View>;
 }
 function VisibilityEditor({draft, disabled, onChange, onError}: {

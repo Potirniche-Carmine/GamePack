@@ -8,6 +8,7 @@
 @property(nonatomic) BOOL paused;
 @property(nonatomic) BOOL pauseOnDrawing;
 @property(nonatomic) float rate;
+@property(nonatomic) double zoom;
 @property(nonatomic) double seekUs;
 @property(nonatomic) NSInteger seekToken;
 @property(nonatomic) NSInteger captureToken;
@@ -21,7 +22,9 @@
 @property(nonatomic,copy) RCTDirectEventBlock onDrawing;
 @property(nonatomic,copy) RCTDirectEventBlock onDrawingStart;
 @property(nonatomic,copy) RCTDirectEventBlock onPointer;
+@property(nonatomic,copy) RCTDirectEventBlock onZoom;
 @property(nonatomic,copy) RCTDirectEventBlock onCaptureFinished;
+- (void)zoomByFactor:(double)factor;
 @end
 @interface GPOverlay : NSView
 @property(nonatomic,weak) GPPlayer *owner;
@@ -50,8 +53,8 @@
 - (BOOL)isFlipped { return YES; }
 - (instancetype)initWithFrame:(NSRect)frame {
   if ((self = [super initWithFrame:frame])) {
-    self.wantsLayer = YES; self.layer.backgroundColor = NSColor.blackColor.CGColor;
-    _paused = YES; _rate = 1; _reviewEndUs = -1; _tool = @"pointer"; _strokeColor = @"#FFCC66";
+    self.wantsLayer = YES; self.layer.backgroundColor = NSColor.blackColor.CGColor; self.layer.masksToBounds = YES;
+    _paused = YES; _rate = 1; _zoom = 1; _reviewEndUs = -1; _tool = @"pointer"; _strokeColor = @"#FFCC66";
     _player = [AVPlayer new]; _player.actionAtItemEnd = AVPlayerActionAtItemEndPause;
     _videoLayer = [AVPlayerLayer playerLayerWithPlayer:_player]; _videoLayer.videoGravity = AVLayerVideoGravityResizeAspect;
     [self.layer addSublayer:_videoLayer];
@@ -62,7 +65,7 @@
   } return self;
 }
 - (void)dealloc { if (_timeObserver) [_player removeTimeObserver:_timeObserver]; [[NSNotificationCenter defaultCenter] removeObserver:self]; }
-- (void)layout { [super layout]; [CATransaction begin]; [CATransaction setDisableActions:YES]; _videoLayer.frame = self.bounds; _overlay.frame = self.bounds; [CATransaction commit]; [_overlay setNeedsDisplay:YES]; }
+- (void)layout { [super layout]; [CATransaction begin]; [CATransaction setDisableActions:YES]; _videoLayer.frame = [self contentRect]; _overlay.frame = self.bounds; [CATransaction commit]; [_overlay setNeedsDisplay:YES]; }
 - (void)setSource:(NSString *)source {
   if ([_source isEqualToString:source]) return; _source = [source copy]; _seekGeneration++; _loadGeneration++; NSInteger generation = _loadGeneration;
   [_player pause]; _samples = nil; _duration = 0; _videoSize = CGSizeZero; _finished = NO;
@@ -79,12 +82,23 @@
       self->_duration = CMTimeGetSeconds(asset.duration);
       AVAssetTrack *track = [[asset tracksWithMediaType:AVMediaTypeVideo] firstObject];
       CGSize size = CGSizeApplyAffineTransform(track.naturalSize, track.preferredTransform); self->_videoSize = CGSizeMake(fabs(size.width), fabs(size.height));
+      self.needsLayout = YES;
       [self performSeek]; [self emitTime:NO];
     });
   }];
 }
 - (void)setPaused:(BOOL)paused { _paused = paused; _finished = NO; if (paused || _pendingCaptureToken) [_player pause]; else if (!_seeking) _player.rate = _rate; [_overlay setNeedsDisplay:YES]; }
 - (void)setRate:(float)rate { _rate = (rate < 0 ? fmax(-4, rate) : fmax(0.25, fmin(4.0, rate))); if (!_paused && !_seeking && !_pendingCaptureToken) _player.rate = _rate; }
+- (void)setZoom:(double)zoom {
+  double value = isfinite(zoom) ? fmin(4, fmax(1, zoom)) : 1;
+  if (fabs(value - _zoom) < 0.00001) return;
+  [self finishStroke]; _zoom = value; self.needsLayout = YES; [_overlay setNeedsDisplay:YES];
+}
+- (void)zoomByFactor:(double)factor {
+  if (!isfinite(factor) || factor <= 0 || !_player.currentItem) return;
+  double previous = _zoom; self.zoom = _zoom * factor;
+  if (self.onZoom && previous != _zoom) self.onZoom(@{@"zoom":@(_zoom)});
+}
 - (void)setSeekUs:(double)seekUs { _seekUs = seekUs; }
 - (void)setSeekToken:(NSInteger)seekToken { _seekToken = seekToken; }
 - (void)didSetProps:(NSArray<NSString *> *)changedProps {
@@ -134,7 +148,7 @@
 }
 - (NSRect)contentRect {
   CGSize size = _videoSize; if (size.width <= 0 || size.height <= 0) return self.bounds;
-  CGFloat scale = fmin(self.bounds.size.width/size.width, self.bounds.size.height/size.height);
+  CGFloat scale = fmin(self.bounds.size.width/size.width, self.bounds.size.height/size.height) * _zoom;
   CGSize fitted = CGSizeMake(size.width*scale,size.height*scale);
   return NSMakeRect((self.bounds.size.width-fitted.width)/2,(self.bounds.size.height-fitted.height)/2,fitted.width,fitted.height);
 }
@@ -151,7 +165,7 @@
   return @{@"x":@(llround(x*1000000)),@"y":@(llround(y*1000000)),@"t_us":@(time)};
 }
 - (void)beginStroke:(NSEvent *)event {
-  if ([_tool isEqual:@"pointer"]) {
+  if ([_tool isEqual:@"pointer"] || [_tool isEqual:@"laser"]) {
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     if (self.onPointer) self.onPointer(@{@"x":@(p.x / MAX(1, self.bounds.size.width)), @"y":@(p.y / MAX(1, self.bounds.size.height))});
     return;
@@ -238,13 +252,16 @@
 - (BOOL)isOpaque { return NO; }
 - (void)drawRect:(NSRect)dirtyRect { [self.owner drawOverlay]; }
 - (BOOL)acceptsFirstResponder { return YES; }
-- (void)mouseDown:(NSEvent *)event {
+- (BOOL)eventTargetsOverlay:(NSEvent *)event {
   // AppKit may forward an unhandled React control event to the current first
   // responder. Floating controls must never trigger a pointer or stroke below.
   NSView *content = self.window.contentView;
   NSPoint point = [content.superview convertPoint:event.locationInWindow fromView:nil];
   NSView *hit = [content hitTest:point];
-  _pointerDown = hit == self || [hit isDescendantOf:self];
+  return hit == self || [hit isDescendantOf:self];
+}
+- (void)mouseDown:(NSEvent *)event {
+  _pointerDown = [self eventTargetsOverlay:event];
   if (!_pointerDown) return;
   [self.window makeFirstResponder:self]; [self.owner beginStroke:event];
 }
@@ -253,6 +270,16 @@
   if (!_pointerDown) return;
   _pointerDown = NO;
   [self.owner continueStroke:event]; [self.owner finishStroke];
+}
+- (void)magnifyWithEvent:(NSEvent *)event {
+  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:fmax(0.05, 1 + event.magnification)];
+}
+- (void)smartMagnifyWithEvent:(NSEvent *)event {
+  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:(self.owner.zoom > 1 ? 1 / self.owner.zoom : 2)];
+}
+- (void)scrollWheel:(NSEvent *)event {
+  if (![self eventTargetsOverlay:event] || fabs(event.scrollingDeltaY) < 0.001) return;
+  [self.owner zoomByFactor:exp(event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 0.008 : 0.08))];
 }
 @end
 @interface GamePackPlayerManager : RCTViewManager @end
@@ -263,6 +290,7 @@ RCT_EXPORT_VIEW_PROPERTY(source, NSString)
 RCT_EXPORT_VIEW_PROPERTY(paused, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(pauseOnDrawing, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(rate, float)
+RCT_EXPORT_VIEW_PROPERTY(zoom, double)
 RCT_EXPORT_VIEW_PROPERTY(seekUs, double)
 RCT_EXPORT_VIEW_PROPERTY(seekToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(captureToken, NSInteger)
@@ -276,5 +304,6 @@ RCT_EXPORT_VIEW_PROPERTY(onTime, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawing, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawingStart, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onPointer, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onZoom, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onCaptureFinished, RCTDirectEventBlock)
 @end

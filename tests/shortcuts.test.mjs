@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {binding, bindingError, migrateReviewBindings, shortcutAction, shortcutLabel, shortcuts} from '../packages/app/src/shortcuts.ts';
+import {binding, bindingError, effectiveShortcutChords, migrateReviewBindings, shortcutAction, shortcutLabel, shortcuts} from '../packages/app/src/shortcuts.ts';
 
 test('new review commands preserve keys already customized in older libraries', () => {
   const old = {play: 'F', comment: 'Shift+M', nextVideo: 'Mod+Shift+R'};
@@ -34,4 +34,24 @@ test('conflicts, text editing, and reserved keys cannot silently overwrite comma
   assert.equal(bindingError('play', 'Mod+Shift+P', {}), null);
   assert.equal(shortcutLabel('Mod+Shift+Z', false), 'Ctrl + Shift + Z');
   assert.equal(shortcutLabel(null, true), 'Unassigned');
+});
+
+test('the printed plus key zooms with the default binding while respecting overrides', () => {
+  for (const repeat of [false, true]) {
+    assert.equal(shortcutAction({chord: '=', repeat}, {}), 'zoomIn');
+    assert.equal(shortcutAction({chord: 'Shift+=', repeat}, {}), 'zoomIn');
+  }
+  assert.ok(effectiveShortcutChords({}).includes('Shift+='));
+  for (const custom of [{zoomIn: null}, {zoomIn: 'Shift+Z'}]) {
+    assert.equal(shortcutAction({chord: 'Shift+=', repeat: false}, custom), undefined);
+    assert.equal(effectiveShortcutChords(custom).includes('Shift+='), false);
+  }
+  const assigned = {play: 'Shift+='};
+  assert.equal(bindingError('play', 'Shift+=', {}), null);
+  assert.equal(shortcutAction({chord: 'Shift+=', repeat: false}, assigned), 'play');
+  assert.equal(shortcutAction({chord: 'Shift+=', repeat: true}, assigned), undefined);
+  assert.equal(effectiveShortcutChords(assigned).filter(chord => chord === 'Shift+=').length, 1);
+  assert.equal(shortcutAction({chord: '=', repeat: false}, assigned), 'zoomIn');
+  assert.equal(shortcutAction({chord: '=', repeat: false}, {zoomIn: 'Shift+='}), undefined);
+  assert.equal(shortcutAction({chord: 'Shift+=', repeat: true}, {zoomIn: 'Shift+='}), 'zoomIn');
 });

@@ -1,5 +1,6 @@
 import type {Comment} from './types';
 import {playbackWindow} from './playback';
+import {conversationRoot} from './discussion';
 
 export function noteWindow(comment: Comment, duration: number): {start: number; end: number} {
   const window = playbackWindow(comment.anchor, duration);
@@ -10,6 +11,13 @@ export function noteWindow(comment: Comment, duration: number): {start: number; 
     last = Math.max(last, mark.visible_until_us);
   }
   return {start: window.start + first, end: Math.min(window.end, window.start + last)};
+}
+
+/** Replies open the visible root card, including a just-posted reply that has
+ * not reached the current React state snapshot yet. */
+export function conversationTarget(comments: readonly Comment[], item: Comment, duration: number): {comment: Comment; time: number} {
+  const root = item.parent_comment_id ? conversationRoot(comments, item.parent_comment_id) ?? item : item;
+  return {comment: root, time: noteWindow(root, duration).start};
 }
 
 export function notesAtTime(comments: readonly Comment[], time: number, duration: number): Comment[] {

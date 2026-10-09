@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {noteWindow, notesAtTime, adjacentNote} from '../packages/app/src/presentation.ts';
+import {conversationTarget, noteWindow, notesAtTime, adjacentNote} from '../packages/app/src/presentation.ts';
 import {commentThreads, replyBranches, toggleReplies, visibleThreads} from '../packages/app/src/review.ts';
 
 const second = 1_000_000;
@@ -56,4 +56,19 @@ test('replies remain in discussion and never become playback overlays or navigat
   assert.equal(adjacentNote(records, 'coach', 2 * second, 30 * second, 1).comment_id, 'next');
   assert.equal(adjacentNote(records, 'follow-up', 4 * second, 30 * second, 1).comment_id, 'next');
   assert.equal(adjacentNote(records, 'next', 9 * second, 30 * second, -1).comment_id, 'coach');
+});
+
+test('reply creation and publication target the root first visible drawing, including stale state', () => {
+  const root = {...comment('coach', 0, 10), drawings: [mark(3, 8)]};
+  const child = {...comment('reply', 0, 10), parent_comment_id: 'coach'};
+  const nested = {...comment('new-reply', 9, 10), parent_comment_id: 'reply'};
+  for (const [records, item] of [[[root], child], [[root, child], child], [[root, child], nested]]) {
+    const target = conversationTarget(records, item, 15 * second);
+    assert.equal(target.comment.comment_id, 'coach');
+    assert.equal(target.time, 3 * second);
+    assert.equal(notesAtTime(records, target.time, 15 * second)[0].comment_id, 'coach');
+  }
+  assert.deepEqual(conversationTarget([root], root, 15 * second), {comment: root, time: 3 * second});
+  const orphan = {...comment('orphan', 5, 6), parent_comment_id: 'missing'};
+  assert.deepEqual(conversationTarget([], orphan, 15 * second), {comment: orphan, time: 5 * second});
 });

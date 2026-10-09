@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {discussionReplies, toggleDiscussion} from '../packages/app/src/discussion.ts';
+import {conversationRoot, discussionReplies, toggleDiscussion} from '../packages/app/src/discussion.ts';
 import {commentThreads, expandedAncestors, visibleThreads} from '../packages/app/src/review.ts';
 
 const comment = (id, parent = null) => ({comment_id: id, parent_comment_id: parent});
@@ -56,4 +56,13 @@ test('selecting then opening a comment reveals its full subtree and a second cli
   assert.deepEqual(visibleThreads(roots, collapsed).map(({node}) => node.comment.comment_id), ['root', 'other', 'unrelated']);
   assert.deepEqual([...original], ['other']);
   assert.deepEqual(toggleDiscussion(comments, 'unknown', original), original);
+});
+
+test('inline reply roots remain reachable across independent anchors and broken imports', () => {
+  const root = {...comment('root'), anchor: {kind: 'point', at_us: 0}};
+  const child = {...comment('child', 'root'), anchor: {kind: 'point', at_us: 9000000}};
+  assert.equal(conversationRoot([root, child], 'child'), root);
+  assert.equal(conversationRoot([child], 'child'), child);
+  assert.equal(conversationRoot([root], 'unknown'), undefined);
+  assert.ok(conversationRoot([comment('a', 'b'), comment('b', 'a')], 'a'));
 });

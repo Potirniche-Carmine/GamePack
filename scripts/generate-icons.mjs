@@ -1,7 +1,7 @@
 // Official Lucide assets, rendered at native display scales. No custom paths.
 import {readFileSync, writeFileSync, mkdirSync, copyFileSync} from 'node:fs';
 import {Resvg} from '@resvg/resvg-js';
-const names = ['maximize', 'minimize', 'panel-left', 'panel-right', 'chevron-left', 'chevrons-down-up', 'chevrons-up-down', 'bookmark', 'mouse-pointer-2', 'pencil', 'move-up-right', 'ellipse', 'undo-2', 'redo-2', 'settings', 'settings-2', 'trash-2', 'folder', 'film', 'message-square', 'reply', 'play', 'pause', 'chevron-right', 'chevron-down', 'x', 'plus', 'eye', 'eye-off', 'clock', 'check'];
+const names = ['maximize', 'minimize', 'panel-left', 'panel-right', 'chevron-left', 'chevrons-down-up', 'chevrons-up-down', 'bookmark', 'mouse-pointer-2', 'pencil', 'move-up-right', 'ellipse', 'undo-2', 'redo-2', 'settings', 'settings-2', 'trash-2', 'folder', 'film', 'message-square', 'reply', 'play', 'pause', 'chevron-right', 'chevron-down', 'x', 'plus', 'eye', 'eye-off', 'clock', 'check', 'target'];
 const output = new URL('../packages/app/assets/icons/', import.meta.url);
 mkdirSync(output, {recursive: true});
 for (const name of names) {

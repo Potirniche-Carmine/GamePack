@@ -1,6 +1,7 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 #import <AppKit/AppKit.h>
+#import <AVFoundation/AVFoundation.h>
 #include "gamepack-core/src/lib.rs.h"
 
 @interface GamePack : RCTEventEmitter <RCTBridgeModule>
@@ -96,6 +97,56 @@ RCT_REMAP_METHOD(command, command:(NSString *)request resolver:(RCTPromiseResolv
     auto response = gamepack::dispatch(rust::Str([[self root] UTF8String]), rust::Str([request UTF8String]));
     resolve([[NSString alloc] initWithBytes:response.data() length:response.size() encoding:NSUTF8StringEncoding]);
   } catch (const std::exception &e) { reject(@"engine", [NSString stringWithUTF8String:e.what()], nil); }
+}
+// Filmstrip decoding is isolated from the engine queue and never delays playback or commands.
+RCT_REMAP_METHOD(thumbnails, thumbnails:(NSString *)path mediaId:(NSString *)mediaId resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSRegularExpression *identifier = [NSRegularExpression regularExpressionWithPattern:@"^blake3:([0-9a-f]{64}):([0-9]{1,20})$" options:0 error:nil];
+  NSTextCheckingResult *match = [identifier firstMatchInString:mediaId ?: @"" options:0 range:NSMakeRange(0, mediaId.length)];
+  if (!match || !path.isAbsolutePath) { resolve(@[]); return; }
+  NSString *cacheKey = [NSString stringWithFormat:@"%@-%@", [mediaId substringWithRange:[match rangeAtIndex:1]], [mediaId substringWithRange:[match rangeAtIndex:2]]];
+  NSString *directory = [[[self root] stringByAppendingPathComponent:@"thumbnails"] stringByAppendingPathComponent:cacheKey];
+  static dispatch_queue_t queue;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{ queue = dispatch_queue_create("app.gamepack.thumbnails", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0)); });
+  dispatch_async(queue, ^{
+    @autoreleasepool {
+      @try {
+        NSFileManager *files = NSFileManager.defaultManager;
+        if (![files createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil]) { resolve(@[]); return; }
+        const NSInteger count = 12;
+        NSMutableArray<NSString *> *paths = [NSMutableArray new];
+        NSMutableArray<NSString *> *urls = [NSMutableArray new];
+        BOOL complete = YES;
+        for (NSInteger index = 0; index < count; index++) {
+          NSString *file = [directory stringByAppendingPathComponent:[NSString stringWithFormat:@"frame-%02ld.jpg", (long)index]];
+          [paths addObject:file]; [urls addObject:[NSURL fileURLWithPath:file].absoluteString];
+          if ([[files attributesOfItemAtPath:file error:nil][NSFileSize] unsignedLongLongValue] == 0) complete = NO;
+        }
+        if (complete) { resolve(urls); return; }
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:path] options:nil];
+        double seconds = CMTimeGetSeconds(asset.duration);
+        if (!isfinite(seconds) || seconds <= 0) { resolve(@[]); return; }
+        AVAssetImageGenerator *generator = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];
+        generator.appliesPreferredTrackTransform = YES;
+        generator.maximumSize = CGSizeMake(320, 180);
+        generator.requestedTimeToleranceBefore = CMTimeMakeWithSeconds(0.25, 600);
+        generator.requestedTimeToleranceAfter = CMTimeMakeWithSeconds(0.25, 600);
+        for (NSInteger index = 0; index < count; index++) {
+          @autoreleasepool {
+            if ([[files attributesOfItemAtPath:paths[index] error:nil][NSFileSize] unsignedLongLongValue] > 0) continue;
+            CMTime at = CMTimeMakeWithSeconds(seconds * ((double)index + 0.5) / count, 600);
+            CGImageRef image = [generator copyCGImageAtTime:at actualTime:nullptr error:nil];
+            if (!image) { resolve(@[]); return; }
+            NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithCGImage:image];
+            CGImageRelease(image);
+            NSData *jpeg = [bitmap representationUsingType:NSBitmapImageFileTypeJPEG properties:@{NSImageCompressionFactor:@0.76}];
+            if (!jpeg.length || ![jpeg writeToFile:paths[index] options:NSDataWritingAtomic error:nil]) { resolve(@[]); return; }
+          }
+        }
+        resolve(urls);
+      } @catch (NSException *exception) { resolve(@[]); }
+    }
+  });
 }
 RCT_REMAP_METHOD(chooseVideo, chooseVideoWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{

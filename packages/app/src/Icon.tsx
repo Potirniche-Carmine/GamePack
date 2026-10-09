@@ -16,6 +16,7 @@ const icons = {
   pen: require('../assets/icons/pencil.png'),
   arrow: require('../assets/icons/move-up-right.png'),
   ellipse: require('../assets/icons/ellipse.png'),
+  target: require('../assets/icons/target.png'),
   pointer: require('../assets/icons/mouse-pointer-2.png'),
   play: require('../assets/icons/play.png'),
   pause: require('../assets/icons/pause.png'),

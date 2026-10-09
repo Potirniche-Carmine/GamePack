@@ -1,10 +1,10 @@
 export type Anchor =
   | {kind: 'point'; at_us: number}
   | {kind: 'interval'; start_us: number; end_us: number};
-export type DrawingTool = 'none' | 'pointer' | 'pen' | 'arrow' | 'ellipse';
+export type DrawingTool = 'none' | 'pointer' | 'laser' | 'pen' | 'arrow' | 'ellipse';
 export type Drawing = {
   id: string;
-  tool: Exclude<DrawingTool, 'none' | 'pointer'>;
+  tool: Exclude<DrawingTool, 'none' | 'pointer' | 'laser'>;
   color: string;
   width: number;
   visible_from_us: number;

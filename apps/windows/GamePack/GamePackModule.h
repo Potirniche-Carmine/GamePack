@@ -23,6 +23,8 @@ struct GamePackModule {
   void Command(std::string request, winrt::Microsoft::ReactNative::ReactPromise<std::string> promise) noexcept;
   REACT_METHOD(ChooseVideo, L"chooseVideo")
   void ChooseVideo(winrt::Microsoft::ReactNative::ReactPromise<winrt::Microsoft::ReactNative::JSValue> promise) noexcept;
+  REACT_METHOD(Thumbnails, L"thumbnails")
+  void Thumbnails(std::string path, std::string mediaId, winrt::Microsoft::ReactNative::ReactPromise<std::vector<std::string>> promise) noexcept;
   REACT_METHOD(Directory, L"dataDirectory")
   void Directory(winrt::Microsoft::ReactNative::ReactPromise<std::string> promise) noexcept;
   REACT_METHOD(SetAppearance, L"setAppearance")
