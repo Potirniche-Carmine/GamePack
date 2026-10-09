@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {activeCommentIds, annotationScene, coloredReview, commentColorMap, playbackWindow} from '../packages/app/src/playback.ts';
+import {activeCommentIds, annotationScene, reviewScene, commentColorMap, playbackWindow} from '../packages/app/src/playback.ts';
 
 const second = 1_000_000;
 function record(id, anchor) {
@@ -42,17 +42,24 @@ test('a moment near the end stops at EOF and an exact-EOF point remains viewable
   assert.equal(scene.anchor.end_us, 10 * second + 1);
 });
 
-test('comment color matches its drawings for combined and isolated review in each theme', () => {
+test('combined and selected playback preserve every original stroke color in both themes', () => {
   const comment = record('stable-comment', {kind: 'interval', start_us: second, end_us: 4 * second});
+  comment.drawings.push({...comment.drawings[0], id: 'blue', color: '#79BFFD'});
   for (const dark of [true, false]) {
     const colors = commentColorMap([comment], dark);
-    const color = colors.get(comment.comment_id);
-    assert.equal(annotationScene([comment], 10 * second, dark).drawings[0].color, color);
-    assert.equal(coloredReview(comment, dark, colors).drawings[0].color, color);
-    assert.equal(commentColorMap([comment], dark).get(comment.comment_id), color);
+    assert.deepEqual(annotationScene([comment], 10 * second).drawings.map(d => d.color), ['#FFFFFF', '#79BFFD']);
+    assert.deepEqual(reviewScene(comment).drawings.map(d => d.color), ['#FFFFFF', '#79BFFD']);
+    assert.ok(colors.has(comment.comment_id));
   }
-  assert.notEqual(commentColorMap([comment], true).get(comment.comment_id), commentColorMap([comment], false).get(comment.comment_id));
-  assert.equal(comment.drawings[0].color, '#FFFFFF');
+});
+
+test('pin colors follow the author across comments and imported ordering', () => {
+  const comments = ['first', 'second'].map(id => ({...record(id, {kind: 'point', at_us: second}), author_id: 'same-author'}));
+  for (const dark of [true, false]) {
+    const colors = commentColorMap(comments, dark);
+    assert.equal(colors.get('first'), colors.get('second'));
+    assert.equal(commentColorMap([comments[1]], dark).get('second'), colors.get('second'));
+  }
 });
 
 test('neighboring reviews receive distinct colors and adding later reviews preserves existing colors', () => {
@@ -60,8 +67,8 @@ test('neighboring reviews receive distinct colors and adding later reviews prese
   const colors = commentColorMap(comments, true);
   assert.equal(new Set(colors.values()).size, 4);
   assert.deepEqual([...commentColorMap(comments.slice(0, 3), true)], [...colors].slice(0, 3));
-  assert.deepEqual([...commentColorMap([...comments].reverse(), true)], [...colors]);
-  assert.equal(coloredReview(comments[2], true, colors).drawings[0].color, annotationScene(comments, 10 * second, true).drawings[2].color);
+  assert.deepEqual(commentColorMap([...comments].reverse(), true), colors);
+  assert.equal(reviewScene(comments[2], true, colors).drawings[0].color, annotationScene(comments, 10 * second, true).drawings[2].color);
 });
 
 test('overlapping drawing order is stable across input order', () => {

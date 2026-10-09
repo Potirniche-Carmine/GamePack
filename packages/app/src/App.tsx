@@ -3,7 +3,7 @@ import {ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, Vie
 import {anchorLabel, anchorStart, Button, Dialog, Empty, parseTime, ShortcutContext, TextField, Timeline, timeLabel} from './components';
 import {chooseVideo, command, configureShortcuts, dataDirectory, GamePackPlayer, listenShortcuts, listenWindowState, setAppearance, setFullScreen} from './native';
 import {beginLiveDraft, capturedDraft, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings} from './review';
-import {annotationScene, coloredReview, commentColorMap} from './playback';
+import {annotationScene, reviewScene, commentColorMap} from './playback';
 import {Icon} from './Icon';
 import {VideoNote} from './VideoNote';
 import {PointerPulse} from './PointerPulse';
@@ -127,10 +127,9 @@ export default function App() {
   const projectVideos = data ? libraryContents(data.projects, data.folders, data.videos, projectId, folderId).videos : [];
   const activeScene = draft ?? selected;
   const isLive = !!draft && liveId === draft.id;
-  const aggregateScene = useMemo(() => annotationScene(originalComments, duration, true), [originalComments, duration]);
-  const commentColors = useMemo(() => commentColorMap(originalComments, true), [originalComments]);
+  const aggregateScene = useMemo(() => annotationScene(originalComments, duration), [originalComments, duration]);
   const railColors = useMemo(() => commentColorMap(originalComments, displayTheme.dark), [originalComments, displayTheme.dark]);
-  const selectedScene = useMemo(() => selected ? coloredReview(selected, true, commentColors) : null, [selected, theme.dark, commentColors]);
+  const selectedScene = useMemo(() => selected ? reviewScene(selected) : null, [selected]);
   const draftStart = draft ? anchorStart(draft.anchor) : 0;
   const draftEnd = draft?.anchor.kind === 'interval' ? (isLive ? duration : draft.anchor.end_us) : 0;
   const draftKind = draft?.anchor.kind;
@@ -284,8 +283,7 @@ export default function App() {
     const generation = ++sourceGeneration.current;
     setPaused(true); setRate(1); clearEditing(); setShowScene(true); setLastPointer(null); setZoomOpen(false); setSpeedOpen(false); setZoom(1); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false);
     setCommentId(null); setExpanded(new Set()); setDuration(item.duration_us); seek(0);
-    const pending = resumableDraft(draftsRef.current, item.id);
-    if (pending) restoreDraftNow(pending);
+    setComposerOpen(false);
     try {
       const result = await command<{valid: boolean; path: string}>(root, 'verify_video', {video_id: item.id});
       if (generation === sourceGeneration.current && !result.valid)
@@ -354,7 +352,7 @@ export default function App() {
     if (!paused) { setPaused(true); return; }
     setLibraryOpen(false);
     if (!draft) { setCommentId(null); setIsolatedReview(false); setReviewing(false); setShowScene(true); }
-    if (draft && draft.anchor.kind === 'point') { startLive(); return; }
+    if (draft && !draft.parent_comment_id && !isLive) { startLive(); return; }
     if (!draft) setTool(previous => previous === 'laser' ? 'laser' : 'pointer');
     if (isLive && time >= duration) seek(anchorStart(draft!.anchor));
     else if (!isLive && draft?.anchor.kind === 'interval' && (time < draft.anchor.start_us || time >= draft.anchor.end_us)) seek(draft.anchor.start_us);
@@ -408,7 +406,7 @@ export default function App() {
         next = finalizeLiveDraft(next, time, duration, furthest.current.get(current.id) ?? time);
       else if (savingDraftId.current === current.id && next.anchor.kind === 'interval')
         next = finalizeLiveDraft(next, next.anchor.end_us, duration, next.anchor.end_us);
-      replaceDraft(next); setRedo([]); setComposerOpen(true); setTool('pointer'); setNotesVisible(true);
+      replaceDraft(next); setRedo([]); setComposerOpen(true); setNotesVisible(true);
       if (data?.settings.pause_after_drawing) setPaused(true);
     } catch (cause) { setError(message(cause)); }
   };
@@ -686,9 +684,9 @@ export default function App() {
       case 'allReplies': setNotesVisible(true); setPaused(true); toggleAllReplies(); break;
       case 'play': play(); break;
       case 'pause': setPaused(true); break;
-      case 'forward': setTool('pointer'); setRate(!paused && rate > 0 ? Math.min(4, rate * 2) : 1); setPaused(false); break;
-      case 'reverse': setTool('pointer'); setRate(!paused && rate < 0 ? Math.max(-4, rate * 2) : -1); setPaused(false); break;
-      case 'previousFrame': case 'nextFrame': setPaused(true); setTool('pointer'); setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); break;
+      case 'forward': setRate(!paused && rate > 0 ? Math.min(4, rate * 2) : 1); setPaused(false); break;
+      case 'reverse': setRate(!paused && rate < 0 ? Math.max(-4, rate * 2) : -1); setPaused(false); break;
+      case 'previousFrame': case 'nextFrame': setPaused(true); setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); break;
       case 'back': seek(Math.max(0, time - 5000000)); break;
       case 'ahead': seek(Math.min(duration, time + 5000000)); break;
       case 'start': seek(0); break;

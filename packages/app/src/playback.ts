@@ -7,8 +7,11 @@ const lightPalette = ['#6953BD', '#1F78BC', '#187E79', '#B14C80', '#AA6625'];
 
 export function commentColorMap(comments: readonly Comment[], dark: boolean): Map<string, string> {
   const palette = dark ? darkPalette : lightPalette;
-  const ordered = [...comments].sort((a, b) => (a.created_at_reported ?? 0) - (b.created_at_reported ?? 0) || a.comment_id.localeCompare(b.comment_id));
-  return new Map(ordered.map((comment, index) => [comment.comment_id, palette[index % palette.length]]));
+  return new Map(comments.map(comment => {
+    const identity = comment.author_id || comment.comment_id;
+    const hash = [...identity].reduce((value, character) => (value * 31 + character.codePointAt(0)!) >>> 0, 0);
+    return [comment.comment_id, palette[hash % palette.length]];
+  }));
 }
 
 export function playbackWindow(anchor: Anchor, durationUs: number): {start: number; end: number} {
@@ -26,11 +29,10 @@ export function activeCommentIds(comments: readonly Comment[], timeUs: number, d
 }
 
 /** Rendering copies use a common video-time origin; saved records remain untouched. */
-export function annotationScene(comments: readonly Comment[], durationUs: number, dark: boolean): {
+export function annotationScene(comments: readonly Comment[], durationUs: number): {
   id: string; anchor: Anchor; drawings: Drawing[];
 } {
   const drawings: Drawing[] = [];
-  const colors = commentColorMap(comments, dark);
   const ordered = [...comments].sort((a, b) => {
     const startA = a.anchor.kind === 'point' ? a.anchor.at_us : a.anchor.start_us;
     const startB = b.anchor.kind === 'point' ? b.anchor.at_us : b.anchor.start_us;
@@ -39,21 +41,19 @@ export function annotationScene(comments: readonly Comment[], durationUs: number
   for (const comment of ordered) {
     const {start, end} = playbackWindow(comment.anchor, durationUs);
     if (end <= start) continue;
-    const color = colors.get(comment.comment_id)!;
     for (const drawing of comment.drawings) {
       const point = comment.anchor.kind === 'point';
       const visibleFrom = point ? start : start + drawing.visible_from_us;
       const visibleUntil = point ? end : Math.min(end, start + drawing.visible_until_us);
       if (visibleUntil <= visibleFrom) continue;
       const samples = drawing.samples.map(sample => ({...sample, t_us: point ? start : start + sample.t_us}));
-      drawings.push({...drawing, id: `${comment.comment_id}:${drawing.id}`, color,
+      drawings.push({...drawing, id: `${comment.comment_id}:${drawing.id}`,
         visible_from_us: visibleFrom, visible_until_us: visibleUntil, samples});
     }
   }
   return {id: 'all-comments', anchor: {kind: 'interval', start_us: 0, end_us: Math.max(1, durationUs + 1)}, drawings};
 }
 
-export function coloredReview(comment: Comment, dark: boolean, colors?: ReadonlyMap<string, string>): {id: string; anchor: Anchor; drawings: Drawing[]} {
-  const color = colors?.get(comment.comment_id) ?? commentColorMap([comment], dark).get(comment.comment_id)!;
-  return {id: comment.comment_id, anchor: comment.anchor, drawings: comment.drawings.map(drawing => ({...drawing, color}))};
+export function reviewScene(comment: Comment): {id: string; anchor: Anchor; drawings: Drawing[]} {
+  return {id: comment.comment_id, anchor: comment.anchor, drawings: comment.drawings};
 }
