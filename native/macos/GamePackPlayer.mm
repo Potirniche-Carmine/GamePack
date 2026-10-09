@@ -250,6 +250,12 @@
 }
 - (BOOL)isFlipped { return YES; }
 - (BOOL)isOpaque { return NO; }
+- (void)viewDidChangeEffectiveAppearance {
+  [super viewDidChangeEffectiveAppearance];
+  // AppKit invalidates the transparent backing layer when appearance changes.
+  // A paused AVPlayer has no next frame to request the annotation redraw.
+  [self setNeedsDisplay:YES];
+}
 - (void)drawRect:(NSRect)dirtyRect { [self.owner drawOverlay]; }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)eventTargetsOverlay:(NSEvent *)event {
