@@ -14,7 +14,7 @@ test('ordinary playback combines reviews in video time without modifying their r
   const interval = record('interval', {kind: 'interval', start_us: 3 * second, end_us: 5 * second});
   const moment = record('moment', {kind: 'point', at_us: second});
   const original = JSON.stringify([interval, moment]);
-  const scene = annotationScene([interval, moment], 10 * second, true);
+  const scene = annotationScene([interval, moment], 10 * second);
   assert.equal(scene.anchor.start_us, 0);
   assert.deepEqual(scene.drawings.map(d => [d.visible_from_us, d.visible_until_us, d.samples.map(s => s.t_us)]), [
     [second, 3 * second, [second, second]],
@@ -37,7 +37,7 @@ test('a moment near the end stops at EOF and an exact-EOF point remains viewable
   assert.deepEqual(playbackWindow({kind: 'point', at_us: 9.5 * second}, 10 * second), {start: 9.5 * second, end: 10 * second});
   const last = record('last', {kind: 'point', at_us: 10 * second});
   assert.equal(activeCommentIds([last], 10 * second, 10 * second).has('last'), true);
-  const scene = annotationScene([last], 10 * second, false);
+  const scene = annotationScene([last], 10 * second);
   assert.equal(scene.drawings[0].visible_until_us, 10 * second + 1);
   assert.equal(scene.anchor.end_us, 10 * second + 1);
 });
@@ -68,11 +68,11 @@ test('neighboring reviews receive distinct colors and adding later reviews prese
   assert.equal(new Set(colors.values()).size, 4);
   assert.deepEqual([...commentColorMap(comments.slice(0, 3), true)], [...colors].slice(0, 3));
   assert.deepEqual(commentColorMap([...comments].reverse(), true), colors);
-  assert.equal(reviewScene(comments[2], true, colors).drawings[0].color, annotationScene(comments, 10 * second, true).drawings[2].color);
+  assert.equal(reviewScene(comments[2]).drawings[0].color, annotationScene(comments, 10 * second).drawings[2].color);
 });
 
 test('overlapping drawing order is stable across input order', () => {
   const first = record('a', {kind: 'point', at_us: second});
   const secondComment = record('b', {kind: 'point', at_us: second});
-  assert.deepEqual(annotationScene([first, secondComment], 10 * second, true), annotationScene([secondComment, first], 10 * second, true));
+  assert.deepEqual(annotationScene([first, secondComment], 10 * second), annotationScene([secondComment, first], 10 * second));
 });

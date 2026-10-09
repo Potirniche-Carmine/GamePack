@@ -155,7 +155,7 @@ export default function App() {
   const previousNote = adjacentNote(videoComments, commentId, time, duration, -1);
   const nextNote = adjacentNote(videoComments, commentId, time, duration, 1);
   playbackContext.current = {comments: originalComments, duration, rate, editing: !!draft || !annotationsVisible};
-  const reviewEnd = !draft && annotationsVisible ? reviewStop?.time ?? -1 : !isLive && (reviewing || (!!draft)) && activeScene?.anchor.kind === 'interval' ? activeScene.anchor.end_us : -1;
+  const reviewEnd = !draft && annotationsVisible ? reviewStop?.time ?? -1 : !isLive && (reviewing || (!!draft)) && activeScene?.anchor.kind === 'interval' ? (rate < 0 ? activeScene.anchor.start_us : activeScene.anchor.end_us - 1) : -1;
   const dialogOpen = profileOpen || projectOpen || discardOpen || !!deleteTarget || !!folderDialog || !!moveTarget;
 
   useEffect(() => {
@@ -320,7 +320,7 @@ export default function App() {
     if (draft && !parent) return draft;
     const pending = parent ? resumableDraft(draftsRef.current, video.id, parent.comment_id) : undefined;
     if (pending) { restoreDraftNow(pending); return pending; }
-   
+
     try {
       let value: Draft = {id: uuid(), project_id: video.project_id, video_id: video.id, text: '',
         anchor: parent?.anchor ?? {kind: 'point', at_us: Math.min(time, duration || time)},
@@ -374,11 +374,6 @@ export default function App() {
     else if (!isLive && draft?.anchor.kind === 'interval' && (time < draft.anchor.start_us || time >= draft.anchor.end_us)) seek(draft.anchor.start_us);
     else if (duration && time >= duration) seek(0);
     setPaused(false);
-  };
-  const playReview = (item: Comment) => {
-    setTool('pointer'); setShowScene(true); setIsolatedReview(false); seek(anchorStart(item.anchor));
-    if (item.anchor.kind === 'point') { setPaused(true); setReviewing(false); }
-    else { setReviewing(true); setPaused(false); }
   };
   const onTime = (event: PlayerTime) => {
     if (Number.isFinite(event.time_us)) {
@@ -796,9 +791,8 @@ export default function App() {
               tool={(!busy || !!captureRequest.current) && (draft || tool === 'pointer' || tool === 'laser') ? tool : 'none'} strokeColor={strokeColor}
               onDrawingStart={event => { setTime(event.nativeEvent.time_us); if (event.nativeEvent.paused) setPaused(true); setComposerOpen(false); }}
               onPointer={event => {
-                const position = normalizedPoint({x: event.nativeEvent.x * playerSize.width, y: event.nativeEvent.y * playerSize.height}, videoRect);
                 setZoomOpen(false); setSpeedOpen(false);
-                if (placingPin) { setPlacingPin(false); focusParent.current = ''; setFocusRequest(value => value + 1); newDraftNow(undefined, true, position); }
+                if (placingPin) { setPlacingPin(false); focusParent.current = ''; setFocusRequest(value => value + 1); newDraftNow(undefined, true, normalizedPoint({x: event.nativeEvent.x * playerSize.width - 16, y: event.nativeEvent.y * playerSize.height - 38}, videoRect)); }
                 else if (tool === 'laser') setPointerPulse({...event.nativeEvent, token: Date.now()});
                 else { commentInput.current?.blur(); play(); }
               }}
@@ -809,7 +803,7 @@ export default function App() {
               <ThemeContext.Provider value={displayTheme}>
                 <VideoNote cardsVisible={notesVisible} notes={onVideoNotes} comments={videoComments} profileName={data.profile.name} colors={railColors} expanded={expanded}
                   viewport={playerSize} rect={videoRect} topInset={presenting ? 76 : 16} disabled={!!busy || dialogOpen || settingsOpen}
-                  replyParent={draft?.parent_comment_id} composer={draft?.parent_comment_id ? composer : null}
+                  replyParent={composerOpen ? draft?.parent_comment_id : undefined} composer={draft?.parent_comment_id && composerOpen ? composer : null}
                   onPause={() => setPaused(true)} onReply={replyToNote} onMove={moveComment}
                   onToggle={item => { setPaused(true); setNotesVisible(true); setExpanded(previous => notesVisible && previous.has(item.comment_id) ? new Set() : new Set([item.comment_id])); }} />
                 {!!draft && !draft.parent_comment_id && (composerOpen || !!draft.drawings.length || !!draft.text.trim()) && <PinnedCard position={notePosition(draft)} viewport={playerSize} rect={videoRect}
