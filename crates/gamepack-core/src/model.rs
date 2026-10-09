@@ -101,7 +101,15 @@ pub struct Drawing {
     pub samples: Vec<Sample>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// Local presentation coordinates, independent of immutable review content.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Draft {
     pub id: String,
@@ -112,9 +120,11 @@ pub struct Draft {
     #[serde(default)]
     pub parent_comment_id: Option<String>,
     pub drawings: Vec<Drawing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<Position>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Comment {
     #[serde(flatten)]
     pub draft: Draft,
@@ -193,6 +203,10 @@ pub(crate) enum Request {
     },
     PostDraft {
         draft_id: String,
+    },
+    MoveComment {
+        comment_id: String,
+        position: Position,
     },
     VerifyVideo {
         video_id: String,

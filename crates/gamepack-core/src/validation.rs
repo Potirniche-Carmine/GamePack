@@ -1,4 +1,4 @@
-use crate::model::{Anchor, Draft, Tool, Video};
+use crate::model::{Anchor, Draft, Position, Tool, Video};
 use anyhow::{bail, ensure, Result};
 use std::collections::HashSet;
 
@@ -36,10 +36,24 @@ pub(crate) fn metadata(duration_us: i64, width: u32, height: u32) -> Result<()> 
     Ok(())
 }
 
+pub(crate) fn position(position: Position) -> Result<()> {
+    ensure!(
+        position.x.is_finite()
+            && position.y.is_finite()
+            && (0.0..=1.0).contains(&position.x)
+            && (0.0..=1.0).contains(&position.y),
+        "Comment position must contain finite coordinates between 0 and 1"
+    );
+    Ok(())
+}
+
 pub(crate) fn draft(draft: &Draft, video: &Video) -> Result<()> {
     identifier(&draft.id)?;
     identifier(&draft.project_id)?;
     identifier(&draft.video_id)?;
+    if let Some(value) = draft.position {
+        position(value)?;
+    }
     ensure!(
         draft.text.len() <= 65_536
             && !draft

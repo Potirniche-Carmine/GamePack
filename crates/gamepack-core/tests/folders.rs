@@ -228,6 +228,6 @@ fn pre_folder_library_migrates_without_changing_existing_records() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
     );
 }

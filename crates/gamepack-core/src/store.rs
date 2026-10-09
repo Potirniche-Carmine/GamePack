@@ -1,4 +1,6 @@
-use crate::model::{Comment, Draft, Folder, Profile, Project, Request, Settings, Theme, Video};
+use crate::model::{
+    Comment, Draft, Folder, Position, Profile, Project, Request, Settings, Theme, Video,
+};
 use crate::validation;
 use anyhow::{ensure, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -85,7 +87,7 @@ impl Store {
         )?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         ensure!(
-            version <= 4,
+            version <= 5,
             "This database was created by a newer GamePack version"
         );
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -103,6 +105,7 @@ impl Store {
             }
         }
         tx.execute_batch(include_str!("../../../schemas/local-v4.sql"))?;
+        tx.execute_batch(include_str!("../../../schemas/local-v5.sql"))?;
         tx.execute(
             "INSERT OR IGNORE INTO profile(singleton,author_id,name) VALUES(1,?1,'')",
             [id()],
@@ -110,7 +113,7 @@ impl Store {
         if version == 0 {
             tx.execute("INSERT INTO projects(id,title,created_at) SELECT ?1,'Review library',?2 WHERE NOT EXISTS(SELECT 1 FROM projects)", params![id(), now()?])?;
         }
-        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); INSERT OR IGNORE INTO preferences(singleton) VALUES(1); PRAGMA user_version=4;")?;
+        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); INSERT OR IGNORE INTO preferences(singleton) VALUES(1); PRAGMA user_version=5;")?;
         tx.commit()?;
         Ok(Self { root, db })
     }
@@ -299,6 +302,21 @@ impl Store {
                 Ok(Value::Null)
             }
             Request::PostDraft { draft_id } => value(self.post(&draft_id)?),
+            Request::MoveComment {
+                comment_id,
+                position,
+            } => {
+                validation::identifier(&comment_id)?;
+                validation::position(position)?;
+                self.atomic(|store| {
+                    let mut comment = store
+                        .comment(&comment_id)?
+                        .context("Comment does not exist")?;
+                    store.save_comment_position(&comment_id, position)?;
+                    comment.draft.position = Some(position);
+                    value(comment)
+                })
+            }
             Request::VerifyVideo { video_id } => {
                 let video = self.video(&video_id)?;
                 let valid = match hash_file(Path::new(&video.path)) {
@@ -407,11 +425,29 @@ impl Store {
     fn load_comments(&self) -> Result<Vec<Comment>> {
         let mut statement = self
             .db
-            .prepare("SELECT body FROM comments ORDER BY created_at,id")?;
-        let bodies = statement.query_map([], |row| row.get::<_, String>(0))?;
-        bodies
-            .map(|body| Ok(serde_json::from_str(&body?)?))
-            .collect()
+            .prepare("SELECT c.body,p.x,p.y FROM comments c LEFT JOIN comment_positions p ON p.comment_id=c.id ORDER BY c.created_at,c.id")?;
+        let rows = statement.query_map([], comment_row)?;
+        rows.map(|row| comment_from_row(row?)).collect()
+    }
+
+    fn comment(&self, comment_id: &str) -> Result<Option<Comment>> {
+        self.db
+            .query_row(
+                "SELECT c.body,p.x,p.y FROM comments c LEFT JOIN comment_positions p ON p.comment_id=c.id WHERE c.id=?1",
+                [comment_id],
+                comment_row,
+            )
+            .optional()?
+            .map(comment_from_row)
+            .transpose()
+    }
+
+    fn save_comment_position(&self, comment_id: &str, position: Position) -> Result<()> {
+        self.db.execute(
+            "INSERT INTO comment_positions(comment_id,x,y) VALUES(?1,?2,?3) ON CONFLICT(comment_id) DO UPDATE SET x=excluded.x,y=excluded.y",
+            params![comment_id, position.x, position.y],
+        )?;
+        Ok(())
     }
 
     fn bootstrap(&self) -> Result<Value> {
@@ -533,14 +569,8 @@ impl Store {
     }
 
     fn post_in_transaction(&self, draft_id: &str) -> Result<Comment> {
-        if let Some(body) = self
-            .db
-            .query_row("SELECT body FROM comments WHERE id=?1", [draft_id], |row| {
-                row.get::<_, String>(0)
-            })
-            .optional()?
-        {
-            return Ok(serde_json::from_str(&body)?);
+        if let Some(comment) = self.comment(draft_id)? {
+            return Ok(comment);
         }
         let body: String = self
             .db
@@ -549,7 +579,7 @@ impl Store {
             })
             .optional()?
             .context("Draft does not exist; save it before posting")?;
-        let draft: Draft = serde_json::from_str(&body)?;
+        let mut draft: Draft = serde_json::from_str(&body)?;
         let video = self.video(&draft.video_id)?;
         validation::draft(&draft, &video)?;
         self.validate_parent(&draft)?;
@@ -559,6 +589,8 @@ impl Store {
         );
         let profile = self.profile()?;
         validation::label(&profile.name, "Display name")?;
+        // Presentation state does not enter the immutable body or v1 digest.
+        let position = draft.position.take();
         let mut comment = Comment {
             comment_id: draft.id.clone(),
             draft,
@@ -581,6 +613,10 @@ impl Store {
             .to_hex()
             .to_string();
         self.db.execute("INSERT INTO comments(id,project_id,video_id,parent_id,created_at,digest,body) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![comment.comment_id, comment.draft.project_id, comment.draft.video_id, comment.draft.parent_comment_id, comment.created_at_reported, comment.digest, serde_json::to_string(&comment)?])?;
+        if let Some(position) = position {
+            self.save_comment_position(&comment.comment_id, position)?;
+            comment.draft.position = Some(position);
+        }
         self.db
             .execute("DELETE FROM drafts WHERE id=?1", [draft_id])?;
         Ok(comment)
@@ -696,6 +732,19 @@ impl Store {
         tx.commit()?;
         self.video(&video_id)
     }
+}
+
+fn comment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, Option<f64>, Option<f64>)> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+}
+
+fn comment_from_row((body, x, y): (String, Option<f64>, Option<f64>)) -> Result<Comment> {
+    let mut comment: Comment = serde_json::from_str(&body)?;
+    comment.draft.position = x.zip(y).map(|(x, y)| Position { x, y });
+    if let Some(position) = comment.draft.position {
+        validation::position(position)?;
+    }
+    Ok(comment)
 }
 
 fn video_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Video> {

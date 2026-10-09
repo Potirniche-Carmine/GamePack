@@ -20,9 +20,11 @@ export type Video = {
 export type Profile = {author_id: string; name: string};
 export type ThemeChoice = 'system' | 'light' | 'dark';
 export type Settings = {theme: ThemeChoice; keybindings: Record<string, string | null>; pause_after_drawing: boolean};
+export type Position = {x: number; y: number};
 export type Draft = {
   id: string; project_id: string; video_id: string; text: string; anchor: Anchor;
   parent_comment_id?: string | null; drawings: Drawing[];
+  position?: Position | null;
 };
 export type Comment = Draft & {
   comment_id: string; media_id: string; author_id: string; name_at_posting: string;

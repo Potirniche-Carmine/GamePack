@@ -1,14 +1,16 @@
 # Local schema and canonical comments
 
-`local-v1.sql` is the Rust-owned SQLite schema. `PRAGMA user_version=2` adds a singleton settings table; opening a v1 library adds the table and defaults theme to `system` without replacing existing records. Older binaries reject this newer schema.
+`local-v1.sql` is the Rust-owned SQLite base schema. Additive migrations retain existing records: v2 adds theme settings, v3 adds preferences, v4 adds project folders and video placement, and v5 adds local comment positions. Opening a library upgrades it to `PRAGMA user_version=5`. Older binaries reject this newer schema.
 
 Bootstrap includes `settings: {theme: 'system' | 'light' | 'dark'}`. `set_theme {theme}` persists and returns these settings. Preferences belong to the chosen root's database.
 It is local application storage, not an exchange format. ZIP import/export is not
 implemented. SQLite uses WAL, foreign keys, a ten-second busy timeout, and FULL
 synchronous writes. Posting acquires an immediate write transaction, validates the
 saved draft, inserts one complete comment, and removes that draft before commit.
-Comment IDs equal draft IDs. Retrying a successful post returns its original record.
-SQL triggers reject any update or deletion of a posted row.
+Comment IDs equal draft IDs. Retrying a successful post returns its original review content with the current local card position.
+SQL triggers reject updates, replacement, or deletion of posted rows. Explicit project/video removal temporarily releases the deletion guard inside a transaction and removes that scope only.
+
+Drafts may include `position: {x, y}` with finite normalized coordinates in the inclusive range 0–1. Missing or null draft positions mean the UI chooses a default. Publishing copies the position into the separate `comment_positions` table; it does not enter the immutable comment body. Bootstrap and post responses hydrate a comment's optional `position` from this table. `move_comment {comment_id, position: {x, y}}` updates only local placement and returns the full comment with its current position. Existing comments remain positionless until moved; their stored bodies and digests are unchanged. Removing a project or video cascades to the corresponding position rows.
 
 The CXX bridge is namespace `gamepack`, function
 `rust::String dispatch(rust::Str root, rust::Str request)`. The generated include is
@@ -35,7 +37,7 @@ Bounds against known duration are checked on save and again on post. Metadata
 updates cannot invalidate a posted anchor in any membership sharing the media.
 
 Canonical comment digest v1 is BLAKE3 of compact UTF-8 JSON representing the
-complete returned Comment with its `digest` member omitted. Object keys are sorted
+complete stored Comment with its `digest` member omitted. Returned comments may also contain a local `position`; omit it when verifying the digest. Object keys are sorted
 lexicographically at every depth; array order is preserved. Integer values use
 unquoted decimal JSON numbers. Strings use serde_json's JSON escaping without
 Unicode normalization. `parent_comment_id` is always present, with `null` when
