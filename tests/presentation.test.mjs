@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {conversationTarget, noteWindow, notesAtTime, adjacentNote} from '../packages/app/src/presentation.ts';
+import {conversationTarget, noteWindow, notesAtTime, adjacentNote, nextReviewStop} from '../packages/app/src/presentation.ts';
 import {commentThreads, replyBranches, toggleReplies, visibleThreads} from '../packages/app/src/review.ts';
 
 const second = 1_000_000;
@@ -71,4 +71,27 @@ test('reply creation and publication target the root first visible drawing, incl
   assert.deepEqual(conversationTarget([root], root, 15 * second), {comment: root, time: 3 * second});
   const orphan = {...comment('orphan', 5, 6), parent_comment_id: 'missing'};
   assert.deepEqual(conversationTarget([], orphan, 15 * second), {comment: orphan, time: 5 * second});
+});
+
+const note = (id, anchor) => ({...comment(id), anchor});
+
+test('review playback stops for points and at the final visible frame of ranges', () => {
+  const comments = [
+    note('moment', {kind: 'point', at_us: 1000000}),
+    note('range', {kind: 'interval', start_us: 2000000, end_us: 6000000}),
+    note('short', {kind: 'interval', start_us: 7000000, end_us: 8000000}),
+  ];
+  assert.deepEqual(nextReviewStop(comments, 0, 10000000), {time: 1000000, commentIds: ['moment']});
+  assert.deepEqual(nextReviewStop(comments, 1000000, 10000000, 1, true), {time: 5999999, commentIds: ['range']});
+  assert.deepEqual(nextReviewStop(comments, 6000000, 10000000), {time: 7999999, commentIds: ['short']});
+  assert.equal(nextReviewStop(comments, 8000000, 10000000), null);
+  assert.deepEqual(nextReviewStop(comments, 6000000, 10000000, -1), {time: 5999999, commentIds: ['range']});
+});
+
+test('simultaneous comments share a pause, replies do not add stops, and seeking back rearms it', () => {
+  const comments = ['a', 'b', 'reply'].map(id => note(id, {kind: 'point', at_us: 0}));
+  comments[2].parent_comment_id = 'a';
+  assert.deepEqual(nextReviewStop(comments, 0, 10000000), {time: 0, commentIds: ['a', 'b']});
+  assert.equal(nextReviewStop(comments, 0, 10000000, 1, true), null);
+  assert.deepEqual(nextReviewStop(comments, 0, 10000000), {time: 0, commentIds: ['a', 'b']});
 });

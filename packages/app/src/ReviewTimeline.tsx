@@ -4,11 +4,12 @@ import {anchorStart, timeLabel} from './components';
 import {commentColorMap} from './playback';
 import {useTheme} from './theme';
 import {clusterTimelineComments, timelinePosition} from './timeline';
-import type {Comment, Video} from './types';
+import type {Comment, Draft, Video} from './types';
 import {useVideoThumbnails} from './useVideoThumbnails';
 
-export function ReviewTimeline({video, time, duration, comments, selectedId, disabled, onSelect, onCluster, onSeek}: {
+export function ReviewTimeline({video, time, duration, comments, drafts = [], activeDraft, selectedId, disabled, onSelect, onSelectDraft, onCluster, onSeek}: {
   video?: Pick<Video, 'path' | 'media_id'> | null;
+  drafts?: Draft[]; activeDraft?: Draft | null; onSelectDraft?: (draft: Draft) => void;
   time: number; duration: number; comments: Comment[]; selectedId: string | null; disabled: boolean;
   onSelect: (comment: Comment) => void; onCluster?: (comments: Comment[]) => void; onSeek: (time: number) => void;
 }) {
@@ -23,6 +24,9 @@ export function ReviewTimeline({video, time, duration, comments, selectedId, dis
   const ordered = useMemo(() => [...comments].sort((a, b) => anchorStart(a.anchor) - anchorStart(b.anchor) || a.comment_id.localeCompare(b.comment_id)), [comments]);
   const noteColors = useMemo(() => commentColorMap(ordered, dark), [ordered, dark]);
   const clusters = useMemo(() => clusterTimelineComments(ordered, duration, width), [ordered, duration, width]);
+  const range = activeDraft ?? comments.find(comment => comment.comment_id === selectedId);
+  const rangeStart = range ? timelinePosition(anchorStart(range.anchor), duration, width) : 0;
+  const rangeEnd = range?.anchor.kind === 'interval' ? timelinePosition(range.anchor.end_us, duration, width) : rangeStart;
   return <View style={styles.root}>
     <View style={styles.lane} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
       <Pressable disabled={disabled || !duration} focusable={!disabled && duration > 0} {...{enableFocusRing: false}}
@@ -39,6 +43,13 @@ export function ReviewTimeline({video, time, duration, comments, selectedId, dis
           {Array.from({length: 31}, (_, i) => <View key={i} style={[styles.tick, {backgroundColor: colors.separator, height: i % 5 ? 8 : 15}]} />)}
         </View>}
       </Pressable>
+      {!!range && <View pointerEvents="none" style={[styles.reviewRange, {left: rangeStart, width: Math.max(2, rangeEnd - rangeStart), backgroundColor: colors.accent}]} />}
+      {drafts.filter(draft => !draft.parent_comment_id && (draft.text.trim() || draft.drawings.length)).map(draft => <Pressable key={draft.id}
+        accessibilityRole="button" accessibilityLabel={`Resume unposted comment at ${timeLabel(anchorStart(draft.anchor))}`} disabled={disabled}
+        onPress={() => onSelectDraft?.(draft)} style={({pressed}) => [styles.draftMarker, {left: timelinePosition(anchorStart(draft.anchor), duration, width) - 10,
+          backgroundColor: colors.panel, borderColor: colors.line, opacity: pressed ? .6 : 1}]}>
+        <Text style={[styles.number, {color: colors.text}]}>+</Text>
+      </Pressable>)}
       {clusters.map(cluster => {
         const comment = cluster.comments[0], multiple = cluster.comments.length > 1;
         const selected = cluster.comments.some(item => item.comment_id === selectedId);
@@ -82,6 +93,8 @@ const styles = StyleSheet.create({
   cluster: {borderWidth: 1, flexDirection: 'row', gap: 4},
   clusterRange: {position: 'absolute', top: 73, height: 1, opacity: 0.7},
   stem: {position: 'absolute', top: 23, height: 52, width: 1, opacity: 0.9},
+  reviewRange: {position: 'absolute', top: 71, height: 5, borderRadius: 2},
+  draftMarker: {position: 'absolute', top: 31, width: 20, height: 20, borderWidth: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center', zIndex: 3},
   selected: {transform: [{scale: 1.14}]},
   number: {fontSize: 10, lineHeight: 14, fontWeight: '700', color: '#ffffff'},
   extra: {fontSize: 9, lineHeight: 14, fontWeight: '500'},

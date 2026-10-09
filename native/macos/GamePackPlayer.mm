@@ -137,7 +137,7 @@
 - (void)tick {
   if (_seeking) return;
   int64_t us = [self timeUs];
-  if (!_paused && !_finished && _reviewEndUs >= 0 && us >= _reviewEndUs) { [self finishStroke]; [_player pause]; _finished = YES; [self emitTime:YES]; }
+  if (!_paused && !_finished && _reviewEndUs >= 0 && (_rate < 0 ? us <= _reviewEndUs : us >= _reviewEndUs)) { [self finishStroke]; [_player pause]; _paused = YES; _finished = YES; [self emitTime:YES]; }
   [_overlay setNeedsDisplay:YES];
   if (NSDate.timeIntervalSinceReferenceDate - _lastEvent > 0.1) [self emitTime:NO];
 }

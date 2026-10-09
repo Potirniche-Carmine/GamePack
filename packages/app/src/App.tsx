@@ -7,7 +7,7 @@ import {annotationScene, reviewScene, commentColorMap} from './playback';
 import {Icon} from './Icon';
 import {VideoNote} from './VideoNote';
 import {PointerPulse} from './PointerPulse';
-import {adjacentNote, conversationTarget, notesAtTime} from './presentation';
+import {adjacentNote, conversationTarget, nextReviewStop, notesAtTime, type ReviewStop} from './presentation';
 import {SettingsPage} from './SettingsPage';
 import {Avatar} from './Avatar';
 import {MotionPressable} from './motion';
@@ -55,7 +55,6 @@ export default function App() {
   const [focusRequest, setFocusRequest] = useState(0);
   const focusParent = useRef<string | null>(null);
   const [playerSize, setPlayerSize] = useState({width: 1, height: 1});
-  const [lastPointer, setLastPointer] = useState<Point | null>(null);
   const [avatarFocused, setAvatarFocused] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -66,6 +65,9 @@ export default function App() {
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rate, setRate] = useState(1);
+  const [reviewStop, setReviewStop] = useState<ReviewStop | null>(null);
+  const lastReviewStop = useRef<number | null>(null);
+  const playbackContext = useRef({comments: [] as Comment[], duration: 0, rate: 1, editing: false});
   const [seekState, setSeekState] = useState({us: 0, token: 0});
   const [captureToken, setCaptureToken] = useState(0);
   const [liveId, setLiveId] = useState<string | null>(null);
@@ -148,9 +150,12 @@ export default function App() {
     return notes;
   }, [videoComments, time, duration, draft?.parent_comment_id]);
   const videoRect = contentRect(playerSize, video ?? {width: 0, height: 0}, zoom);
+  const timelineDraft = draft && isLive ? finalizeCapturedClip(draft, time, duration, furthest.current.get(draft.id) ?? time) : draft;
+  const timelineDrafts = data?.drafts.filter(item => item.video_id === videoId).map(item => item.id === draft?.id ? timelineDraft! : item) ?? [];
   const previousNote = adjacentNote(videoComments, commentId, time, duration, -1);
   const nextNote = adjacentNote(videoComments, commentId, time, duration, 1);
-  const reviewEnd = !isLive && (reviewing || (!!draft)) && activeScene?.anchor.kind === 'interval' ? activeScene.anchor.end_us : -1;
+  playbackContext.current = {comments: originalComments, duration, rate, editing: !!draft || !annotationsVisible};
+  const reviewEnd = !draft && annotationsVisible ? reviewStop?.time ?? -1 : !isLive && (reviewing || (!!draft)) && activeScene?.anchor.kind === 'interval' ? activeScene.anchor.end_us : -1;
   const dialogOpen = profileOpen || projectOpen || discardOpen || !!deleteTarget || !!folderDialog || !!moveTarget;
 
   useEffect(() => {
@@ -182,6 +187,9 @@ export default function App() {
     const target = Math.max(0, Math.round(us));
     setSeekState(previous => ({us: target, token: previous.token + 1}));
     setTime(target);
+    lastReviewStop.current = null;
+    const context = playbackContext.current;
+    setReviewStop(context.editing ? null : nextReviewStop(context.comments, target, context.duration, context.rate < 0 ? -1 : 1));
   }, []);
   const setLive = (id: string | null) => { liveRef.current = id; setLiveId(id); };
 
@@ -282,7 +290,7 @@ export default function App() {
   };
   const openVideoNow = async (item: Video) => {
     const generation = ++sourceGeneration.current;
-    setPaused(true); setRate(1); clearEditing(); setShowScene(true); setLastPointer(null); setZoomOpen(false); setSpeedOpen(false); setZoom(1); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false);
+    setPaused(true); setRate(1); clearEditing(); setShowScene(true); setZoomOpen(false); setSpeedOpen(false); setZoom(1); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false);
     setCommentId(null); setExpanded(new Set()); setDuration(item.duration_us); seek(0);
     setComposerOpen(false);
     try {
@@ -310,14 +318,14 @@ export default function App() {
     if (!video || busy) return;
     if (revealComposer) { setComposerOpen(true); setLibraryVisible(false); }
     if (draft && !parent) return draft;
-    const pending = resumableDraft(draftsRef.current, video.id, parent?.comment_id ?? null);
+    const pending = parent ? resumableDraft(draftsRef.current, video.id, parent.comment_id) : undefined;
     if (pending) { restoreDraftNow(pending); return pending; }
    
     try {
       let value: Draft = {id: uuid(), project_id: video.project_id, video_id: video.id, text: '',
         anchor: parent?.anchor ?? {kind: 'point', at_us: Math.min(time, duration || time)},
         parent_comment_id: parent?.comment_id ?? null, drawings: [], position: parent?.position ?? position ?? (revealComposer ? {x: .4, y: .26} : undefined)};
-      const live = !paused && !parent;
+      const live = !parent && time < duration;
       if (live) value = beginLiveDraft(value, duration);
       replaceDraft(value); activeDraftRef.current = value.id; setDraftId(value.id); setCommentId(null);
       setLive(live ? value.id : null); setReviewing(false); setShowScene(true); setTool('pointer'); setRedo([]);
@@ -332,7 +340,7 @@ export default function App() {
   };
   const selectCommentNow = (item: Comment) => {
     const target = conversationTarget(data?.comments ?? [], item, duration);
-    clearEditing(); setIsolatedReview(false); setCommentId(target.comment.comment_id); setPaused(true); setShowScene(true); seek(target.time);
+    clearEditing(); setIsolatedReview(false); setCommentId(target.comment.comment_id); setPaused(true); setShowScene(true); seek(target.time); lastReviewStop.current = target.time;
     setExpanded(previous => new Set(expandedAncestors(data?.comments ?? [], item.comment_id, previous)).add(target.comment.comment_id));
   };
   const selectComment = (item: Comment) => leaveDraft(() => selectCommentNow(item));
@@ -348,10 +356,17 @@ export default function App() {
       setPaused(false);
     } catch (cause) { setError(message(cause)); }
   };
+  const armReview = (at: number, nextRate = rate) => setReviewStop(!draft && annotationsVisible
+    ? nextReviewStop(originalComments, at, duration, nextRate < 0 ? -1 : 1, lastReviewStop.current === at) : null);
+  const shuttle = (direction: -1 | 1) => {
+    const nextRate = !paused && Math.sign(rate) === direction ? direction * Math.min(4, Math.abs(rate) * 2) : direction;
+    setRate(nextRate); armReview(time, nextRate);
+    if (draft && !draft.parent_comment_id && !isLive) startLive(); else setPaused(false);
+  };
   const play = () => {
     if (!video || busy) return;
     if (!paused) { setPaused(true); return; }
-    setLibraryOpen(false);
+    setPlacingPin(false); setLibraryOpen(false); armReview(time);
     if (!draft) { setCommentId(null); setIsolatedReview(false); setReviewing(false); setShowScene(true); }
     if (draft && !draft.parent_comment_id && !isLive) { startLive(); return; }
     if (!draft) setTool(previous => previous === 'laser' ? 'laser' : 'pointer');
@@ -380,7 +395,13 @@ export default function App() {
     }
     if (event.duration_us > 0) setDuration(Math.round(event.duration_us));
     if (event.error) { setError(`Playback failed: ${event.error}`); setPaused(true); }
-    if (event.ended) { setPaused(true); setReviewing(false); }
+    if (event.ended) {
+      setPaused(true); setReviewing(false);
+      if (!draft && reviewStop && (rate < 0 ? event.time_us <= reviewStop.time : event.time_us >= reviewStop.time)) {
+        seek(reviewStop.time); lastReviewStop.current = reviewStop.time;
+        setNotesVisible(true); setExpanded(new Set(reviewStop.commentIds)); setCommentId(reviewStop.commentIds[0]);
+      }
+    }
     if (video && event.duration_us > 0 && event.width > 0 && !metadataSent.current.has(video.id)) {
       metadataSent.current.add(video.id);
       void command<Video>(root, 'update_video_metadata', {video_id: video.id,
@@ -674,8 +695,8 @@ export default function App() {
       case 'allReplies': setNotesVisible(true); setPaused(true); toggleAllReplies(); break;
       case 'play': play(); break;
       case 'pause': setPaused(true); break;
-      case 'forward': setRate(!paused && rate > 0 ? Math.min(4, rate * 2) : 1); setPaused(false); break;
-      case 'reverse': setRate(!paused && rate < 0 ? Math.max(-4, rate * 2) : -1); setPaused(false); break;
+      case 'forward': shuttle(1); break;
+      case 'reverse': shuttle(-1); break;
       case 'previousFrame': case 'nextFrame': setPaused(true); setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); break;
       case 'back': seek(Math.max(0, time - 5000000)); break;
       case 'ahead': seek(Math.min(duration, time + 5000000)); break;
@@ -776,7 +797,7 @@ export default function App() {
               onDrawingStart={event => { setTime(event.nativeEvent.time_us); if (event.nativeEvent.paused) setPaused(true); setComposerOpen(false); }}
               onPointer={event => {
                 const position = normalizedPoint({x: event.nativeEvent.x * playerSize.width, y: event.nativeEvent.y * playerSize.height}, videoRect);
-                setLastPointer(position); setZoomOpen(false); setSpeedOpen(false);
+                setZoomOpen(false); setSpeedOpen(false);
                 if (placingPin) { setPlacingPin(false); focusParent.current = ''; setFocusRequest(value => value + 1); newDraftNow(undefined, true, position); }
                 else if (tool === 'laser') setPointerPulse({...event.nativeEvent, token: Date.now()});
                 else { commentInput.current?.blur(); play(); }
@@ -812,7 +833,7 @@ export default function App() {
                 </View>
               </View>
               {speedOpen && <View style={[vs.drawingPalette, {zIndex: 40, left: undefined, top: undefined, right: 74, bottom: 66, flexDirection: 'column', gap: 2}]}>
-                {[.5, 1, 1.5, 2].map(value => <Button quiet compact key={value} active={rate === value} label={`Playback speed ${value}×`} onPress={() => { setRate(value); setSpeedOpen(false); }}>{value}×</Button>)}
+                {[.5, 1, 1.5, 2].map(value => <Button quiet compact key={value} active={rate === value} label={`Playback speed ${value}×`} onPress={() => { setRate(value); armReview(time, value); setSpeedOpen(false); }}>{value}×</Button>)}
               </View>}
               {zoomOpen && <View style={[vs.drawingPalette, {zIndex: 40, left: undefined, top: undefined, right: 18, bottom: 66, flexDirection: 'column', gap: 2}]}>
                 {[1, 1.5, 2, 3, 4].map(value => <Button quiet compact key={value} active={zoom === value} label={`Zoom ${value * 100}%`} onPress={() => { setZoom(value); setZoomOpen(false); }}>{value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}
@@ -833,7 +854,7 @@ export default function App() {
             </>}
           </View>
         </ThemeContext.Provider>
-        {!presenting && <ReviewTimeline video={video} time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => leaveDraft(() => { setNotesVisible(true); const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectCommentNow(next); setIsolatedReview(false); setExpanded(new Set([next.comment_id])); })} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />}
+        {!presenting && <ReviewTimeline video={video} activeDraft={timelineDraft} drafts={timelineDrafts} onSelectDraft={item => leaveDraft(() => restoreDraftNow(item))} time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => leaveDraft(() => { setNotesVisible(true); const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectCommentNow(next); setIsolatedReview(false); setExpanded(new Set([next.comment_id])); })} onSeek={value => { if (!draft) { setIsolatedReview(false); setCommentId(null); } seek(value); }} />}
         </>}
         {!!busy && <View style={s.statusRow}><Text style={s.status}>{busy}</Text></View>}
       </View>

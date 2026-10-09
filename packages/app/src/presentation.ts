@@ -41,3 +41,22 @@ export function adjacentNote(comments: readonly Comment[], selected: string | nu
   if (index !== -1) return ordered[index + direction];
   return direction === 1 ? ordered.find(item => noteWindow(item, duration).start >= time) : ordered.reverse().find(item => noteWindow(item, duration).start < time);
 }
+
+export type ReviewStop = {time: number; commentIds: string[]};
+
+/** Stop on a moment's frame or the final visible microsecond of a drawing range.
+ * Equal-time notes share one stop; resume skips it until the reviewer seeks back. */
+export function nextReviewStop(comments: readonly Comment[], from: number, duration: number, direction: -1 | 1 = 1, skipCurrent = false): ReviewStop | null {
+  if (duration <= 0) return null;
+  let result: ReviewStop | null = null;
+  for (const comment of comments) {
+    if (comment.parent_comment_id) continue;
+    const window = noteWindow(comment, duration);
+    if (window.end <= window.start) continue;
+    const time = comment.anchor.kind === 'point' ? window.start : window.end - 1;
+    if (time < 0 || time > duration || (direction > 0 ? time < from : time > from) || (skipCurrent && time === from)) continue;
+    if (!result || (direction > 0 ? time < result.time : time > result.time)) result = {time, commentIds: [comment.comment_id]};
+    else if (time === result.time) result.commentIds.push(comment.comment_id);
+  }
+  return result;
+}

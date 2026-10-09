@@ -134,6 +134,10 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     timer.Interval(std::chrono::milliseconds(16));
     timerToken = timer.Tick([weak](auto const&, auto const&) {
       if (auto self = weak.lock(); self && !self->disposed && !self->seeking) {
+        if (self->reviewEnd >= 0 && !self->paused && (self->rate < 0 ? self->Time() <= self->reviewEnd : self->Time() >= self->reviewEnd)) {
+          self->Finish(); self->player.Pause(); self->paused = true;
+          self->ended = true; self->Seek(self->reviewEnd); return;
+        }
         if (self->reverseSeek && !self->paused) {
           auto now=std::chrono::steady_clock::now();
           double elapsed=std::chrono::duration<double>(now-self->reverseTick).count();
@@ -143,10 +147,6 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
             if (target==0) { self->paused=true; self->ended=true; }
             self->Seek(target); return;
           }
-        }
-        if (self->reviewEnd >= 0 && !self->paused && self->Time() >= self->reviewEnd) {
-          self->Finish(); self->player.Pause(); self->paused = true;
-          self->ended = true; self->Seek(self->reviewEnd);
         }
         self->Render(); self->Emit();
       }
