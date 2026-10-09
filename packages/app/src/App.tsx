@@ -766,7 +766,9 @@ export default function App() {
   const moveComment = (item: Comment, position: Point) => {
     setData(previous => previous ? {...previous, comments: previous.comments.map(comment => comment.comment_id === item.comment_id ? {...comment, position} : comment)} : previous);
     void command<Comment>(root, 'move_comment', {comment_id: item.comment_id, position}).catch(cause => {
-      setData(previous => previous ? {...previous, comments: previous.comments.map(comment => comment.comment_id === item.comment_id ? {...comment, position: item.position} : comment)} : previous);
+      setData(previous => previous ? {...previous, comments: previous.comments.map(comment =>
+        comment.comment_id === item.comment_id && comment.position?.x === position.x && comment.position?.y === position.y
+          ? {...comment, position: item.position} : comment)} : previous);
       setError(`Could not move comment: ${message(cause)}`);
     });
   };
@@ -813,10 +815,10 @@ export default function App() {
                   </View>
                 </View>
               </View>
-              {speedOpen && <View style={[vs.drawingPalette, {left: undefined, top: undefined, right: 74, bottom: 66, flexDirection: 'column', gap: 2}]}>
+              {speedOpen && <View style={[vs.drawingPalette, {zIndex: 40, left: undefined, top: undefined, right: 74, bottom: 66, flexDirection: 'column', gap: 2}]}>
                 {[.5, 1, 1.5, 2].map(value => <Button quiet compact key={value} active={rate === value} label={`Playback speed ${value}×`} onPress={() => { setRate(value); setSpeedOpen(false); }}>{value}×</Button>)}
               </View>}
-              {zoomOpen && <View style={[vs.drawingPalette, {left: undefined, top: undefined, right: 18, bottom: 66, flexDirection: 'column', gap: 2}]}>
+              {zoomOpen && <View style={[vs.drawingPalette, {zIndex: 40, left: undefined, top: undefined, right: 18, bottom: 66, flexDirection: 'column', gap: 2}]}>
                 {[1, 1.5, 2, 3, 4].map(value => <Button quiet compact key={value} active={zoom === value} label={`Zoom ${value * 100}%`} onPress={() => { setZoom(value); setZoomOpen(false); }}>{value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}
               </View>}
               <ThemeContext.Provider value={displayTheme}>
