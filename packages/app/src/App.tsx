@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, StyleSheet, useWindowDimensions} from 'react-native';
+import {ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View, StyleSheet, useWindowDimensions} from 'react-native';
 import {anchorLabel, anchorStart, Button, Dialog, Empty, parseTime, ShortcutContext, TextField, Timeline, timeLabel} from './components';
 import {chooseVideo, command, configureShortcuts, dataDirectory, GamePackPlayer, listenShortcuts, listenWindowState, setAppearance, setFullScreen} from './native';
 import {beginLiveDraft, capturedDraft, expandedAncestors, finalizeCapturedClip, finalizeLiveDraft, liveScene, mergeDrawings} from './review';
@@ -79,6 +79,9 @@ export default function App() {
   const displayTheme = presenting ? videoTheme : theme;
   const {colors, styles: s} = displayTheme;
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [videoMenuAnchor, setVideoMenuAnchor] = useState({x: 24, y: 64});
+  const appView = useRef<View>(null);
+  const videoMenuTrigger = useRef<View>(null);
   const [libraryMenuOpen, setLibraryMenuOpen] = useState(false);
   const setLibraryVisible = setLibraryOpen;
   const [pointerPulse, setPointerPulse] = useState<{x: number; y: number; token: number} | null>(null);
@@ -171,9 +174,9 @@ export default function App() {
   useEffect(() => { const listener = listenShortcuts(event => shortcutHandler.current(event)); return () => listener.remove(); }, []);
   useEffect(() => {
     const bindings = data?.settings.keybindings ?? {};
-    const chords = !data || busy || libraryMenuOpen ? [] : dialogOpen ? ['Escape'] : settingsOpen ? [binding('settings', bindings), 'Escape'] : [...effectiveShortcutChords(bindings), ...(presenting ? ['PageUp', 'PageDown'] : []), 'Escape'];
+    const chords = !data || busy || libraryMenuOpen ? [] : dialogOpen || libraryOpen ? ['Escape'] : settingsOpen ? [binding('settings', bindings), 'Escape'] : [...effectiveShortcutChords(bindings), ...(presenting ? ['PageUp', 'PageDown'] : []), 'Escape'];
     configureShortcuts(chords.filter((chord): chord is string => !!chord), !!recording && !busy, !dialogOpen && !settingsOpen ? binding('submit', bindings) ?? '' : '');
-  }, [data?.settings.keybindings, !!data, busy, dialogOpen, settingsOpen, recording, presenting, libraryMenuOpen]);
+  }, [data?.settings.keybindings, !!data, busy, dialogOpen, settingsOpen, recording, presenting, libraryMenuOpen, libraryOpen]);
   useEffect(() => { if (data) { try { setAppearance(themeChoice); } catch (cause) { setError(message(cause)); } } }, [themeChoice, !!data]);
   const seek = useCallback((us: number) => {
     const target = Math.max(0, Math.round(us));
@@ -737,6 +740,16 @@ export default function App() {
   const currentProject = data.projects.find(item => item.id === projectId);
   const currentFolder = data.folders?.find(item => item.id === folderId);
   const startProject = () => leaveDraft(() => { setPaused(true); setProjectTitle(''); setError(''); setProjectOpen(true); });
+  const toggleVideoMenu = () => {
+    if (libraryOpen) { setLibraryOpen(false); return; }
+    setPaused(true);
+    videoMenuTrigger.current?.measureInWindow((x, y, _triggerWidth, triggerHeight) => {
+      appView.current?.measureInWindow((rootX, rootY) => {
+        setVideoMenuAnchor({x: Math.max(12, Math.min(x - rootX, width - 332)), y: y - rootY + triggerHeight + 8});
+        setLibraryOpen(true);
+      });
+    });
+  };
   const header = <View style={presenting ? vs.videoHeader : s.workspaceHeader}>
     <MotionPressable accessibilityRole="button" accessibilityLabel="All projects" onFocus={() => setBrandFocused(true)} onBlur={() => setBrandFocused(false)} onPress={() => browse(null)} disabled={!!busy || dialogOpen}
       style={({pressed}) => [s.brandButton, pressed && {opacity: .65}, brandFocused && {backgroundColor: colors.selected}]}>
@@ -746,7 +759,7 @@ export default function App() {
     <View style={s.breadcrumb}>
       {!!currentProject && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact disabled={!!busy || dialogOpen} style={s.breadcrumbPart} label={`Browse project ${currentProject.title}`} onPress={() => browse(projectId)}>{currentProject.title}</Button></>}
       {!!currentFolder && width > 850 && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact disabled={!!busy || dialogOpen} style={s.breadcrumbPart} label={`Browse folder ${currentFolder.title}`} onPress={() => browse(projectId, folderId)}>{currentFolder.title}</Button></>}
-      {!!video && <><Text style={s.breadcrumbSlash}>/</Text><Button quiet compact icon="chevronDown" label={`Choose video: ${videoTitle(video)}`} expanded={libraryOpen} disabled={!!busy || dialogOpen} onPress={() => { setLibraryOpen(value => !value); setPaused(true); }}>{videoTitle(video)}</Button></>}
+      {!!video && <><Text style={s.breadcrumbSlash}>/</Text><View ref={videoMenuTrigger} collapsable={false}><Button quiet compact icon="chevronDown" label={`Choose video: ${videoTitle(video)}`} expanded={libraryOpen} disabled={!!busy || dialogOpen} onPress={toggleVideoMenu}>{videoTitle(video)}</Button></View></>}
     </View>
     <Button quiet compact shortcut="settings" icon="settings" label="Settings" disabled={!!busy || dialogOpen} onPress={() => openSettings()} />
     <MotionPressable accessibilityRole="button" accessibilityLabel={data.profile.name ? `Profile: ${data.profile.name}` : 'Set your name'} onFocus={() => setAvatarFocused(true)} onBlur={() => setAvatarFocused(false)} disabled={!!busy || dialogOpen} onPress={() => openSettings('profile')}
@@ -760,9 +773,10 @@ export default function App() {
     onRenameFolder: (folder: Folder) => editFolder('renameFolder', folder), onDeleteFolder: (folder: Folder) => askDelete('folder', folder),
     onMoveVideo: (item: Video) => leaveDraft(() => { setMoveTarget(item); setError(''); setPaused(true); }), onDeleteVideo: (item: Video) => askDelete('video', item),
   };
-  const libraryPanel = <View style={[s.libraryPopover, {top: presenting ? 66 : 62, left: Math.min(240, width * .18), width: 350, bottom: undefined, height: Math.min(460, height - 160)}]}>
-    <LibraryBrowser {...libraryProps} compact />
-  </View>;
+  const libraryPanel = <VideoPickerMenu videos={projectVideos} currentId={videoId} anchor={videoMenuAnchor}
+    availableHeight={height - videoMenuAnchor.y - 16} folder={!!currentFolder}
+    onDismiss={() => setLibraryOpen(false)} onSelect={item => { setLibraryOpen(false); if (item.id !== videoId) openVideo(item); }}
+    onBrowse={() => browse(projectId, folderId)} onImport={() => { setLibraryOpen(false); void importVideo(); }} />;
   const moveComment = (item: Comment, position: Point) => {
     setData(previous => previous ? {...previous, comments: previous.comments.map(comment => comment.comment_id === item.comment_id ? {...comment, position} : comment)} : previous);
     void command<Comment>(root, 'move_comment', {comment_id: item.comment_id, position}).catch(cause => {
@@ -773,7 +787,7 @@ export default function App() {
     });
   };
 
-  return <ThemeContext.Provider value={displayTheme}><ShortcutContext.Provider value={data.settings.keybindings}><View style={s.root}>
+  return <ThemeContext.Provider value={displayTheme}><ShortcutContext.Provider value={data.settings.keybindings}><View ref={appView} collapsable={false} style={s.root}>
     {!!error && <View pointerEvents={dialogOpen || settingsOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen || settingsOpen} importantForAccessibility={dialogOpen || settingsOpen ? 'no-hide-descendants' : 'auto'} style={s.errorBar} accessibilityRole="alert"><Text selectable style={s.errorText}>{error}</Text><Button compact onPress={() => setError('')}>Dismiss</Button></View>}
     {!presenting && <View pointerEvents={dialogOpen || settingsOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen || settingsOpen} importantForAccessibility={dialogOpen || settingsOpen ? 'no-hide-descendants' : 'auto'}>{header}</View>}
     <View pointerEvents={dialogOpen || settingsOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen || settingsOpen} importantForAccessibility={dialogOpen || settingsOpen ? 'no-hide-descendants' : 'auto'} style={[s.workspace, presenting && {paddingHorizontal: 0, paddingBottom: 0, gap: 0}]}>
@@ -842,7 +856,7 @@ export default function App() {
         {!!busy && <View style={s.statusRow}><Text style={s.status}>{busy}</Text></View>}
       </View>
     </View>
-    {libraryOpen && !settingsOpen && <><Pressable accessible={false} style={[StyleSheet.absoluteFill, {top: 64}]} onPress={() => setLibraryOpen(false)} />{libraryPanel}</>}
+    {libraryOpen && !settingsOpen && <><Pressable accessible={false} focusable={false} style={[StyleSheet.absoluteFill, {zIndex: 3}]} onPress={() => setLibraryOpen(false)} />{libraryPanel}</>}
     {settingsOpen && <View style={[StyleSheet.absoluteFill, {zIndex: 100, alignItems: 'center', justifyContent: 'center', padding: 24}]} accessibilityViewIsModal>
       <Pressable accessible={false} style={[StyleSheet.absoluteFill, {backgroundColor: '#00000045'}]} onPress={() => { setRecording(null); setSettingsOpen(false); }} />
       <SettingsPage animateEntrance={settingsAnimate} profile={data.profile} initialTab={settingsTab} onProfileSave={saveSettingsProfile} settings={data.settings} recording={recording} error={settingsError || error} busy={!!busy} onRecord={id => { setRecording(id); setSettingsError(''); }} onChange={settings => void savePreferences(settings)} onTheme={choice => void changeTheme(choice)} onClose={() => { setRecording(null); setSettingsOpen(false); }} />
@@ -884,6 +898,62 @@ export default function App() {
       <Text style={s.modalTitle}>Discard comment?</Text><View style={s.modalActions}><Button autoFocus onPress={() => setDiscardOpen(false)}>Keep editing</Button><Button primary onPress={() => void discard()}>Discard</Button></View>
     </Dialog>
   </View></ShortcutContext.Provider></ThemeContext.Provider>;
+}
+
+function VideoPickerMenu({videos, currentId, anchor, availableHeight, folder, onSelect, onBrowse, onImport, onDismiss}: {
+  videos: Video[]; currentId: string | null; anchor: Point; availableHeight: number; folder: boolean;
+  onSelect: (video: Video) => void; onBrowse: () => void; onImport: () => void; onDismiss: () => void;
+}) {
+  const {colors} = useTheme();
+  const currentIndex = Math.max(0, videos.findIndex(item => item.id === currentId));
+  const [focused, setFocused] = useState(currentIndex);
+  const rows = useRef<(View | null)[]>([]);
+  const list = useRef<ScrollView>(null);
+  const listHeight = Math.min(videos.length * 38, Math.max(38, Math.min(304, availableHeight - 96)));
+  const focusRow = (index: number) => {
+    const next = (index + videos.length + 2) % (videos.length + 2);
+    setFocused(next); rows.current[next]?.focus();
+    if (next < videos.length) list.current?.scrollTo({y: Math.max(0, next * 38 - listHeight / 2 + 19), animated: false});
+  };
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => focusRow(currentIndex));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const keyboardProps = Platform.OS === 'macos' || Platform.OS === 'windows' ? {
+    keyDownEvents: ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape', 'Tab'].map(key => ({key})),
+    onKeyDown: (event: {nativeEvent: {key: string}; stopPropagation: () => void}) => {
+      switch (event.nativeEvent.key) {
+        case 'ArrowDown': event.stopPropagation(); focusRow(focused + 1); break;
+        case 'ArrowUp': event.stopPropagation(); focusRow(focused - 1); break;
+        case 'Home': event.stopPropagation(); focusRow(0); break;
+        case 'End': event.stopPropagation(); focusRow(videos.length + 1); break;
+        case 'Escape': case 'Tab': event.stopPropagation(); onDismiss(); break;
+      }
+    },
+  } : {};
+  const rowStyle = (index: number) => ({height: 36, marginVertical: 1, paddingHorizontal: 11, flexDirection: 'row' as const,
+    gap: 9, alignItems: 'center' as const, borderRadius: 7, backgroundColor: focused === index ? colors.inset : 'transparent'});
+  return <View {...keyboardProps} accessibilityRole="menu" accessibilityLabel="Choose video" accessibilityViewIsModal
+    style={{position: 'absolute', zIndex: 4, left: anchor.x, top: anchor.y, width: 320, padding: 6,
+      backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 12}}>
+    <ScrollView ref={list} style={{height: listHeight, flexGrow: 0}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={videos.length * 38 > listHeight}>
+      {videos.map((item, index) => <MotionPressable key={item.id} ref={node => { rows.current[index] = node; }} focusable
+        accessibilityRole="menuitem" accessibilityLabel={videoTitle(item)} accessibilityState={{selected: item.id === currentId}}
+        onFocus={() => setFocused(index)} onHoverIn={() => { setFocused(index); rows.current[index]?.focus(); }} onPress={() => onSelect(item)} style={rowStyle(index)}>
+        <Text numberOfLines={1} style={{flex: 1, fontSize: 13, lineHeight: 18, color: colors.text, fontWeight: item.id === currentId ? '600' : '400'}}>{videoTitle(item)}</Text>
+        {item.id === currentId && <Icon name="check" color={colors.text} />}
+      </MotionPressable>)}
+    </ScrollView>
+    <View style={{height: 1, backgroundColor: colors.separator, marginVertical: 5, marginHorizontal: 5}} />
+    {[{label: folder ? 'Browse folder' : 'Browse project', icon: 'folder' as const, action: onBrowse},
+      {label: 'Add video', icon: 'plus' as const, action: onImport}].map((item, offset) => {
+      const index = videos.length + offset;
+      return <MotionPressable key={item.label} ref={node => { rows.current[index] = node; }} focusable accessibilityRole="menuitem"
+        onFocus={() => setFocused(index)} onHoverIn={() => { setFocused(index); rows.current[index]?.focus(); }} onPress={item.action} style={rowStyle(index)}>
+        <Icon name={item.icon} color={colors.muted} /><Text style={{fontSize: 13, lineHeight: 18, color: colors.text}}>{item.label}</Text>
+      </MotionPressable>;
+    })}
+  </View>;
 }
 
 function AnchorEditor({anchor, live, time, duration, locked, disabled, onChange, onError}: {
