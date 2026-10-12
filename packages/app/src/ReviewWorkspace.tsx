@@ -92,7 +92,7 @@ export function ReviewWorkspace(props: Props) {
         <View style={styles.transportSpace} />
         <View style={[styles.mode, {backgroundColor: dark ? '#00000028' : '#ffffff40'}]}>
           {(['watch', 'review'] as const).map(mode => <Button key={mode} quiet compact shortcut="reviewMode"
-            label={mode === 'watch' ? 'Watch continuously' : 'Review: pause at comments'}
+            label={mode === 'watch' ? 'Watch' : 'Review'}
             active={props.reviewMode === mode} disabled={disabled} onPress={() => props.onMode(mode)}
             style={[styles.modeButton, {borderColor: 'transparent', backgroundColor: props.reviewMode === mode ? dark ? '#ffffff22' : '#ffffffd9' : 'transparent'}]}>
             {mode === 'watch' ? 'Watch' : 'Review'}

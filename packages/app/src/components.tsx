@@ -17,30 +17,11 @@ export function Button({children, onPress, disabled, active, primary, compact, l
   const {styles: s, colors} = useTheme();
   const target = useRef<View>(null);
   useEffect(() => { if (autoFocus && !disabled) { const frame = requestAnimationFrame(() => target.current?.focus()); return () => cancelAnimationFrame(frame); } }, [autoFocus, disabled]);
-  const bindings = useContext(ShortcutContext);
-  const chord = shortcut ? binding(shortcut, bindings) : null;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [showTooltip, setShowTooltip] = useState(false);
   const hasTooltip = !!(toolbar || shortcut);
-  const tooltipVisible = !disabled && (showTooltip || focused);
-  const tooltip = useContext(TooltipContext);
-  const tooltipOwner = useRef({}).current;
-  const keyLabel = chord ? shortcutLabel(chord, Platform.OS === 'macos') : '';
-  const hintLabel = label ?? (typeof children === 'string' ? children : '');
-  useEffect(() => {
-    setShowTooltip(false);
-    if (!hasTooltip || !hovered || disabled) return;
-    const timer = setTimeout(() => setShowTooltip(true), 350);
-    return () => clearTimeout(timer);
-  }, [hasTooltip, hovered, disabled]);
-  useEffect(() => {
-    if (hasTooltip && tooltipVisible && target.current) tooltip.show(tooltipOwner, target.current, hintLabel, keyLabel);
-    else tooltip.hide(tooltipOwner);
-    return () => tooltip.hide(tooltipOwner);
-  }, [hasTooltip, tooltipVisible, hintLabel, keyLabel, tooltip, tooltipOwner]);
-  const button = <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={chord ? shortcutLabel(chord, Platform.OS === 'macos') : undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
-    {...{onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false)}}
+  const hint = useShortcutHint(target, shortcut, label ?? (typeof children === 'string' ? children : ''), hovered, focused, !disabled && hasTooltip);
+  const button = <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint.keyLabel || undefined} {...hint.nativeProps} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
     onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     disabled={disabled} onPress={() => { if (toolbar) target.current?.focus(); onPress?.(); }} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
       hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && !primary && {backgroundColor: colors.inset},
@@ -48,7 +29,33 @@ export function Button({children, onPress, disabled, active, primary, compact, l
     {!!icon && <Icon name={icon} color={disabled ? colors.faint : danger ? colors.danger : primary ? colors.primaryText : active ? colors.accentText : colors.text} />}
     {children !== undefined && <Text numberOfLines={1} style={[s.buttonText, primary && s.buttonPrimaryText, active && s.accentText, danger && {color: colors.danger}, disabled && s.disabledText]}>{children}</Text>}
   </MotionPressable>;
-  return button;
+  if (!hasTooltip) return button;
+  // RN macOS delivers native mouse tracking to a plain view wrapper.
+  return <View {...{onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false)}}>{button}</View>;
+}
+
+/** Shared by controls and project tiles; use a plain native View for mouse tracking. */
+export function useShortcutHint(target: React.RefObject<View | null>, shortcut: string | undefined, label: string,
+  hovered: boolean, focused: boolean, enabled: boolean) {
+  const bindings = useContext(ShortcutContext);
+  const chord = shortcut ? binding(shortcut, bindings) : null;
+  const keyLabel = chord ? shortcutLabel(chord, Platform.OS === 'macos') : '';
+  const [visible, setVisible] = useState(false);
+  const tooltip = useContext(TooltipContext);
+  const owner = useRef({}).current;
+  useEffect(() => {
+    setVisible(false);
+    if (!enabled || !hovered) return;
+    const timer = setTimeout(() => setVisible(true), 350);
+    return () => clearTimeout(timer);
+  }, [enabled, hovered]);
+  useEffect(() => {
+    if (enabled && ((Platform.OS !== 'macos' && visible) || focused) && target.current) tooltip.show(owner, target.current, label, keyLabel);
+    else tooltip.hide(owner);
+    return () => tooltip.hide(owner);
+  }, [enabled, visible, focused, target, label, keyLabel, tooltip, owner]);
+  return {keyLabel, nativeProps: Platform.OS === 'macos' && enabled
+    ? {tooltip: `${label}${keyLabel ? ` (${keyLabel})` : ''}`} : {}};
 }
 
 const textStyleKeys = new Set(['color', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'fontVariant', 'letterSpacing', 'lineHeight', 'textAlign', 'textDecorationLine', 'textDecorationStyle', 'textDecorationColor', 'textTransform', 'writingDirection', 'includeFontPadding', 'textAlignVertical']);

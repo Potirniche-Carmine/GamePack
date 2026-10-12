@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {GlassSurface} from './Glass';
-import {Button, TextField} from './components';
+import {Button, TextField, useShortcutHint} from './components';
 import {Icon, type IconName} from './Icon';
 import {libraryContents, videoTitle} from './library';
 import {LibraryMenu, type LibraryAction, type LibraryMenuState} from './LibraryMenu';
@@ -24,24 +24,27 @@ export type LibraryBrowserProps = {
 type MenuRequest = {id: string; title: string; actions: LibraryAction[]; trigger: View; keyboard: boolean};
 type ItemProps = {
   id: string; title: string; subtitle?: string; icon: IconName; selected?: boolean; compact?: boolean;
-  disabled?: boolean; onPress: () => void; actions?: LibraryAction[]; tileWidth?: number;
+  disabled?: boolean; shortcut?: string; onPress: () => void; actions?: LibraryAction[]; tileWidth?: number;
   menuId?: string; onOpenMenu: (request: MenuRequest) => void;
 };
 
-function LibraryItem({id, title, subtitle, icon, selected, compact, disabled, onPress, actions, tileWidth, menuId, onOpenMenu}: ItemProps) {
+function LibraryItem({id, title, subtitle, icon, selected, compact, disabled, onPress, actions, tileWidth, menuId, onOpenMenu, shortcut}: ItemProps) {
   const {colors: c, styles: s} = useTheme();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [optionsHovered, setOptionsHovered] = useState(false);
   const [optionsFocused, setOptionsFocused] = useState(false);
   const options = useRef<View>(null);
+  const target = useRef<View>(null);
+  const hint = useShortcutHint(target, shortcut, `Open ${title}`, hovered, focused, !disabled && !!shortcut);
   const tile = tileWidth !== undefined;
   const menuOpen = menuId === id;
   return <View style={[local.item, tile && local.tile, tile && {width: tileWidth, borderColor: focused ? c.selectedLine : c.separator, backgroundColor: 'transparent'},
     selected && {backgroundColor: c.selected}]}>
     {!compact && <GlassSurface radius={18} />}
     {focused && tile && <View pointerEvents="none" style={[StyleSheet.absoluteFill, {borderRadius: 18, borderWidth: 1.5, borderColor: c.selectedLine}]} />}
-    <Pressable {...{enableFocusRing: false}} accessibilityRole="button" accessibilityLabel={`Open ${title}`} accessibilityState={{selected: !!selected, disabled: !!disabled}}
+    <View {...{onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false)}}>
+    <Pressable ref={target} accessibilityHint={hint.keyLabel || undefined} {...hint.nativeProps} {...{enableFocusRing: false}} accessibilityRole="button" accessibilityLabel={`Open ${title}`} accessibilityState={{selected: !!selected, disabled: !!disabled}}
       disabled={disabled} focusable={!disabled} onPress={onPress} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       style={({pressed}) => [local.itemMain, compact && local.compactMain, tile && local.tileMain,
@@ -54,7 +57,7 @@ function LibraryItem({id, title, subtitle, icon, selected, compact, disabled, on
         {!!subtitle && <Text numberOfLines={1} style={[local.itemSubtitle, {color: c.muted}]}>{subtitle}</Text>}
       </View>
       {!compact && !tile && <View style={local.rowChevron}><Icon name="chevronRight" color={c.faint} /></View>}
-    </Pressable>
+    </Pressable></View>
     {!!actions?.length && <MotionPressable ref={options} disabled={disabled} focusable={!disabled}
       accessibilityRole="button" accessibilityLabel={`Options for ${title}`} accessibilityState={{expanded: menuOpen, disabled: !!disabled}}
       onHoverIn={() => setOptionsHovered(true)} onHoverOut={() => setOptionsHovered(false)}
@@ -112,6 +115,7 @@ export function LibraryBrowser(props: LibraryBrowserProps) {
       });
     }));
   };
+  const projectShortcut = (item: Project) => { const index = projects.findIndex(project => project.id === item.id); return index >= 0 && index < 9 ? `project${index + 1}` : undefined; };
   const itemProps = {disabled: disabled || !!menu, onOpenMenu: openMenu, menuId: menu?.id};
   const empty = !contents.projects.length && !contents.folders.length && !contents.videos.length;
   const searching = !!query.trim();
@@ -142,8 +146,8 @@ export function LibraryBrowser(props: LibraryBrowserProps) {
       keyboardShouldPersistTaps="handled" onScrollBeginDrag={() => dismissMenu()}>
       {compact && <>
         <View style={local.sectionHeader}><Text style={[local.sectionTitle, {color: c.muted}]}>Projects</Text><Button quiet compact icon="plus" label="New project" shortcut="newProject" disabled={disabled || !!menu} onPress={props.onNewProject} /></View>
-        {projects.map(item => <LibraryItem key={item.id} {...itemProps} id={item.id} compact title={item.title} icon="folder" selected={projectId === item.id} onPress={() => props.onOpenProject(item)} actions={projectActions(item)} />)}
-        {!projects.length && <Button quiet icon="plus" disabled={disabled || !!menu} onPress={props.onNewProject}>New project</Button>}
+        {projects.map(item => <LibraryItem key={item.id} {...itemProps} id={item.id} shortcut={projectShortcut(item)} compact title={item.title} icon="folder" selected={projectId === item.id} onPress={() => props.onOpenProject(item)} actions={projectActions(item)} />)}
+        {!projects.length && <Button quiet icon="plus" shortcut="newProject" disabled={disabled || !!menu} onPress={props.onNewProject}>New project</Button>}
         {!!project && <>
           <View style={[local.sectionHeader, local.sectionGap]}><Text style={[local.sectionTitle, {color: c.muted}]} numberOfLines={1}>{project.title}</Text><Button quiet compact icon="plus" label="New folder" disabled={disabled || !!menu} onPress={props.onCreateFolder} /></View>
           <LibraryItem {...itemProps} id="root" compact title="Project overview" icon="library" selected={!folderId && !videoId} onPress={props.onOpenRoot} />
@@ -151,7 +155,7 @@ export function LibraryBrowser(props: LibraryBrowserProps) {
           <View style={local.sectionGap}>{search}</View>
         </>}
       </>}
-      {!compact && !project && !!contents.projects.length && <View style={local.grid}>{contents.projects.map(item => <LibraryItem key={item.id} {...itemProps} id={item.id} tileWidth={tileWidth} title={item.title} icon="folder" onPress={() => props.onOpenProject(item)} actions={projectActions(item)} />)}</View>}
+      {!compact && !project && !!contents.projects.length && <View style={local.grid}>{contents.projects.map(item => <LibraryItem key={item.id} {...itemProps} id={item.id} shortcut={projectShortcut(item)} tileWidth={tileWidth} title={item.title} icon="folder" onPress={() => props.onOpenProject(item)} actions={projectActions(item)} />)}</View>}
       {!compact && !!contents.folders.length && <View style={local.folderList}>{contents.folders.map(item => <LibraryItem key={item.id} {...itemProps} id={item.id} title={item.title} icon="folder" onPress={() => props.onOpenFolder(item)} actions={folderActions(item)} />)}</View>}
       {!!project && !!contents.videos.length && <View style={[local.videoList, !compact && {borderTopColor: c.separator, borderTopWidth: contents.folders.length ? 1 : 0}]}>
         {contents.videos.map(item => <LibraryItem key={item.id} {...itemProps} id={item.id} title={videoTitle(item)} subtitle={searching && !folder ? projectFolders.find(location => location.id === item.folder_id)?.title : undefined}
@@ -160,7 +164,7 @@ export function LibraryBrowser(props: LibraryBrowserProps) {
       {empty && (!compact || !!project) && <View style={[local.empty, compact && local.compactEmpty]}>
         {!compact && <View style={[local.emptyIcon, {backgroundColor: c.inset}]}><Icon name={project ? 'video' : 'folder'} color={c.muted} /></View>}
         <Text style={[local.emptyTitle, compact && local.compactEmptyTitle, {color: c.muted}]}>{emptyTitle}</Text>
-        {!searching && (!compact || !!folder) && <Button quiet icon="plus" disabled={disabled || !!menu} onPress={project ? props.onImport : props.onNewProject}>{project ? 'Add video' : 'New project'}</Button>}
+        {!searching && (!compact || !!folder) && <Button quiet icon="plus" shortcut={project ? 'import' : 'newProject'} disabled={disabled || !!menu} onPress={project ? props.onImport : props.onNewProject}>{project ? 'Add video' : 'New project'}</Button>}
       </View>}
     </ScrollView>
     {compact && !!project && <View style={[local.footer, {borderTopColor: c.separator}]}><Button primary icon="plus" shortcut="import" disabled={disabled || !!menu} onPress={props.onImport}>Add video</Button></View>}
