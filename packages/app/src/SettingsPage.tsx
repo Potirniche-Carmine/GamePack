@@ -51,8 +51,9 @@ export function SettingsPage({settings, profile, recording, error, busy, onProfi
 
   return <Animated.View style={[s.page, {opacity: entrance}, !reduceMotion && {transform: [{scale: entrance.interpolate({inputRange: [0, 1], outputRange: [0.985, 1]})}]}]}>
     <GlassSurface radius={28} />
+    <View pointerEvents="none" style={[StyleSheet.absoluteFill, {borderRadius: 28, backgroundColor: colors.panel, opacity: .14}]} />
     <View style={s.header}>
-      <Button icon="close" quiet compact label="Close settings" autoFocus onPress={onClose} style={s.close} />
+      <Button icon="close" quiet compact label="Close settings" onPress={onClose} style={s.close} />
       <Text accessibilityRole="header" style={s.title}>Settings</Text>
       <View style={s.close} />
     </View>
@@ -164,10 +165,10 @@ function AppearancePreview({dark}: {dark: boolean}) {
 }
 
 const createSettingsStyles = (c: Colors) => StyleSheet.create({
-  page: {width: 640, height: 460, maxWidth: '92%', maxHeight: '90%', alignSelf: 'center', paddingHorizontal: 26, paddingTop: 18, borderRadius: 28},
+  page: {width: 720, height: 620, maxWidth: '96%', maxHeight: '96%', alignSelf: 'center', paddingHorizontal: 32, paddingTop: 24, paddingBottom: 28, borderRadius: 28},
   header: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22},
   title: {color: c.text, fontSize: 17, lineHeight: 23, letterSpacing: -0.35, fontWeight: '600'},
-  close: {width: 30, height: 30, minHeight: 30, padding: 0},
+  close: {width: 32, height: 32, minHeight: 32, padding: 0, borderRadius: 16},
   navigation: {flexDirection: 'row', padding: 3, borderRadius: 18, backgroundColor: c.glassInset, gap: 2, marginBottom: 24},
   tab: {flex: 1, minHeight: 33, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', borderRadius: 15, borderWidth: 1, borderColor: 'transparent'},
   tabHover: {backgroundColor: c.inset},
@@ -175,7 +176,7 @@ const createSettingsStyles = (c: Colors) => StyleSheet.create({
   tabLabel: {fontSize: 13, lineHeight: 19, fontWeight: '500', color: c.muted},
   tabLabelSelected: {color: c.text, fontWeight: '600'},
   scroll: {flex: 1},
-  content: {paddingBottom: 24, width: '100%'},
+  content: {paddingBottom: 16, paddingRight: 10, width: '100%'},
   error: {color: c.errorText, backgroundColor: c.errorBg, padding: 12, borderRadius: 8, fontSize: 13, lineHeight: 19, marginBottom: 20},
   profilePanel: {width: '100%', maxWidth: 360, alignSelf: 'center'},
   identity: {alignItems: 'center', marginTop: 8, marginBottom: 26},
@@ -199,9 +200,9 @@ const createSettingsStyles = (c: Colors) => StyleSheet.create({
   searchRow: {flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 8},
   search: {flex: 1},
   shortcutGroup: {marginTop: 23},
-  sectionTitle: {color: c.muted, fontSize: 12, lineHeight: 18, fontWeight: '600', marginBottom: 8},
-  shortcutRow: {flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, borderBottomWidth: 1, borderBottomColor: c.separator},
-  shortcutLabel: {flex: 1, color: c.text, fontSize: 13, lineHeight: 19},
+  sectionTitle: {color: c.muted, fontSize: 13, lineHeight: 20, fontWeight: '600', marginBottom: 10},
+  shortcutRow: {flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 52, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: c.separator},
+  shortcutLabel: {flex: 1, color: c.text, fontSize: 14, lineHeight: 21},
   keycap: {minWidth: 106, minHeight: 30},
   emptySearch: {color: c.muted, fontSize: 14, lineHeight: 20, paddingVertical: 36, textAlign: 'center'},
   focus: {borderColor: c.selectedLine},
