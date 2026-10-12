@@ -10,12 +10,12 @@ export const ANNOTATION_COLOR = '#79BFFD';
 export const FRAME_TOLERANCE_US = 2_000;
 export const sameFrame = (a: number, b: number) => Math.abs(a - b) <= FRAME_TOLERANCE_US;
 
-/** Only paused frame geometry is sent to the native overlay. */
-export function annotationScene(comments: readonly Comment[], timeUs: number, paused: boolean, selectedId?: string | null) {
-  if (!paused) return null;
-  const active = comments.filter(comment => sameFrame(comment.anchor.at_us, timeUs)).sort(compareComments);
+/** Preload the next stop so native playback can reveal its ink 80 ms before pausing. */
+export function annotationScene(comments: readonly Comment[], timeUs: number, paused: boolean, selectedId?: string | null, nextStopUs?: number) {
+  if (!paused && nextStopUs === undefined) return null;
+  const active = comments.filter(comment => sameFrame(comment.anchor.at_us, paused ? timeUs : nextStopUs!)).sort(compareComments);
   if (!active.length) return null;
-  return {id: `frame:${active[0].anchor.at_us}`, anchor: active[0].anchor,
+  return {id: `frame:${active[0].anchor.at_us}`, anchor: active[0].anchor, ...(!paused ? {preview_lead_us: 80_000} : {}),
     drawings: active.flatMap(comment => comment.drawings.map(drawing => ({...drawing,
       id: `${comment.comment_id}:${drawing.id}`, opacity: !selectedId || (conversationRoot(comments, comment.comment_id)?.comment_id ?? comment.comment_id) === selectedId ? 1 : .3,
     })))};

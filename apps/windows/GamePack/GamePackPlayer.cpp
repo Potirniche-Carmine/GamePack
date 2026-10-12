@@ -53,7 +53,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   hstring tool{L"pointer"}, source;
   int64_t seekToken{-1}, seekUs{}, reviewEnd{-1}, flushToken{}, flushRequest{};
   std::string flushDrawing;
-  bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{};
+  bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{}, settlingReviewStop{};
   uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
   int64_t pendingSeekTarget{}, stepFrames{1};
   double frameRate{}, rate{1}, zoom{1};
@@ -109,7 +109,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     seekInFlight=false;
     // Serialize native seeks: an older completion cannot release a newer request.
     if (generation!=seekGeneration) { StartSeek(); return; }
-    seeking=false;
+    seeking=false; settlingReviewStop=false;
     if (flushRequest) StrokeFlush();
     else if (!paused && !reverseSeek) player.Play();
     Render(); Emit(true);
@@ -118,7 +118,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     if (disposed || seekInFlight || Duration()<=0) return;
     auto target=std::clamp<int64_t>(pendingSeekTarget,0,Duration());
     auto generation=seekGeneration;
-    if (Time()==target) { seeking=false; if (flushRequest) StrokeFlush(); else if (!paused && !reverseSeek) player.Play(); Render(); Emit(true); return; }
+    if (Time()==target) { seeking=false; settlingReviewStop=false; if (flushRequest) StrokeFlush(); else if (!paused && !reverseSeek) player.Play(); Render(); Emit(true); return; }
     seekInFlight=true; activeSeekGeneration=generation;
     auto weak=weak_from_this();
     seekCompletedToken=player.PlaybackSession().SeekCompleted([weak,generation](auto const&,auto const&) {
@@ -128,8 +128,8 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     });
     player.PlaybackSession().Position(std::chrono::microseconds(target));
   }
-  void Seek(int64_t target) {
-    Finish(); ++seekGeneration; pendingSeekTarget=target; seeking=true;
+  void Seek(int64_t target, bool reviewStop=false) {
+    Finish(); ++seekGeneration; pendingSeekTarget=target; seeking=true; settlingReviewStop=reviewStop;
     player.Pause(); StartSeek();
   }
   bool CanAnnotate() {
@@ -159,7 +159,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
       if (auto self = weak.lock(); self && !self->disposed && !self->seeking) {
         if (self->reviewEnd >= 0 && !self->paused && (self->rate < 0 ? self->Time() <= self->reviewEnd : self->Time() >= self->reviewEnd)) {
           self->Finish(); self->player.Pause(); self->paused = true;
-          self->ended = true; self->Seek(self->reviewEnd); return;
+          self->ended = true; self->Seek(self->reviewEnd, true); self->Render(); return;
         }
         if (self->reverseSeek && !self->paused) {
           auto now=std::chrono::steady_clock::now();
@@ -350,12 +350,15 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   void Render() {
     if (disposed) return;
     overlay.Children().Clear();
-    if (seeking) { readyKey.clear(); return; }
+    if (seeking && !settlingReviewStop) { readyKey.clear(); return; }
     if (!scene) readyKey.clear();
     if (scene) {
       auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
       int64_t t=Time(), start=static_cast<int64_t>(Number(anchor,L"at_us"));
-      if (paused && std::abs(t-start)<=2000) {
+      double distance=rate<0 ? t-start : start-t;
+      bool atReviewStop=reviewEnd>=0 && std::abs(start-reviewEnd)<=2000;
+      bool preview=!paused && atReviewStop && distance>=0 && distance<=Number(scene,L"preview_lead_us")*std::abs(rate);
+      if ((settlingReviewStop && atReviewStop) || preview || (paused && std::abs(t-start)<=2000)) {
         auto drawings=scene.GetNamedArray(L"drawings",JsonArray{});
         for (auto const& item:drawings) Draw(item.GetObject());
         for (auto const& entry:pendingDrawings) Draw(entry.second);

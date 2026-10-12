@@ -15,6 +15,7 @@ export function usePlaybackTimeline({time, duration, paused, rate, seekToken, di
   const [scrubbing, setScrubbing] = useState(false);
   const position = useRef(new Animated.Value(0)).current;
   const lastSeek = useRef(0);
+  const lastTarget = useRef<number | null>(null);
   const slider = useRef<View>(null);
   const drag = useRef<{pageX: number; locationX: number; time: number} | null>(null);
   const previous = useRef<TimelineSample | null>(null);
@@ -41,18 +42,20 @@ export function usePlaybackTimeline({time, duration, paused, rate, seekToken, di
     const x = current.locationX + event.nativeEvent.pageX - current.pageX;
     current.time = timelineSeekTime(x, duration, width);
     position.setValue(progress(current.time));
-    if (Date.now() - lastSeek.current >= 64) { lastSeek.current = Date.now(); onSeek(current.time); }
+    if (current.time !== lastTarget.current && Date.now() - lastSeek.current >= 64) {
+      lastSeek.current = Date.now(); lastTarget.current = current.time; onSeek(current.time);
+    }
   };
   return {width, setWidth, focused, setFocused, hovered, setHovered, scrubbing, position, slider, canSeek,
     start: (event: GestureResponderEvent) => {
       slider.current?.focus(); position.stopAnimation();
       drag.current = {pageX: event.nativeEvent.pageX, locationX: event.nativeEvent.locationX, time};
-      lastSeek.current = 0; setScrubbing(true); updateDrag(event);
+      lastSeek.current = 0; lastTarget.current = null; setScrubbing(true); updateDrag(event);
     },
     move: updateDrag,
     finish: (event: GestureResponderEvent) => {
       updateDrag(event); const target = drag.current?.time;
-      drag.current = null; setScrubbing(false); if (target !== undefined) onSeek(target);
+      drag.current = null; setScrubbing(false); if (target !== undefined && target !== lastTarget.current) onSeek(target);
     },
     cancel: () => { drag.current = null; setScrubbing(false); position.setValue(progress(time)); },
   };

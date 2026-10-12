@@ -44,3 +44,16 @@ test('native clock settling is tolerated without a playback visibility window', 
   assert.equal(annotationScene([eof], 10000000, true).drawings.length, 1);
   assert.equal(annotationScene([eof], 10000000, false), null);
 });
+
+test('review preloads only the upcoming stop with a short native preview window', () => {
+  const records = [record('first'), record('second', 2000000)];
+  const scene = annotationScene(records, 500000, false, null, 1000000);
+  assert.equal(scene.anchor.at_us, 1000000);
+  assert.equal(scene.preview_lead_us, 80000);
+  assert.equal(scene.drawings.length, 1);
+  assert.equal(scene.drawings[0].id, 'first:stroke');
+  assert.equal(scene.id, annotationScene(records, 1000000, true).id);
+  assert.equal(annotationScene(records, 2000000, true).preview_lead_us, undefined);
+  assert.equal(annotationScene(records, 500000, false), null);
+  assert.equal(annotationScene(records, 500000, false, null, 3000000), null);
+});

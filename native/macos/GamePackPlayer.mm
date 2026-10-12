@@ -106,6 +106,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   NSString *_drawingTool;
   NSTimeInterval _lastEvent;
   BOOL _seeking;
+  BOOL _settlingReviewStop;
   BOOL _finished;
   NSInteger _loadGeneration;
   NSInteger _seekGeneration;
@@ -162,7 +163,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
     });
   }];
 }
-- (void)setPaused:(BOOL)paused { _paused = paused; _finished = NO; if (paused || _pendingStrokeFlushToken) [_player pause]; else if (!_seeking) _player.rate = _rate; [_overlay setNeedsDisplay:YES]; if (!_seeking) [self emitTime:NO]; }
+- (void)setPaused:(BOOL)paused { _paused = paused; _finished = NO; if (paused || _pendingStrokeFlushToken) [_player pause]; else if (!_seeking) _player.rate = _rate; [_overlay setNeedsDisplay:YES]; }
 - (void)setRate:(float)rate { _rate = (rate < 0 ? fmax(-4, rate) : fmax(0.25, fmin(4.0, rate))); if (!_paused && !_seeking && !_pendingStrokeFlushToken) _player.rate = _rate; }
 - (void)setZoom:(double)zoom {
   double value = isfinite(zoom) ? fmin(4, fmax(1, zoom)) : 1;
@@ -193,6 +194,8 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
     _pendingStepFrames += _stepFrames; [self applyFrameSteps];
   }
   [self emitStrokeFlushIfReady];
+  // Publish only after the whole prop batch, including its seek token, is applied.
+  if ([changedProps containsObject:@"paused"]) [self emitTime:NO];
 }
 - (void)applyFrameSteps {
   if (_seeking || !_pendingStepFrames || !_player.currentItem) return;
@@ -200,11 +203,14 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   [_player.currentItem stepByCount:(int)_pendingStepFrames]; _pendingStepFrames = 0;
 }
 - (void)performSeek {
+  [self seekToUs:_seekUs reviewStop:NO];
+}
+- (void)seekToUs:(double)target reviewStop:(BOOL)reviewStop {
   [self finishStroke]; if (!_player.currentItem) return;
-  _seeking = YES; _finished = NO; NSInteger generation = ++_seekGeneration; [_player pause];
+  _seeking = YES; _settlingReviewStop = reviewStop; _finished = reviewStop; NSInteger generation = ++_seekGeneration; [_player pause];
   __weak GPPlayer *weakSelf = self;
-  [_player seekToTime:CMTimeMake((int64_t)fmax(0, _seekUs), 1000000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL complete) {
-    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; if (!self.paused && complete && !self->_pendingStrokeFlushToken) self->_player.rate = self.rate; [self applyFrameSteps]; [self emitStrokeFlushIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:NO]; });
+  [_player seekToTime:CMTimeMake((int64_t)fmax(0, target), 1000000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL complete) {
+    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; self->_settlingReviewStop = NO; if (!self.paused && complete && !self->_pendingStrokeFlushToken) self->_player.rate = self.rate; [self applyFrameSteps]; [self emitStrokeFlushIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:reviewStop && complete]; });
   }];
 }
 - (void)setSceneJson:(NSString *)sceneJson { _sceneJson = [sceneJson copy]; }
@@ -213,12 +219,15 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)tick {
   if (_seeking) return;
   int64_t us = [self timeUs];
-  if (!_paused && !_finished && _reviewEndUs >= 0 && (_rate < 0 ? us <= _reviewEndUs : us >= _reviewEndUs)) { [self finishStroke]; [_player pause]; _paused = YES; _finished = YES; [self emitTime:YES]; }
+  if (!_paused && !_finished && _reviewEndUs >= 0 && (_rate < 0 ? us <= _reviewEndUs : us >= _reviewEndUs)) {
+    _paused = YES; [self seekToUs:_reviewEndUs reviewStop:YES]; [_overlay setNeedsDisplay:YES]; return;
+  }
   [_overlay setNeedsDisplay:YES];
   if (NSDate.timeIntervalSinceReferenceDate - _lastEvent > 0.1) [self emitTime:NO];
 }
 - (void)ended:(NSNotification *)notification { if (!_seeking && notification.object == _player.currentItem) { [self finishStroke]; _finished = YES; [self emitTime:YES]; } }
 - (void)emitTime:(BOOL)ended {
+  if (_seeking) return;
   _lastEvent = NSDate.timeIntervalSinceReferenceDate;
   if (self.onTime) self.onTime(@{@"time_us":@([self timeUs]), @"duration_us":@(isfinite(_duration) ? llround(_duration*1000000):0), @"width":@(_videoSize.width), @"height":@(_videoSize.height), @"seekToken":@(_seekToken), @"playing":@(_player.rate != 0), @"ended":@(ended)});
 }
@@ -305,7 +314,11 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 }
 - (void)drawOverlay {
   NSRect rect=[self contentRect]; [NSGraphicsContext saveGraphicsState]; NSRectClip(rect);
-  BOOL visible=_paused && !_seeking && llabs([self timeUs]-[_scene[@"anchor"][@"at_us"] longLongValue]) <= 2000;
+  int64_t anchor = [_scene[@"anchor"][@"at_us"] longLongValue], time = [self timeUs];
+  double distance = _rate < 0 ? time - anchor : anchor - time;
+  BOOL atReviewStop = _reviewEndUs >= 0 && llabs(anchor - (int64_t)_reviewEndUs) <= 2000;
+  BOOL preview = !_paused && atReviewStop && distance >= 0 && distance <= [_scene[@"preview_lead_us"] doubleValue] * fabs(_rate);
+  BOOL visible = (_settlingReviewStop && atReviewStop) || (!_seeking && (preview || (_paused && llabs(time-anchor) <= 2000)));
   if (visible && _scene) {
     for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect];
     for (NSDictionary *drawing in _pendingDrawings.allValues) [self drawDrawing:drawing rect:rect];

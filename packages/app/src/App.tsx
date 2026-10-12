@@ -66,6 +66,7 @@ export default function App() {
   const lastReviewStop = useRef<number | null>(null);
   const playbackContext = useRef({comments: [] as Comment[], duration: 0, rate: 1, editing: false});
   const [seekState, setSeekState] = useState({us: 0, token: 0});
+  const seekRequest = useRef(seekState);
   const [flushToken, setFlushToken] = useState(0);
   const [tool, setTool] = useState<DrawingTool>('pointer');
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
@@ -119,15 +120,15 @@ export default function App() {
   const allRepliesExpanded = originalComments.length > 0 && originalComments.every(item => expanded.has(item.comment_id));
   const projectVideos = data ? libraryContents(data.projects, data.folders, data.videos, projectId, folderId).videos : [];
   const sceneJson = useMemo(() => {
-    if (reviewMode !== 'review' || !paused || !annotationsVisible) return '';
+    if (reviewMode !== 'review' || !annotationsVisible) return '';
     if (draft) {
       const root = draft.parent_comment_id ? conversationRoot(videoComments, draft.parent_comment_id) : undefined;
       const context = root ? annotationScene(videoComments.filter(item => conversationRoot(videoComments, item.comment_id)?.comment_id === root.comment_id), draft.anchor.at_us, true) : null;
       return JSON.stringify({id: draft.id, anchor: draft.anchor, drawings: [...(context?.drawings ?? []), ...draft.drawings]});
     }
-    const scene = annotationScene(videoComments, time, paused, commentId);
+    const scene = annotationScene(videoComments, time, paused, commentId, reviewStop?.time);
     return scene ? JSON.stringify(scene) : '';
-  }, [draft, videoComments, time, paused, commentId, annotationsVisible, reviewMode]);
+  }, [draft, videoComments, time, paused, commentId, annotationsVisible, reviewMode, reviewStop?.time]);
   const onVideoNotes = useMemo(() => {
     const notes = paused ? notesAtTime(videoComments, time) : [];
     const root = draft?.parent_comment_id ? conversationRoot(videoComments, draft.parent_comment_id) : undefined;
@@ -178,7 +179,8 @@ export default function App() {
   useEffect(() => { if (data) { try { setAppearance(themeChoice); } catch (cause) { setError(message(cause)); } } }, [themeChoice, !!data]);
   const seek = useCallback((us: number) => {
     const target = Math.max(0, Math.round(us));
-    setSeekState(previous => ({us: target, token: previous.token + 1}));
+    seekRequest.current = {us: target, token: seekRequest.current.token + 1};
+    setSeekState(seekRequest.current);
     setTime(target);
     lastReviewStop.current = null;
     const context = playbackContext.current;
@@ -359,7 +361,7 @@ export default function App() {
     });
   };
   const onTime = (event: PlayerTime) => {
-    if (event.seekToken !== undefined && event.seekToken !== seekState.token) return;
+    if (event.seekToken !== undefined && event.seekToken !== seekRequest.current.token) return;
     if (Number.isFinite(event.time_us)) {
       const now = Math.max(0, Math.round(event.time_us)); setTime(now);
 
@@ -369,7 +371,8 @@ export default function App() {
     if (event.ended) {
       setPaused(true);
       if (reviewMode === 'review' && !draft && reviewStop && (rate < 0 ? event.time_us <= reviewStop.time : event.time_us >= reviewStop.time)) {
-        seek(reviewStop.time); lastReviewStop.current = reviewStop.time;
+        if (!sameFrame(event.time_us, reviewStop.time)) seek(reviewStop.time);
+        lastReviewStop.current = reviewStop.time;
         setExpanded(new Set(reviewStop.commentIds)); setCommentId(reviewStop.commentIds[0]);
       }
     }
