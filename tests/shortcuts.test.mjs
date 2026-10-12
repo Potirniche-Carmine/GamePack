@@ -83,3 +83,15 @@ test('the removed comments toggle cannot be restored by old keybindings', () => 
   assert.equal(shortcuts.some(item => item.id === 'onVideoNotes'), false);
   assert.equal(shortcutAction({chord: 'Shift+M', repeat: false}, {onVideoNotes: 'Shift+M'}), undefined);
 });
+
+test('Watch / Review toggle works in both modes and preserves custom assignments', () => {
+  for (const mode of ['watch', 'review']) {
+    assert.equal(shortcutAction({chord: 'R', repeat: false}, {}, mode), 'reviewMode');
+    assert.equal(shortcutAction({chord: 'R', repeat: true}, {}, mode), undefined);
+    assert.equal(shortcutAction({chord: 'Shift+W', repeat: false}, {reviewMode: 'Shift+W'}, mode), 'reviewMode');
+    assert.equal(shortcutAction({chord: 'R', repeat: false}, {reviewMode: null}, mode), undefined);
+  }
+  const migrated = migrateReviewBindings({play: 'R'});
+  assert.equal(binding('reviewMode', migrated), null);
+  assert.equal(shortcutAction({chord: 'R', repeat: false}, migrated), 'play');
+});

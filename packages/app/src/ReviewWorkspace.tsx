@@ -18,7 +18,7 @@ type Props = {
   video: Video; time: number; duration: number; paused: boolean; reviewMode: 'watch' | 'review';
   activityToken: number; sceneReady: boolean; drawingsVisible: boolean; comments: Comment[]; notes: Comment[]; selectedId: string | null; draft: Draft | null; expanded: ReadonlySet<string>;
   disabled: boolean; header: ReactNode; composer: ReactNode; toolbar: ReactNode; timeline: ReactNode; popover: ReactNode; children: ReactNode;
-  rate: number; zoom: number; presenting: boolean;
+  rate: number; zoom: number; presenting: boolean; popoverKind: 'speed' | 'zoom';
   onMode: (mode: 'watch' | 'review') => void; onSelect: (note: Comment) => void; onReply: (note: Comment) => void;
   onExpand: (note: Comment) => void;
   onPlay: () => void; onSpeed: () => void; onZoom: () => void; onPresent: () => void;
@@ -28,6 +28,7 @@ export function ReviewWorkspace(props: Props) {
   const {video, time, duration, notes, comments, selectedId, draft, disabled, composer} = props;
   const {colors, dark} = useTheme();
   const [area, setArea] = useState({width: 1, height: 1});
+  const [menuAnchors, setMenuAnchors] = useState({speed: 0, zoom: 0});
   const reviewing = props.reviewMode === 'review';
   const rect = reviewViewport(area, video.width && video.height ? video : {width: 16, height: 9}, reviewing, props.presenting);
   const reduce = useReducedMotion();
@@ -84,21 +85,24 @@ export function ReviewWorkspace(props: Props) {
       <NoteColumn {...props} notes={props.sceneReady ? visibleNotes : []} draft={visibleDraft} numbers={numbers} composer={visibleDraft ? composer : null} />
     </FloatingConversation>}
     <PlaybackDock available={area.width} duration={duration} reviewing={reviewing} disabled={disabled} hidden={hidden} opacity={opacity}
-      onInteractionChange={setOverControls} popover={props.popover}>
+      onInteractionChange={setOverControls} popover={props.popover} popoverCenter={menuAnchors[props.popoverKind]}>
       <View style={styles.transport}>
         <Button compact quiet shortcut="play" label={props.paused ? 'Play video' : 'Pause video'} icon={props.paused ? 'play' : 'pause'} disabled={disabled} onPress={props.onPlay} />
         <Text style={[styles.time, {color: colors.text}]}>{timeLabel(time)}<Text style={{color: colors.muted}}> / {timeLabel(duration)}</Text></Text>
         <View style={styles.transportSpace} />
         <View style={[styles.mode, {backgroundColor: dark ? '#00000028' : '#ffffff40'}]}>
-          {(['watch', 'review'] as const).map(mode => <Pressable key={mode} accessibilityRole="button" accessibilityLabel={mode === 'watch' ? 'Watch continuously' : 'Review: pause at comments'}
-            accessibilityState={{selected: props.reviewMode === mode, disabled}} disabled={disabled} onPress={() => props.onMode(mode)}
-            style={({pressed}) => [styles.modeButton, {backgroundColor: props.reviewMode === mode ? dark ? '#ffffff22' : '#ffffffd9' : 'transparent', opacity: pressed ? .7 : 1}]}>
-            <Text style={[styles.modeLabel, {color: props.reviewMode === mode || !dark ? colors.text : colors.muted}]}>{mode === 'watch' ? 'Watch' : 'Review'}</Text>
-          </Pressable>)}
+          {(['watch', 'review'] as const).map(mode => <Button key={mode} quiet compact shortcut="reviewMode"
+            label={mode === 'watch' ? 'Watch continuously' : 'Review: pause at comments'}
+            active={props.reviewMode === mode} disabled={disabled} onPress={() => props.onMode(mode)}
+            style={[styles.modeButton, {borderColor: 'transparent', backgroundColor: props.reviewMode === mode ? dark ? '#ffffff22' : '#ffffffd9' : 'transparent'}]}>
+            {mode === 'watch' ? 'Watch' : 'Review'}
+          </Button>)}
         </View>
         <View style={styles.transportSpace} />
-        <Button quiet compact label="Playback speed" disabled={disabled} onPress={props.onSpeed}>{props.rate}×</Button>
-        <Button quiet compact label="Video zoom" disabled={disabled} onPress={props.onZoom}>{props.zoom === 1 ? 'Fit' : `${Math.round(props.zoom * 100)}%`}</Button>
+        <View onLayout={event => { const {x, width} = event.nativeEvent.layout; setMenuAnchors(previous => ({...previous, speed: 20 + x + width / 2})); }}>
+        <Button quiet compact label="Playback speed" disabled={disabled} onPress={props.onSpeed}>{props.rate}×</Button></View>
+        <View onLayout={event => { const {x, width} = event.nativeEvent.layout; setMenuAnchors(previous => ({...previous, zoom: 20 + x + width / 2})); }}>
+        <Button quiet compact label="Video zoom" disabled={disabled} onPress={props.onZoom}>{props.zoom === 1 ? 'Fit' : `${Math.round(props.zoom * 100)}%`}</Button></View>
         <Button quiet compact icon={props.presenting ? 'minimize' : 'maximize'} label={props.presenting ? 'Exit full screen' : 'Enter full screen'} shortcut="present" disabled={disabled} onPress={props.onPresent} />
       </View>
       <View style={styles.timeline}>{props.timeline}</View>

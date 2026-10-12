@@ -5,11 +5,12 @@ import {resizeTimelineDock, timelineDockBounds, timelineDockWidth} from './timel
 import {useTheme} from './theme';
 
 /** Resize through layout so text, thumbnails and hit targets retain their proportions. */
-export function PlaybackDock({available, duration, reviewing, disabled, hidden, opacity, onInteractionChange, popover, children}: {
+export function PlaybackDock({available, duration, reviewing, disabled, hidden, opacity, onInteractionChange, popover, popoverCenter, children}: {
   available: number; duration: number; reviewing: boolean; disabled: boolean; hidden: boolean;
-  opacity: Animated.Value; onInteractionChange: (active: boolean) => void; popover: ReactNode; children: ReactNode;
+  opacity: Animated.Value; onInteractionChange: (active: boolean) => void; popover: ReactNode; popoverCenter: number; children: ReactNode;
 }) {
   const {colors} = useTheme();
+  const [popoverWidth, setPopoverWidth] = useState(64);
   const [preferred, setPreferred] = useState<number | null>(null);
   const [hovered, setHovered] = useState(false);
   const [activeEdge, setActiveEdge] = useState<number | null>(null);
@@ -63,7 +64,10 @@ export function PlaybackDock({available, duration, reviewing, disabled, hidden, 
       style={[styles.edge, side < 0 ? {left: 0} : {right: 0}, Platform.OS === 'macos' && ({cursor: canResize ? 'ew-resize' : 'default'} as object)]}>
       <View pointerEvents="none" style={[styles.grip, {backgroundColor: focusedEdge === side || activeEdge === side || (resizing && drag.current?.side === side) ? colors.text : colors.muted, opacity: canResize ? 1 : .3}]} />
     </View>)}
-    {!!popover && <Glass style={styles.popover}>{popover}</Glass>}
+    {!!popover && <View onLayout={event => setPopoverWidth(event.nativeEvent.layout.width)}
+      style={[styles.popover, {left: Math.max(0, Math.min(width - popoverWidth, popoverCenter - popoverWidth / 2))}]}>
+      <Glass style={styles.menu}>{popover}</Glass>
+    </View>}
   </Animated.View>;
 }
 
@@ -72,5 +76,6 @@ const styles = StyleSheet.create({
   surface: {borderRadius: 24, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10},
   edge: {position: 'absolute', top: 22, bottom: 22, width: 16, alignItems: 'center', justifyContent: 'center'},
   grip: {width: 3, height: 28, borderRadius: 1.5},
-  popover: {position: 'absolute', bottom: '100%', right: 16, marginBottom: 8, padding: 6, borderRadius: 16},
+  popover: {position: 'absolute', bottom: '100%', marginBottom: 8},
+  menu: {padding: 6, borderRadius: 16},
 });

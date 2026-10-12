@@ -651,6 +651,7 @@ export default function App() {
     if (presenting && reviewMode === 'review' && (event.chord === 'PageDown' || event.chord === 'PageUp')) { navigateNote(event.chord === 'PageDown' ? 1 : -1); return; }
     switch (action) {
       case 'present': togglePresentation(); break;
+      case 'reviewMode': changeReviewMode(reviewMode === 'watch' ? 'review' : 'watch'); break;
       case 'allReplies': setPaused(true); toggleAllReplies(); break;
       case 'play': play(); break;
       case 'pause': setPaused(true); break;
@@ -750,7 +751,8 @@ export default function App() {
             <Button toolbar quiet compact shortcut="laser" icon="target" label="Laser pointer" active={tool === 'laser'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('laser')} />
           </>}
           timeline={<ReviewTimeline paused={paused} rate={rate} seekToken={seekState.token} mode={reviewMode} video={video} time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => { const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectComment(next); }} onSeek={scrubTo} />}
-          popover={speedOpen || zoomOpen ? <View style={{gap: 2}}>{(speedOpen ? [.5, 1, 1.5, 2] : [1, 1.5, 2, 3, 4]).map(value => <Button quiet compact key={value} active={(speedOpen ? rate : zoom) === value} label={speedOpen ? `Playback speed ${value}×` : `Zoom ${value * 100}%`} onPress={() => { if (speedOpen) { setRate(value); armReview(time, value); } else setZoom(value); setSpeedOpen(false); setZoomOpen(false); }}>{speedOpen ? `${value}×` : value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}</View> : null}
+          popoverKind={speedOpen ? 'speed' : 'zoom'}
+          popover={speedOpen || zoomOpen ? <View style={{gap: 2}}>{(speedOpen ? [.5, 1, 1.5, 2] : [1, 1.5, 2, 3, 4]).map(value => <Button quiet compact key={value} shortcut={!speedOpen && value === 1 ? 'zoomReset' : undefined} active={(speedOpen ? rate : zoom) === value} label={speedOpen ? `Playback speed ${value}×` : `Zoom ${value * 100}%`} onPress={() => { if (speedOpen) { setRate(value); armReview(time, value); } else setZoom(value); setSpeedOpen(false); setZoomOpen(false); }}>{speedOpen ? `${value}×` : value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}</View> : null}
           >
           <GamePackPlayer key={video.id} style={StyleSheet.absoluteFill} source={video.path} zoom={zoom} onZoom={event => setZoom(event.nativeEvent.zoom)} paused={paused} rate={rate}
             seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson}

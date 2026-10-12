@@ -1,4 +1,5 @@
 [
+  {"id":"reviewMode","label":"Switch Watch / Review","group":"Playback","key":"R","repeat":false},
   {"id":"present","label":"Enter / exit full screen","group":"Playback","key":"F","repeat":false},
   {"id":"allReplies","label":"Expand / collapse all replies","group":"Comments & drawing","key":"Mod+Shift+R","repeat":false},
   {"id":"play","label":"Play / pause","group":"Playback","key":"Space","repeat":false},

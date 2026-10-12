@@ -6,7 +6,7 @@ const availableShortcuts = (mode: 'watch' | 'review') => shortcuts.filter(item =
 /** New defaults must not take a key already assigned in an older library. */
 export function migrateReviewBindings(overrides: Keybindings): Keybindings {
   const next = {...overrides};
-  for (const id of ['present', 'allReplies', 'laser', 'zoomIn', 'zoomOut', 'zoomReset']) {
+  for (const id of ['reviewMode', 'present', 'allReplies', 'laser', 'zoomIn', 'zoomOut', 'zoomReset']) {
     const chord = shortcuts.find(item => item.id === id)?.key;
     if (chord && !Object.prototype.hasOwnProperty.call(next, id) && Object.values(overrides).includes(chord)) next[id] = null;
   }
