@@ -16,14 +16,14 @@ export function ReviewTimeline(props: React.ComponentProps<typeof ReviewFilmstri
     : <ReviewFilmstrip {...props} />;
 }
 
-function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 0, video, time, duration, comments, selectedId, disabled, onSelect, onCluster, onSeek}: {
-  mode?: 'watch' | 'review'; paused?: boolean; rate?: number; seekToken?: number;
+function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 0, reviewEnd, video, time, duration, comments, selectedId, disabled, onSelect, onCluster, onSeek}: {
+  mode?: 'watch' | 'review'; paused?: boolean; rate?: number; seekToken?: number; reviewEnd?: number;
   video?: Pick<Video, 'path' | 'media_id' | 'width' | 'height'> | null;
   time: number; duration: number; comments: Comment[]; selectedId: string | null; disabled: boolean;
   onSelect: (comment: Comment) => void; onCluster?: (comments: Comment[]) => void; onSeek: (time: number) => void;
 }) {
   const {colors} = useTheme();
-  const {width, setWidth, position, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, disabled, onSeek});
+  const {width, setWidth, position, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, reviewEnd, disabled, onSeek});
   const [focused, setFocused] = useState<string | null>(null);
   const thumbnails = useVideoThumbnails(video);
   const aspectRatio = video && video.width > 0 && video.height > 0 ? video.width / video.height : 16 / 9;

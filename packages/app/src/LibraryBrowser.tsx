@@ -44,7 +44,7 @@ function LibraryItem({id, title, subtitle, icon, selected, compact, disabled, on
     {!compact && <GlassSurface radius={18} />}
     {focused && tile && <View pointerEvents="none" style={[StyleSheet.absoluteFill, {borderRadius: 18, borderWidth: 1.5, borderColor: c.selectedLine}]} />}
     <View {...{onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false)}}>
-    <Pressable ref={target} accessibilityHint={hint.keyLabel || undefined} {...hint.nativeProps} {...{enableFocusRing: false}} accessibilityRole="button" accessibilityLabel={`Open ${title}`} accessibilityState={{selected: !!selected, disabled: !!disabled}}
+    <Pressable ref={target} accessibilityHint={hint.keyLabel || undefined} {...{enableFocusRing: false}} accessibilityRole="button" accessibilityLabel={`Open ${title}`} accessibilityState={{selected: !!selected, disabled: !!disabled}}
       disabled={disabled} focusable={!disabled} onPress={onPress} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       style={({pressed}) => [local.itemMain, compact && local.compactMain, tile && local.tileMain,

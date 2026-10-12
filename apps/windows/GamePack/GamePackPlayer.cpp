@@ -1,4 +1,5 @@
 #include "pch.h"
+#include <winrt/Windows.UI.ViewManagement.h>
 #include "GamePackPlayer.h"
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -56,7 +57,9 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{}, settlingReviewStop{};
   uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
   int64_t pendingSeekTarget{}, stepFrames{1};
-  double frameRate{}, rate{1}, zoom{1};
+  double frameRate{}, rate{1}, zoom{1}, requestedZoom{1}, zoomTarget{1};
+  int64_t zoomToken{-1};
+  std::chrono::steady_clock::time_point zoomTick{};
   bool reverseSeek{};
   std::chrono::steady_clock::time_point reverseTick{};
   event_token seekCompletedToken{};
@@ -96,7 +99,16 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     value=std::isfinite(value) ? std::clamp(value,1.0,4.0) : 1;
     if (std::abs(value-zoom)<0.00001) return;
     Finish(); zoom=value; UpdateViewport(); Render();
-    if (notify) context.DispatchEvent(root,L"topZoom",JSValueObject{{"zoom",zoom}});
+    if (notify) context.DispatchEvent(root,L"topZoom",JSValueObject{{"zoom",zoom},{"zoomToken",zoomToken}});
+  }
+  void AnimateZoom() {
+    auto now=std::chrono::steady_clock::now();
+    double elapsed=std::clamp(std::chrono::duration<double>(now-zoomTick).count(),0.0,0.05);
+    zoomTick=now;
+    if (std::abs(zoomTarget-zoom)<0.00001) return;
+    double next=zoom+(zoomTarget-zoom)*(1-std::exp(-elapsed/0.035));
+    if (std::abs(next-zoomTarget)<0.0005) next=zoomTarget;
+    SetZoom(next,true);
   }
   void ResetSeek() {
     ++seekGeneration;
@@ -156,8 +168,11 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     auto weak = weak_from_this();
     timer.Interval(std::chrono::milliseconds(16));
     timerToken = timer.Tick([weak](auto const&, auto const&) {
+      if (auto self=weak.lock(); self && !self->disposed) self->AnimateZoom();
       if (auto self = weak.lock(); self && !self->disposed && !self->seeking) {
-        if (self->reviewEnd >= 0 && !self->paused && (self->rate < 0 ? self->Time() <= self->reviewEnd : self->Time() >= self->reviewEnd)) {
+        // Reserve one dispatcher tick to settle the exact frame before crossing it.
+        auto lead=static_cast<int64_t>(20000*std::abs(self->rate));
+        if (self->reviewEnd >= 0 && !self->paused && (self->rate < 0 ? self->Time()-lead <= self->reviewEnd : self->Time()+lead >= self->reviewEnd)) {
           self->Finish(); self->player.Pause(); self->paused = true;
           self->ended = true; self->Seek(self->reviewEnd, true); self->Render(); return;
         }
@@ -167,6 +182,9 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
           if (elapsed>=0.08) {
             self->reverseTick=now;
             auto target=std::max<int64_t>(0,self->Time()+static_cast<int64_t>(std::min(elapsed,0.25)*self->rate*1000000));
+            if (self->reviewEnd>=0 && target<=self->reviewEnd) {
+              self->paused=true; self->ended=true; self->Seek(self->reviewEnd,true); return;
+            }
             if (target==0) { self->paused=true; self->ended=true; }
             self->Seek(target); return;
           }
@@ -230,7 +248,8 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
       if (auto self=weak.lock(); self && !self->source.empty()) {
         auto properties=args.GetCurrentPoint(self->overlay).Properties();
         if (properties.IsHorizontalMouseWheel()) return;
-        self->SetZoom(self->zoom*std::pow(1.1,properties.MouseWheelDelta()/120.0),true);
+        self->zoomTarget=std::clamp(self->zoomTarget*std::pow(1.1,properties.MouseWheelDelta()/120.0),1.0,4.0);
+        if (!Windows::UI::ViewManagement::UISettings{}.AnimationsEnabled()) self->SetZoom(self->zoomTarget,true);
         args.Handled(true);
       }
     });
@@ -375,7 +394,7 @@ FrameworkElement PlayerManager::CreateView() noexcept {
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
-  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"flushToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
+  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"zoomToken",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"flushToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
   auto it=players.find(ViewKey(view)); if (it==players.end()) return;
@@ -407,7 +426,10 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
       p->scene=parsed;
     }
     if (auto v=props.find("tool");v!=props.end()) { auto tool=to_hstring(v->second.AsString()); if (tool!=p->tool) p->Finish(); p->tool=tool; p->overlay.IsHitTestVisible(true); }
-    if (auto v=props.find("zoom");v!=props.end()) p->SetZoom(v->second.AsDouble());
+    if (auto v=props.find("zoom");v!=props.end()) p->requestedZoom=v->second.AsDouble();
+    if (auto v=props.find("zoomToken");v!=props.end() && v->second.AsInt64()!=p->zoomToken) {
+      p->zoomToken=v->second.AsInt64(); p->SetZoom(p->requestedZoom); p->zoomTarget=p->zoom;
+    }
     if (auto v=props.find("reviewEndUs");v!=props.end()) p->reviewEnd=v->second.AsInt64();
     if (auto v=props.find("stepFrames");v!=props.end()) p->stepFrames=v->second.AsInt64();
     if (auto v=props.find("stepToken");v!=props.end() && v->second.AsInt64()>0) {

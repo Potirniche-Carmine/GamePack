@@ -21,7 +21,7 @@ export function Button({children, onPress, disabled, active, primary, compact, l
   const [focused, setFocused] = useState(false);
   const hasTooltip = !!(toolbar || shortcut);
   const hint = useShortcutHint(target, shortcut, label ?? (typeof children === 'string' ? children : ''), hovered, focused, !disabled && hasTooltip);
-  const button = <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint.keyLabel || undefined} {...hint.nativeProps} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
+  const button = <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint.keyLabel || undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
     onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     disabled={disabled} onPress={() => { if (toolbar) target.current?.focus(); onPress?.(); }} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
       hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && !primary && {backgroundColor: colors.inset},
@@ -50,12 +50,11 @@ export function useShortcutHint(target: React.RefObject<View | null>, shortcut: 
     return () => clearTimeout(timer);
   }, [enabled, hovered]);
   useEffect(() => {
-    if (enabled && ((Platform.OS !== 'macos' && visible) || focused) && target.current) tooltip.show(owner, target.current, label, keyLabel);
+    if (enabled && (visible || focused) && target.current) tooltip.show(owner, target.current, label, keyLabel);
     else tooltip.hide(owner);
     return () => tooltip.hide(owner);
   }, [enabled, visible, focused, target, label, keyLabel, tooltip, owner]);
-  return {keyLabel, nativeProps: Platform.OS === 'macos' && enabled
-    ? {tooltip: `${label}${keyLabel ? ` (${keyLabel})` : ''}`} : {}};
+  return {keyLabel};
 }
 
 const textStyleKeys = new Set(['color', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'fontVariant', 'letterSpacing', 'lineHeight', 'textAlign', 'textDecorationLine', 'textDecorationStyle', 'textDecorationColor', 'textTransform', 'writingDirection', 'includeFontPadding', 'textAlignVertical']);

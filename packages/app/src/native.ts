@@ -36,7 +36,7 @@ export async function command<T>(_root: string, name: string, fields: Record<str
 }
 
 export type PlayerProps = ViewProps & {
-  source: string; paused: boolean; rate: number; zoom: number; seekUs: number; seekToken: number;
+  source: string; paused: boolean; rate: number; zoom: number; zoomToken: number; seekUs: number; seekToken: number;
   reviewEndUs: number; sceneJson: string; tool: DrawingTool;
   flushToken: number; stepToken: number; stepFrames: number;
   onStrokeFlushFinished: (event: NativeSyntheticEvent<StrokeFlushFinished>) => void;
@@ -46,7 +46,7 @@ export type PlayerProps = ViewProps & {
   onPointer: (event: NativeSyntheticEvent<{x: number; y: number}>) => void;
   onSceneReady: (event: NativeSyntheticEvent<{key: string}>) => void;
   onActivity: (event: NativeSyntheticEvent<{}>) => void;
-  onZoom: (event: NativeSyntheticEvent<{zoom: number}>) => void;
+  onZoom: (event: NativeSyntheticEvent<{zoom: number; zoomToken: number}>) => void;
 };
 export const GamePackPlayer = requireNativeComponent<PlayerProps>('GamePackPlayer');
 export const GamePackGlass = requireNativeComponent<ViewProps & {dark: boolean; cornerRadius: number; desktop?: boolean}>('GamePackGlass');

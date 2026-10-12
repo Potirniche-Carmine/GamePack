@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {clusterTimelineComments, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
+import {clusterTimelineComments, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePrediction, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
 
 test('pausing holds the presented position until the stopped native frame arrives; resume never snaps', () => {
   const playing = {time: 2000000, duration: 30000000, paused: false, rate: 1, seekToken: 1};
@@ -11,6 +11,28 @@ test('pausing holds the presented position until the stopped native frame arrive
   assert.deepEqual(timelineMotion(stopped, {...stopped, paused: false}), {kind: 'animate', time: 2213000, duration: 140});
   assert.equal(timelineMotion(stopped, {...stopped, seekToken: 2, time: 5000000}).kind, 'snap');
   assert.equal(timelineMotion(stopped, {...stopped, paused: false, rate: -1}).time, 1933000);
+});
+
+test('playhead prediction lands on drawing stops without crossing or easing back, in either direction', () => {
+  for (const rate of [.5, 1, 2, 4, -1, -2, -4]) {
+    const reviewEnd = 2000000;
+    const playing = {time: reviewEnd - rate * 40000, duration: 30000000, paused: false, rate, seekToken: 1, reviewEnd};
+    const before = {...playing, time: playing.time - rate * 100000};
+    assert.deepEqual(timelineMotion(before, playing), {kind: 'animate', time: reviewEnd, duration: 40});
+    // Initial samples and seeks use this same bound after snapping.
+    assert.deepEqual(timelinePrediction(playing), {time: reviewEnd, duration: 40});
+    const stopped = {...playing, time: reviewEnd, paused: true};
+    assert.deepEqual(timelineMotion(playing, stopped), {kind: 'snap', time: reviewEnd});
+    assert.deepEqual(timelineMotion(stopped, stopped), {kind: 'snap', time: reviewEnd});
+    const resumed = {...stopped, paused: false, reviewEnd: reviewEnd + rate * 1000000};
+    assert.equal(timelineMotion(stopped, resumed).time, reviewEnd + rate * 140000);
+  }
+});
+
+test('watch playback prediction is bounded by clip ends without inheriting a review stop', () => {
+  const sample = {time: 290000, duration: 300000, paused: false, rate: 1, seekToken: 1, reviewEnd: -1};
+  assert.deepEqual(timelinePrediction(sample), {time: 300000, duration: 10});
+  assert.deepEqual(timelinePrediction({...sample, time: 10000, rate: -2}), {time: 0, duration: 5});
 });
 
 test('dock sizing fits short and long clips without tracking the current playhead', () => {

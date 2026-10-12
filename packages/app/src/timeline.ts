@@ -33,16 +33,23 @@ export function resizeTimelineDock(width: number, deltaX: number, side: -1 | 1, 
   return timelineDockWidth(available, 0, true, width + (Number.isFinite(deltaX) ? deltaX : 0) * side * 2);
 }
 
-export type TimelineSample = {time: number; duration: number; paused: boolean; rate: number; seekToken: number};
+export type TimelineSample = {time: number; duration: number; paused: boolean; rate: number; seekToken: number; reviewEnd?: number};
+
+/** Never present a predicted frame beyond the stop already armed in the player. */
+export function timelinePrediction({time, duration, rate, reviewEnd = -1}: TimelineSample) {
+  const limit = reviewEnd >= 0 ? reviewEnd : rate < 0 ? 0 : duration;
+  const target = rate < 0 ? Math.max(limit, time + rate * 140000) : Math.min(limit, time + rate * 140000);
+  return {time: target, duration: rate ? Math.min(140, Math.abs(target - time) / Math.abs(rate) / 1000) : 0};
+}
 export function timelineMotion(previous: TimelineSample | null, current: TimelineSample) {
-  const {time, duration, paused, rate, seekToken} = current;
+  const {time, duration, paused, rate, seekToken, reviewEnd = -1} = current;
   const discontinuity = !previous || previous.seekToken !== seekToken || previous.duration !== duration
     || Math.abs(time - previous.time) > 500000 * Math.max(1, Math.abs(rate));
-  if (discontinuity) return {kind: 'snap' as const, time};
+  if (discontinuity || (paused && reviewEnd >= 0 && Math.abs(time - reviewEnd) <= 2000)) return {kind: 'snap' as const, time};
   // The pause request still carries the previous periodic sample. Freeze the
   // presentation until native reports the stopped frame, instead of rewinding.
   if (paused && time === previous.time) return {kind: 'hold' as const, time};
-  return {kind: 'animate' as const, time: paused ? time : time + rate * 140000, duration: paused ? 100 : 140};
+  return {kind: 'animate' as const, ...(paused ? {time, duration: 100} : timelinePrediction(current))};
 }
 
 /** Pointer positions use the same inset as markers and the playback thumb. */

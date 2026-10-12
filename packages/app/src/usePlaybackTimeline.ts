@@ -1,14 +1,14 @@
 import {useEffect, useRef, useState} from 'react';
 import {Animated, Easing, View, type GestureResponderEvent} from 'react-native';
-import {timelineMotion, timelineSeekTime, type TimelineSample} from './timeline';
+import {timelineMotion, timelinePrediction, timelineSeekTime, type TimelineSample} from './timeline';
 
 export type PlaybackTimelineProps = {
-  time: number; duration: number; paused: boolean; rate: number; seekToken: number;
+  time: number; duration: number; paused: boolean; rate: number; seekToken: number; reviewEnd?: number;
   disabled: boolean; onSeek: (time: number) => void;
 };
 
 /** Interpolate only the presentation; native playback remains the source of truth. */
-export function usePlaybackTimeline({time, duration, paused, rate, seekToken, disabled, onSeek}: PlaybackTimelineProps) {
+export function usePlaybackTimeline({time, duration, paused, rate, seekToken, reviewEnd, disabled, onSeek}: PlaybackTimelineProps) {
   const [width, setWidth] = useState(1);
   const [focused, setFocused] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -22,20 +22,20 @@ export function usePlaybackTimeline({time, duration, paused, rate, seekToken, di
   const canSeek = !disabled && duration > 0;
   const progress = (value: number) => Math.max(0, Math.min(1, value / Math.max(1, duration)));
   useEffect(() => {
-    const sample = {time, duration, paused, rate, seekToken};
+    const sample = {time, duration, paused, rate, seekToken, reviewEnd};
     const motion = timelineMotion(previous.current, sample);
     previous.current = sample;
     if (drag.current) return;
     position.stopAnimation();
     if (motion.kind === 'snap') position.setValue(progress(time));
     if (motion.kind === 'animate' || (motion.kind === 'snap' && !paused)) {
-      // A bounded prediction stops if native playback stalls. No free-running
-      // JS timer can carry the thumb beyond the last confirmed frame.
-      Animated.timing(position, {toValue: progress(motion.kind === 'animate' ? motion.time : time + rate * 140000), duration: motion.kind === 'animate' ? motion.duration : 140,
+      // Bound interpolation by both the next native sample and the review stop.
+      const target = motion.kind === 'animate' ? motion : timelinePrediction(sample);
+      Animated.timing(position, {toValue: progress(target.time), duration: target.duration,
         easing: paused ? Easing.out(Easing.quad) : Easing.linear, useNativeDriver: true, isInteraction: false}).start();
     }
     return () => position.stopAnimation();
-  }, [time, duration, paused, rate, seekToken, position, scrubbing]);
+  }, [time, duration, paused, rate, seekToken, reviewEnd, position, scrubbing]);
   const updateDrag = (event: GestureResponderEvent) => {
     const current = drag.current;
     if (!current) return;

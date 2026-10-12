@@ -9,6 +9,7 @@ import {Icon} from './Icon';
 import {ReviewWorkspace} from './ReviewWorkspace';
 import {TooltipProvider} from './Tooltips';
 import {PointerPulse} from './PointerPulse';
+import {requestZoom, receiveZoom} from './zoom';
 import {adjacentNote, conversationTarget, nextReviewStop, notesAtTime, type ReviewStop} from './presentation';
 import {SettingsPage} from './SettingsPage';
 import {Avatar} from './Avatar';
@@ -47,7 +48,9 @@ export default function App() {
   const [moveTarget, setMoveTarget] = useState<Video | null>(null);
   const [brandFocused, setBrandFocused] = useState(false);
   const [settingsAnimate, setSettingsAnimate] = useState(true);
-  const [zoom, setZoom] = useState(1);
+  const [zoomState, setZoomState] = useState({value: 1, token: 0});
+  const zoom = zoomState.value;
+  const setZoom = (value: number | ((previous: number) => number)) => setZoomState(previous => requestZoom(previous, value));
   const [zoomOpen, setZoomOpen] = useState(false);
   const [speedOpen, setSpeedOpen] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
@@ -753,11 +756,11 @@ export default function App() {
             {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} toolbar quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={!!busy || dialogOpen} onPress={() => chooseTool(value)} />)}
             <Button toolbar quiet compact shortcut="laser" icon="target" label="Laser pointer" active={tool === 'laser'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('laser')} />
           </>}
-          timeline={<ReviewTimeline paused={paused} rate={rate} seekToken={seekState.token} mode={reviewMode} video={video} time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => { const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectComment(next); }} onSeek={scrubTo} />}
+          timeline={<ReviewTimeline reviewEnd={reviewEnd} paused={paused} rate={rate} seekToken={seekState.token} mode={reviewMode} video={video} time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => { const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectComment(next); }} onSeek={scrubTo} />}
           popoverKind={speedOpen ? 'speed' : 'zoom'}
           popover={speedOpen || zoomOpen ? <View style={{gap: 2}}>{(speedOpen ? [.5, 1, 1.5, 2] : [1, 1.5, 2, 3, 4]).map(value => <Button quiet compact key={value} shortcut={!speedOpen && value === 1 ? 'zoomReset' : undefined} active={(speedOpen ? rate : zoom) === value} label={speedOpen ? `Playback speed ${value}×` : `Zoom ${value * 100}%`} onPress={() => { if (speedOpen) { setRate(value); armReview(time, value); } else setZoom(value); setSpeedOpen(false); setZoomOpen(false); }}>{speedOpen ? `${value}×` : value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}</View> : null}
           >
-          <GamePackPlayer key={video.id} style={StyleSheet.absoluteFill} source={video.path} zoom={zoom} onZoom={event => setZoom(event.nativeEvent.zoom)} paused={paused} rate={rate}
+          <GamePackPlayer key={video.id} style={StyleSheet.absoluteFill} source={video.path} zoom={zoom} zoomToken={zoomState.token} onZoom={event => setZoomState(previous => receiveZoom(previous, event.nativeEvent))} paused={paused} rate={rate}
             seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson}
             flushToken={flushToken} stepToken={step.token} stepFrames={step.frames} onStrokeFlushFinished={event => void onStrokeFlushFinished(event.nativeEvent)}
             tool={reviewMode === 'watch' ? busy ? 'none' : 'pointer' : (!busy || !!flushRequest.current) && (draft || tool === 'pointer' || tool === 'laser') ? tool : 'none'}
