@@ -52,10 +52,10 @@ try {
     $originalHash = (Get-FileHash $source).Hash
     $video = Request @{command='import_video'; path=$source; project_id=$boot.projects[0].id; duration_us=2000000; width=1920; height=1080}
     foreach ($tool in @('pen','arrow','ellipse')) {
-        $first = @{x=100000; y=200000; t_us=0}
-        $last = @{x=800000; y=700000; t_us=100000}
-        $drawing = @{id=[guid]::NewGuid().ToString(); tool=$tool; color='#FF775E'; width=3500; visible_from_us=0; visible_until_us=1000000; samples=@($first,$last)}
-        $draft = @{id="windows-$tool"; project_id=$boot.projects[0].id; video_id=$video.id; text=''; anchor=@{kind='interval'; start_us=100000; end_us=1100000}; drawings=@($drawing)}
+        $first = @{x=100000; y=200000}
+        $last = @{x=800000; y=700000}
+        $drawing = @{id=[guid]::NewGuid().ToString(); tool=$tool; width=3500; samples=@($first,$last)}
+        $draft = @{id="windows-$tool"; project_id=$boot.projects[0].id; video_id=$video.id; text=''; anchor=@{kind='point'; at_us=100000}; drawings=@($drawing)}
         $saved = Request @{command='save_draft'; draft=$draft}
         # A tap duplicates its single endpoint for arrow/ellipse; both must remain valid.
         $drawing.samples=@($first,$first)

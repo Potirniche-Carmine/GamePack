@@ -7,6 +7,23 @@
 #import <AVFoundation/AVFoundation.h>
 #include "gamepack-core/src/lib.rs.h"
 
+// Text editors keep their own Undo/Redo earlier in the responder chain.
+// The window falls back to drawing history when no editor handles the action.
+@interface GPDrawingHistory : NSResponder <NSUserInterfaceValidations>
+@property(nonatomic) BOOL canUndo;
+@property(nonatomic) BOOL canRedo;
+@property(nonatomic, copy) void (^perform)(NSString *);
+@end
+@implementation GPDrawingHistory
+- (void)undo:(id)sender { if (self.canUndo && self.perform) self.perform(@"undo"); }
+- (void)redo:(id)sender { if (self.canRedo && self.perform) self.perform(@"redo"); }
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
+  if (item.action == @selector(undo:)) return self.canUndo;
+  if (item.action == @selector(redo:)) return self.canRedo;
+  return NO;
+}
+@end
+
 @interface GamePack : RCTEventEmitter <RCTBridgeModule>
 @end
 @implementation GamePack {
@@ -15,6 +32,8 @@
   NSSet<NSString *> *_shortcuts;
   NSString *_typingShortcut;
   BOOL _recordShortcut;
+  GPDrawingHistory *_drawingHistory;
+  __weak NSWindow *_historyWindow;
 }
 - (NSArray<NSString *> *)supportedEvents { return @[@"GamePackShortcut", @"GamePackWindowState"]; }
 - (void)stopObserving {
@@ -22,6 +41,8 @@
     if (self->_keyMonitor) { [NSEvent removeMonitor:self->_keyMonitor]; self->_keyMonitor = nil; }
     for (id token in self->_windowObservers) [NSNotificationCenter.defaultCenter removeObserver:token];
     self->_windowObservers = nil;
+    if (self->_historyWindow.nextResponder == self->_drawingHistory) self->_historyWindow.nextResponder = self->_drawingHistory.nextResponder;
+    self->_drawingHistory = nil;
   });
 }
 - (void)startObserving {
@@ -64,6 +85,24 @@
 }
 RCT_EXPORT_METHOD(configureShortcuts:(NSArray<NSString *> *)chords recording:(BOOL)recording typingShortcut:(NSString *)typingShortcut) {
   dispatch_async(dispatch_get_main_queue(), ^{ self->_shortcuts = [NSSet setWithArray:chords]; self->_recordShortcut = recording; self->_typingShortcut = typingShortcut; });
+}
+RCT_EXPORT_METHOD(configureDrawingHistory:(BOOL)canUndo canRedo:(BOOL)canRedo) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSWindow *window = NSApp.mainWindow ?: NSApp.keyWindow;
+    if (!window) return;
+    if (!self->_drawingHistory) {
+      self->_drawingHistory = [GPDrawingHistory new];
+      __weak GamePack *weakSelf = self;
+      self->_drawingHistory.perform = ^(NSString *action) {
+        [weakSelf sendEventWithName:@"GamePackShortcut" body:@{@"action":action, @"chord":@"", @"repeat":@NO}];
+      };
+      self->_drawingHistory.nextResponder = window.nextResponder;
+      window.nextResponder = self->_drawingHistory;
+      self->_historyWindow = window;
+    }
+    self->_drawingHistory.canUndo = canUndo;
+    self->_drawingHistory.canRedo = canRedo;
+  });
 }
 // AppKit's autoresizing can leave the document above the clip view after Yoga
 // changes the editor height. Restore its origin without moving the caret.

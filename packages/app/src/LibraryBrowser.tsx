@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {GlassSurface} from './Glass';
 import {Button, TextField} from './components';
 import {Icon, type IconName} from './Icon';
 import {libraryContents, videoTitle} from './library';
@@ -36,14 +37,16 @@ function LibraryItem({id, title, subtitle, icon, selected, compact, disabled, on
   const options = useRef<View>(null);
   const tile = tileWidth !== undefined;
   const menuOpen = menuId === id;
-  return <View style={[local.item, tile && local.tile, tile && {width: tileWidth, borderColor: focused ? c.selectedLine : c.separator, backgroundColor: c.panel},
+  return <View style={[local.item, tile && local.tile, tile && {width: tileWidth, borderColor: focused ? c.selectedLine : c.separator, backgroundColor: 'transparent'},
     selected && {backgroundColor: c.selected}]}>
+    {!compact && <GlassSurface radius={18} />}
+    {focused && tile && <View pointerEvents="none" style={[StyleSheet.absoluteFill, {borderRadius: 18, borderWidth: 1.5, borderColor: c.selectedLine}]} />}
     <Pressable {...{enableFocusRing: false}} accessibilityRole="button" accessibilityLabel={`Open ${title}`} accessibilityState={{selected: !!selected, disabled: !!disabled}}
       disabled={disabled} focusable={!disabled} onPress={onPress} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       style={({pressed}) => [local.itemMain, compact && local.compactMain, tile && local.tileMain,
-        hovered && !selected && {backgroundColor: c.inset}, focused && !tile && s.focusRing, pressed && {backgroundColor: c.selected}]}>
-      <View style={[local.itemIcon, compact && local.compactIcon, tile && local.tileIcon, !compact && {backgroundColor: c.inset}]}>
+        hovered && !selected && {backgroundColor: c.glassInset}, focused && !tile && s.focusRing, pressed && {backgroundColor: c.selected}]}>
+      <View style={[local.itemIcon, compact && local.compactIcon, tile && local.tileIcon, !compact && {backgroundColor: c.glassInset}]}>
         <Icon name={icon} color={selected ? c.accentText : c.muted} />
       </View>
       <View style={[local.itemText, tile && local.tileText]}>
@@ -118,7 +121,7 @@ export function LibraryBrowser(props: LibraryBrowserProps) {
   const tileWidth = (contentWidth - (columns - 1) * 12) / columns;
   const search = <View style={[local.search, compact && local.compactSearch]}>
     <TextField accessibilityLabel={project ? 'Search videos and folders' : 'Search projects'} placeholder={project ? 'Search videos and folders' : 'Search projects'}
-      value={query} onChangeText={value => {setQuery(value); setMenu(null);}} style={[local.searchField, {borderColor: c.separator}, !!query && local.searchWithClear]}
+      value={query} onChangeText={value => {setQuery(value); setMenu(null);}} style={[local.searchField, {borderColor: c.separator, backgroundColor: c.glassInset}, !!query && local.searchWithClear]}
       inputStyle={local.searchInput} editable={!disabled && !menu} clearButtonMode="never" />
     {!!query && <View style={local.clearSearch}><Button quiet compact icon="close" label="Clear search" disabled={disabled || !!menu} onPress={() => setQuery('')} /></View>}
   </View>;
@@ -167,7 +170,7 @@ export function LibraryBrowser(props: LibraryBrowserProps) {
 
 const local = StyleSheet.create({
   browser: {flex: 1, minHeight: 0},
-  fullBrowser: {paddingHorizontal: 32, paddingTop: 38},
+  fullBrowser: {paddingHorizontal: 32, paddingTop: 44},
   widthConstraint: {width: '100%', maxWidth: 1040, alignSelf: 'center'},
   heading: {flexDirection: 'row', alignItems: 'center', gap: 20, marginBottom: 24},
   headingTitle: {fontSize: 27, lineHeight: 34, letterSpacing: -0.8, fontWeight: '600', flex: 1, minWidth: 0},
@@ -183,13 +186,13 @@ const local = StyleSheet.create({
   compactContent: {paddingHorizontal: 10, paddingBottom: 16, gap: 2},
   emptyScroll: {flexGrow: 1},
   grid: {flexDirection: 'row', flexWrap: 'wrap', gap: 12},
-  folderList: {gap: 4, marginBottom: 14},
-  videoList: {paddingTop: 6},
-  item: {borderRadius: 11},
-  tile: {height: 72, borderWidth: 1, borderRadius: 11, overflow: 'hidden'},
-  itemMain: {minWidth: 0, minHeight: 68, paddingLeft: 14, paddingRight: 52, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 10},
-  compactMain: {minHeight: 40, paddingVertical: 8, paddingLeft: 9, paddingRight: 38, gap: 10},
-  tileMain: {height: 70, paddingLeft: 14, paddingRight: 46, paddingVertical: 12, gap: 12},
+  folderList: {gap: 10, marginBottom: 14},
+  videoList: {paddingTop: 6, gap: 10},
+  item: {borderRadius: 18},
+  tile: {height: 80, borderRadius: 18},
+  itemMain: {minWidth: 0, minHeight: 68, paddingLeft: 14, paddingRight: 52, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 18},
+  compactMain: {minHeight: 40, paddingVertical: 8, paddingLeft: 9, paddingRight: 38, gap: 10, borderRadius: 10},
+  tileMain: {height: 80, paddingLeft: 14, paddingRight: 46, paddingVertical: 12, gap: 12},
   itemIcon: {width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 11},
   compactIcon: {width: 18, height: 20, borderRadius: 0},
   tileIcon: {width: 40, height: 40},
@@ -202,7 +205,7 @@ const local = StyleSheet.create({
   rowChevron: {marginRight: 6},
   optionsButton: {position: 'absolute', width: 32, height: 32, right: 8, top: 18, borderRadius: 8, alignItems: 'center', justifyContent: 'center'},
   compactOptions: {width: 28, height: 28, top: 6, right: 4},
-  tileOptions: {top: 19, right: 9},
+  tileOptions: {top: 24, right: 9},
   dots: {flexDirection: 'row', alignItems: 'center', gap: 3},
   dot: {height: 3, width: 3, borderRadius: 1.5},
   sectionHeader: {minHeight: 34, flexDirection: 'row', alignItems: 'center', paddingLeft: 9, gap: 4},

@@ -9,13 +9,14 @@
     "test:ui": "node scripts/test-ui.mjs",
     "test:rust": "cargo test --workspace",
     "build:macos": "bash scripts/build-macos.sh",
-    "install:macos": "bash scripts/install-macos.sh",
-    "icons": "node scripts/generate-icons.mjs"
+    "install:macos": "bash scripts/install-macos.sh"
   },
   "dependencies": {
+    "lucide-react-native": "^1.55.0",
     "react": "19.1.4",
     "react-native": "0.81.6",
     "react-native-macos": "0.81.9",
+    "react-native-svg": "^15.15.5",
     "react-native-windows": "0.81.6"
   },
   "devDependencies": {
@@ -27,9 +28,7 @@
     "@react-native/babel-preset": "0.81.6",
     "@react-native/metro-config": "0.81.6",
     "@react-native/typescript-config": "0.81.6",
-    "@resvg/resvg-js": "^2.6.2",
     "@types/react": "19.1.4",
-    "lucide-static": "^1.53.0",
     "typescript": "^5.8.3"
   },
   "engines": {

@@ -66,24 +66,13 @@ pub(crate) fn draft(draft: &Draft, video: &Video) -> Result<()> {
         draft.project_id == video.project_id,
         "Draft project must match its video"
     );
-    let (end, interval) = match draft.anchor {
-        Anchor::Point { at_us } => {
-            ensure!(
-                (0..=MAX_SAFE_INTEGER).contains(&at_us),
-                "Point anchor must be nonnegative integer microseconds"
-            );
-            (at_us, None)
-        }
-        Anchor::Interval { start_us, end_us } => {
-            ensure!(
-                start_us >= 0 && end_us > start_us && end_us <= MAX_SAFE_INTEGER,
-                "Interval must have 0 <= start_us < end_us"
-            );
-            (end_us, Some(end_us - start_us))
-        }
-    };
+    let Anchor::Point { at_us } = draft.anchor;
     ensure!(
-        video.duration_us == 0 || end <= video.duration_us,
+        (0..=MAX_SAFE_INTEGER).contains(&at_us),
+        "Frame time must be nonnegative integer microseconds"
+    );
+    ensure!(
+        video.duration_us == 0 || at_us <= video.duration_us,
         "Anchor extends beyond the video duration"
     );
     ensure!(
@@ -100,27 +89,9 @@ pub(crate) fn draft(draft: &Draft, video: &Video) -> Result<()> {
             drawing.id
         );
         ensure!(
-            drawing.color.len() == 7
-                && drawing.color.starts_with('#')
-                && drawing.color[1..].bytes().all(|b| b.is_ascii_hexdigit()),
-            "Drawing color must be #RRGGBB"
-        );
-        ensure!(
             (0..=1_000_000).contains(&drawing.width),
             "Drawing width must be between 0 and 1000000"
         );
-        match interval {
-            None => ensure!(
-                drawing.visible_from_us == 0 && drawing.visible_until_us == 0,
-                "Point drawing visibility must be zero"
-            ),
-            Some(duration) => ensure!(
-                drawing.visible_from_us >= 0
-                    && drawing.visible_from_us < drawing.visible_until_us
-                    && drawing.visible_until_us <= duration,
-                "Drawing visibility must be a nonempty interval within its anchor"
-            ),
-        }
         ensure!(!drawing.samples.is_empty(), "Drawings must contain samples");
         if drawing.tool != Tool::Pen {
             ensure!(
@@ -135,24 +106,11 @@ pub(crate) fn draft(draft: &Draft, video: &Video) -> Result<()> {
             sample_count <= 100_000,
             "A comment supports at most 100000 drawing samples"
         );
-        let mut previous = 0;
         for sample in &drawing.samples {
             ensure!(
                 (0..=1_000_000).contains(&sample.x) && (0..=1_000_000).contains(&sample.y),
                 "Drawing coordinates must be between 0 and 1000000"
             );
-            ensure!(
-                sample.t_us >= previous,
-                "Drawing sample times must be nondecreasing"
-            );
-            match interval {
-                None => ensure!(sample.t_us == 0, "Point drawing sample times must be zero"),
-                Some(_) => ensure!(
-                    (drawing.visible_from_us..drawing.visible_until_us).contains(&sample.t_us),
-                    "Drawing samples must be within their visibility interval"
-                ),
-            }
-            previous = sample.t_us;
         }
     }
     if let Some(parent) = &draft.parent_comment_id {

@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Animated, Platform, Pressable, StyleSheet, Text, View} from 'react-native';
+import {GlassSurface} from './Glass';
 import {Icon, type IconName} from './Icon';
 import {useTheme} from './theme';
 import {easeOut, useReducedMotion} from './motion';
@@ -51,7 +52,8 @@ export function LibraryMenu({menu, onDismiss}: {menu: LibraryMenuState; onDismis
   return <View {...keyboardProps} style={local.layer} accessibilityViewIsModal onAccessibilityEscape={() => onDismiss(true)}>
     <Pressable accessible={false} focusable={false} style={StyleSheet.absoluteFill} onPress={() => onDismiss(false)} />
     <Animated.View ref={surface} focusable {...{enableFocusRing: false}} accessibilityRole="menu" accessibilityLabel={`Options for ${menu.title}`}
-      style={[local.menu, {left: menu.x, top: menu.y, backgroundColor: c.panel, borderColor: c.separator, opacity}]}>
+      style={[local.menu, {left: menu.x, top: menu.y, opacity}]}>
+      <GlassSurface radius={16} />
       {menu.actions.map((action, index) => <Pressable key={action.label} ref={node => {items.current[index] = node;}}
         accessibilityRole="menuitem" accessibilityLabel={action.label} focusable {...{enableFocusRing: false}}
         onHoverIn={() => {setActive(index); items.current[index]?.focus();}} onFocus={() => setActive(index)}
@@ -66,7 +68,7 @@ export function LibraryMenu({menu, onDismiss}: {menu: LibraryMenuState; onDismis
 
 const local = StyleSheet.create({
   layer: {...StyleSheet.absoluteFillObject, zIndex: 100},
-  menu: {position: 'absolute', width: 196, borderRadius: 12, borderWidth: 1, padding: 5},
+  menu: {position: 'absolute', width: 196, borderRadius: 16, padding: 5},
   action: {height: 36, paddingHorizontal: 10, borderRadius: 7, flexDirection: 'row', alignItems: 'center', gap: 10},
   label: {fontSize: 13, lineHeight: 18, fontWeight: '500'},
 });

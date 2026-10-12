@@ -30,7 +30,6 @@ impl Theme {
 pub struct Settings {
     pub theme: Theme,
     pub keybindings: std::collections::BTreeMap<String, Option<String>>,
-    pub pause_after_drawing: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -70,7 +69,6 @@ pub struct Video {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Anchor {
     Point { at_us: i64 },
-    Interval { start_us: i64, end_us: i64 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,7 +84,6 @@ pub enum Tool {
 pub struct Sample {
     pub x: i64,
     pub y: i64,
-    pub t_us: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,10 +91,7 @@ pub struct Sample {
 pub struct Drawing {
     pub id: String,
     pub tool: Tool,
-    pub color: String,
     pub width: i64,
-    pub visible_from_us: i64,
-    pub visible_until_us: i64,
     pub samples: Vec<Sample>,
 }
 
@@ -149,7 +143,6 @@ pub(crate) enum Request {
     },
     SetPreferences {
         keybindings: std::collections::BTreeMap<String, Option<String>>,
-        pause_after_drawing: bool,
     },
     DeleteVideo {
         video_id: String,

@@ -1,5 +1,5 @@
 import {NativeModules, NativeEventEmitter, requireNativeComponent, type NativeSyntheticEvent, type ViewProps} from 'react-native';
-import type {CaptureFinished, DrawingTool, PlayerTime, ThemeChoice} from './types';
+import type {StrokeFlushFinished, DrawingTool, PlayerTime, ThemeChoice} from './types';
 
 type NativeBridge = {
   command(request: string): Promise<string>;
@@ -7,6 +7,7 @@ type NativeBridge = {
   dataDirectory(): Promise<string>;
   thumbnails(path: string, mediaId: string): Promise<string[]>;
   configureShortcuts(chords: string[], recording: boolean, typingShortcut: string): void;
+  configureDrawingHistory?(canUndo: boolean, canRedo: boolean): void;
   setAppearance(theme: ThemeChoice): void;
   setFullScreen(enabled: boolean): void;
   measureCommentInput?(reactTag: number): Promise<number | null>;
@@ -35,21 +36,25 @@ export async function command<T>(_root: string, name: string, fields: Record<str
 }
 
 export type PlayerProps = ViewProps & {
-  source: string; paused: boolean; pauseOnDrawing: boolean; rate: number; zoom: number; seekUs: number; seekToken: number;
-  reviewEndUs: number; sceneJson: string; tool: DrawingTool; strokeColor: string;
-  captureToken: number; stepToken: number; stepFrames: number;
-  onCaptureFinished: (event: NativeSyntheticEvent<CaptureFinished>) => void;
+  source: string; paused: boolean; rate: number; zoom: number; seekUs: number; seekToken: number;
+  reviewEndUs: number; sceneJson: string; tool: DrawingTool;
+  flushToken: number; stepToken: number; stepFrames: number;
+  onStrokeFlushFinished: (event: NativeSyntheticEvent<StrokeFlushFinished>) => void;
   onTime: (event: NativeSyntheticEvent<PlayerTime>) => void;
   onDrawing: (event: NativeSyntheticEvent<{drawingJson: string}>) => void;
   onDrawingStart: (event: NativeSyntheticEvent<{time_us: number; paused: boolean}>) => void;
   onPointer: (event: NativeSyntheticEvent<{x: number; y: number}>) => void;
+  onSceneReady: (event: NativeSyntheticEvent<{key: string}>) => void;
+  onActivity: (event: NativeSyntheticEvent<{}>) => void;
   onZoom: (event: NativeSyntheticEvent<{zoom: number}>) => void;
 };
 export const GamePackPlayer = requireNativeComponent<PlayerProps>('GamePackPlayer');
+export const GamePackGlass = requireNativeComponent<ViewProps & {dark: boolean; cornerRadius: number; desktop?: boolean}>('GamePackGlass');
 
 export function configureShortcuts(chords: string[], recording: boolean, typingShortcut: string) {
   bridge().configureShortcuts(chords, recording, typingShortcut);
 }
+export function configureDrawingHistory(canUndo: boolean, canRedo: boolean) { bridge().configureDrawingHistory?.(canUndo, canRedo); }
 export function listenShortcuts(callback: (event: import('./shortcuts').ShortcutEvent) => void) {
   const emitter = new NativeEventEmitter(NativeModules.GamePack);
   return emitter.addListener('GamePackShortcut', callback);

@@ -1,6 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {clusterTimelineComments, timelinePosition} from '../packages/app/src/timeline.ts';
+import {clusterTimelineComments, timelineDockWidth, timelineMotion, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
+
+test('pausing holds the presented position until the stopped native frame arrives; resume never snaps', () => {
+  const playing = {time: 2000000, duration: 30000000, paused: false, rate: 1, seekToken: 1};
+  const requested = {...playing, paused: true};
+  assert.equal(timelineMotion(playing, requested).kind, 'hold');
+  const stopped = {...requested, time: 2073000};
+  assert.deepEqual(timelineMotion(requested, stopped), {kind: 'animate', time: stopped.time, duration: 100});
+  assert.deepEqual(timelineMotion(stopped, {...stopped, paused: false}), {kind: 'animate', time: 2213000, duration: 140});
+  assert.equal(timelineMotion(stopped, {...stopped, seekToken: 2, time: 5000000}).kind, 'snap');
+  assert.equal(timelineMotion(stopped, {...stopped, paused: false, rate: -1}).time, 1933000);
+});
+
+test('dock sizing fits short and long clips without tracking the current playhead', () => {
+  for (const review of [false, true]) {
+    const short = timelineDockWidth(1400, 30000000, review);
+    assert.ok(short <= 560);
+    assert.ok(timelineDockWidth(1400, 600000000, review) > short);
+    assert.ok(timelineDockWidth(1080, 7200000000, review) <= 760);
+    assert.ok(timelineDockWidth(600, 7200000000, review) <= 552);
+    assert.ok(Number.isFinite(timelineDockWidth(1400, NaN, review)));
+  }
+});
 
 const note = (id, time) => ({comment_id: id, anchor: {kind: 'point', at_us: time}});
 const ids = clusters => clusters.map(cluster => cluster.comments.map(comment => comment.comment_id));
@@ -12,6 +34,20 @@ const checkBounds = (clusters, width) => {
     if (index) assert.ok(cluster.left >= clusters[index - 1].left + clusters[index - 1].width + 6);
   }
 };
+
+test('scrubbing follows the thumb across resized tracks and clamps captured drags outside the track', () => {
+  const duration = 30000000;
+  for (const width of [320, 612, 860]) {
+    for (const time of [0, 1000000, 15000000, duration]) {
+      assert.equal(timelineSeekTime(timelinePosition(time, duration, width), duration, width), time);
+    }
+    assert.equal(timelineSeekTime(-100, duration, width), 0);
+    assert.equal(timelineSeekTime(width + 100, duration, width), duration);
+  }
+  for (const [x, length, width] of [[0, 0, 1], [NaN, duration, 640], [50, Infinity, 640], [0, duration, 0]]) {
+    assert.equal(timelineSeekTime(x, length, width), 0);
+  }
+});
 
 test('equal-time comments remain individually represented in a deterministic cluster', () => {
   const comments = [note('b', 50), note('later', 90), note('a', 50)];
@@ -41,9 +77,9 @@ test('expanded labels merge neighbors and remain within both timeline edges', ()
   checkBounds(clusters, 320);
 });
 
-test('dense timelines preserve every member once, including intervals and out-of-range anchors', () => {
+test('dense timelines preserve every member once, including simultaneous and out-of-range anchors', () => {
   const comments = Array.from({length: 10000}, (_, index) => note(String(index).padStart(5, '0'), index % 101));
-  comments.push({comment_id: 'interval', anchor: {kind: 'interval', start_us: 50, end_us: 70}});
+  comments.push({comment_id: 'moment', anchor: {kind: 'point', at_us: 50}});
   comments.push(note('before', -5), note('after', 120));
   for (const width of [18, 300, 1500]) {
     const clusters = clusterTimelineComments(comments, 100, width);

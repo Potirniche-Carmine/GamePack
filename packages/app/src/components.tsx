@@ -4,13 +4,15 @@ import type {Anchor, Comment} from './types';
 import {Icon, type IconName} from './Icon';
 import {useTheme} from './theme';
 import {binding, shortcutLabel, type Keybindings} from './shortcuts';
+import {GlassSurface} from './Glass';
 import {MotionPressable} from './motion';
+import {TooltipContext} from './Tooltips';
 
 export const ShortcutContext = createContext<Keybindings>({});
 
-export function Button({children, onPress, disabled, active, primary, compact, label, style, icon, danger, expanded, shortcut, quiet, autoFocus}: {
+export function Button({children, onPress, disabled, active, primary, compact, label, style, icon, danger, expanded, shortcut, quiet, autoFocus, toolbar}: {
   children?: ReactNode; icon?: IconName; danger?: boolean; expanded?: boolean; onPress?: () => void; disabled?: boolean; active?: boolean;
-  primary?: boolean; compact?: boolean; label?: string; style?: StyleProp<ViewStyle>; shortcut?: string; quiet?: boolean; autoFocus?: boolean;
+  primary?: boolean; compact?: boolean; label?: string; style?: StyleProp<ViewStyle>; shortcut?: string; quiet?: boolean; autoFocus?: boolean; toolbar?: boolean;
 }) {
   const {styles: s, colors} = useTheme();
   const target = useRef<View>(null);
@@ -19,14 +21,32 @@ export function Button({children, onPress, disabled, active, primary, compact, l
   const chord = shortcut ? binding(shortcut, bindings) : null;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  return <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={chord ? shortcutLabel(chord, Platform.OS === 'macos') : undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipVisible = !disabled && (showTooltip || focused);
+  const tooltip = useContext(TooltipContext);
+  const tooltipOwner = useRef({}).current;
+  const keyLabel = shortcutLabel(chord, Platform.OS === 'macos');
+  useEffect(() => {
+    setShowTooltip(false);
+    if (!toolbar || !hovered || disabled) return;
+    const timer = setTimeout(() => setShowTooltip(true), 350);
+    return () => clearTimeout(timer);
+  }, [toolbar, hovered, disabled]);
+  useEffect(() => {
+    if (toolbar && tooltipVisible && target.current) tooltip.show(tooltipOwner, target.current, label ?? '', keyLabel);
+    else tooltip.hide(tooltipOwner);
+    return () => tooltip.hide(tooltipOwner);
+  }, [toolbar, tooltipVisible, label, keyLabel, tooltip, tooltipOwner]);
+  const button = <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={chord ? shortcutLabel(chord, Platform.OS === 'macos') : undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
     onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-    disabled={disabled} onPress={onPress} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
+    disabled={disabled} onPress={() => { if (toolbar) target.current?.focus(); onPress?.(); }} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
       hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && !primary && {backgroundColor: colors.inset},
-      disabled && s.buttonDisabled, style, focused && s.focusRing]}>
+      disabled && s.buttonDisabled, toolbar && {width: 36, height: 36, padding: 0, borderRadius: 18, borderColor: 'transparent'}, style, focused && s.focusRing]}>
     {!!icon && <Icon name={icon} color={disabled ? colors.faint : danger ? colors.danger : primary ? colors.primaryText : active ? colors.accentText : colors.text} />}
     {children !== undefined && <Text numberOfLines={1} style={[s.buttonText, primary && s.buttonPrimaryText, active && s.accentText, danger && {color: colors.danger}, disabled && s.disabledText]}>{children}</Text>}
   </MotionPressable>;
+  if (!toolbar) return button;
+  return <View {...{onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false)}}>{button}</View>;
 }
 
 const textStyleKeys = new Set(['color', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'fontVariant', 'letterSpacing', 'lineHeight', 'textAlign', 'textDecorationLine', 'textDecorationStyle', 'textDecorationColor', 'textTransform', 'writingDirection', 'includeFontPadding', 'textAlignVertical']);
@@ -68,7 +88,7 @@ export function Dialog({visible, children, onDismiss}: {visible: boolean; childr
     onKeyDown: (event: {nativeEvent: {key: string}}) => { if (event.nativeEvent.key === 'Escape') onDismiss(); },
   } : {};
   return <View {...keyboardProps} style={s.modalBackdrop} accessibilityViewIsModal onAccessibilityEscape={onDismiss}>
-    <View style={s.modal}>{children}</View>
+    <View style={[s.modal, {backgroundColor: 'transparent', borderWidth: 0, borderRadius: 22}]}><GlassSurface radius={22} />{children}</View>
   </View>;
 }
 
@@ -89,9 +109,9 @@ export function parseTime(text: string): number | null {
   return Number.isFinite(seconds) && seconds <= Number.MAX_SAFE_INTEGER / 1000000 ? Math.round(seconds * 1000000) : null;
 }
 export function anchorLabel(anchor: Anchor): string {
-  return anchor.kind === 'point' ? timeLabel(anchor.at_us) : `${timeLabel(anchor.start_us)} – ${timeLabel(anchor.end_us)}`;
+  return timeLabel(anchor.at_us);
 }
-export function anchorStart(anchor: Anchor): number { return anchor.kind === 'point' ? anchor.at_us : anchor.start_us; }
+export function anchorStart(anchor: Anchor): number { return anchor.at_us; }
 export function bytesLabel(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;

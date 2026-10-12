@@ -10,10 +10,13 @@ MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release --locked -p gamepack-core
 npm run typecheck
 npm run test:ui
 mkdir -p artifacts/local
+# Metro copies assets incrementally; clear stale raster files before bundling.
+rm -rf build/macos/Build/Products/Release/GamePack.app/Contents/Resources/assets
 xcodebuild -workspace macos/gamepack.xcworkspace -scheme gamepack-macOS -configuration Release \
   -derivedDataPath build/macos -jobs "${GAMEPACK_BUILD_JOBS:-8}" CODE_SIGNING_ALLOWED=NO ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES build \
   > artifacts/local/macos-build.log 2>&1 || { tail -80 artifacts/local/macos-build.log; exit 1; }
 mkdir -p dist
+rm -rf dist/GamePack.app
 /usr/bin/ditto build/macos/Build/Products/Release/GamePack.app dist/GamePack.app
 codesign --force --deep --sign - dist/GamePack.app
 printf '\nBuilt %s/dist/GamePack.app (JavaScript and Rust embedded; no runtime server).\n' "$PWD"

@@ -5,7 +5,7 @@ import {binding, bindingError, effectiveShortcutChords, migrateReviewBindings, s
 test('new review commands preserve keys already customized in older libraries', () => {
   const old = {play: 'F', comment: 'Shift+M', nextVideo: 'Mod+Shift+R'};
   const migrated = migrateReviewBindings(old);
-  assert.deepEqual(migrated, {...old, present: null, onVideoNotes: null, allReplies: null});
+  assert.deepEqual(migrated, {...old, present: null, allReplies: null});
   assert.equal(shortcutAction({chord: 'F', repeat: false}, migrated), 'play');
   assert.deepEqual(migrateReviewBindings(migrated), migrated);
   assert.deepEqual(migrateReviewBindings({present: 'Shift+F'}), {present: 'Shift+F'});
@@ -54,4 +54,32 @@ test('the printed plus key zooms with the default binding while respecting overr
   assert.equal(shortcutAction({chord: '=', repeat: false}, assigned), 'zoomIn');
   assert.equal(shortcutAction({chord: '=', repeat: false}, {zoomIn: 'Shift+='}), undefined);
   assert.equal(shortcutAction({chord: 'Shift+=', repeat: true}, {zoomIn: 'Shift+='}), 'zoomIn');
+});
+
+
+test('standalone comment creation is removed, including saved custom bindings', () => {
+  for (const overrides of [{}, {comment: 'M'}, {comment: 'Shift+C'}]) {
+    assert.equal(shortcutAction({chord: 'M', repeat: false}, overrides), undefined);
+    assert.equal(shortcutAction({chord: 'Shift+C', repeat: false}, overrides), undefined);
+    assert.equal(effectiveShortcutChords(overrides).includes('M'), false);
+    assert.equal(shortcuts.some(item => item.id === 'comment'), false);
+  }
+});
+
+test('Watch ignores review shortcuts while preserving regular player controls', () => {
+  const overrides = {pen: 'Shift+P', nextComment: 'Shift+C'};
+  for (const chord of ['Shift+P', 'A', 'E', 'B', 'Shift+M', 'Mod+Enter', 'Shift+C', 'ArrowUp', 'Mod+Z', 'Shift+H']) {
+    assert.equal(shortcutAction({chord, repeat: false}, overrides, 'watch'), undefined);
+    assert.equal(effectiveShortcutChords(overrides, 'watch').includes(chord), false);
+  }
+  assert.equal(shortcutAction({chord: 'Space', repeat: false}, overrides, 'watch'), 'play');
+  assert.equal(shortcutAction({chord: 'ArrowRight', repeat: true}, overrides, 'watch'), 'nextFrame');
+  assert.equal(shortcutAction({chord: 'F', repeat: false}, overrides, 'watch'), 'present');
+  assert.equal(shortcutAction({chord: 'Shift+P', repeat: false}, overrides, 'review'), 'pen');
+});
+
+
+test('the removed comments toggle cannot be restored by old keybindings', () => {
+  assert.equal(shortcuts.some(item => item.id === 'onVideoNotes'), false);
+  assert.equal(shortcutAction({chord: 'Shift+M', repeat: false}, {onVideoNotes: 'Shift+M'}), undefined);
 });

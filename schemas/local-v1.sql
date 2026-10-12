@@ -52,6 +52,5 @@ BEGIN SELECT RAISE(ABORT,'Posted comments are immutable'); END;
 -- v3: application preferences remain local to this library.
 CREATE TABLE IF NOT EXISTS preferences (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
-    keybindings TEXT NOT NULL DEFAULT '{}',
-    pause_after_drawing INTEGER NOT NULL DEFAULT 1 CHECK(pause_after_drawing IN (0,1))
+    keybindings TEXT NOT NULL DEFAULT '{}'
 );

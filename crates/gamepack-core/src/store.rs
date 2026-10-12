@@ -87,7 +87,7 @@ impl Store {
         )?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         ensure!(
-            version <= 5,
+            version <= 6,
             "This database was created by a newer GamePack version"
         );
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -106,6 +106,9 @@ impl Store {
         }
         tx.execute_batch(include_str!("../../../schemas/local-v4.sql"))?;
         tx.execute_batch(include_str!("../../../schemas/local-v5.sql"))?;
+        if version < 6 {
+            crate::migration::freeze_reviews(&tx)?;
+        }
         tx.execute(
             "INSERT OR IGNORE INTO profile(singleton,author_id,name) VALUES(1,?1,'')",
             [id()],
@@ -113,7 +116,7 @@ impl Store {
         if version == 0 {
             tx.execute("INSERT INTO projects(id,title,created_at) SELECT ?1,'Review library',?2 WHERE NOT EXISTS(SELECT 1 FROM projects)", params![id(), now()?])?;
         }
-        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); INSERT OR IGNORE INTO preferences(singleton) VALUES(1); PRAGMA user_version=5;")?;
+        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); INSERT OR IGNORE INTO preferences(singleton) VALUES(1); PRAGMA user_version=6;")?;
         tx.commit()?;
         Ok(Self { root, db })
     }
@@ -128,12 +131,12 @@ impl Store {
                 )?;
                 value(self.settings()?)
             }
-            Request::SetPreferences {
-                keybindings,
-                pause_after_drawing,
-            } => {
+            Request::SetPreferences { keybindings } => {
                 crate::shortcuts::validate(&keybindings)?;
-                self.db.execute("UPDATE preferences SET keybindings=?1,pause_after_drawing=?2 WHERE singleton=1", params![serde_json::to_string(&keybindings)?, pause_after_drawing])?;
+                self.db.execute(
+                    "UPDATE preferences SET keybindings=?1 WHERE singleton=1",
+                    params![serde_json::to_string(&keybindings)?],
+                )?;
                 value(self.settings()?)
             }
             Request::DeleteVideo { video_id } => self.delete_scope(&video_id, false),
@@ -375,14 +378,13 @@ impl Store {
                 .query_row("SELECT theme FROM settings WHERE singleton=1", [], |row| {
                     row.get(0)
                 })?;
-        let (bindings, pause_after_drawing): (String, bool) = self.db.query_row(
-            "SELECT keybindings,pause_after_drawing FROM preferences WHERE singleton=1",
+        let bindings: String = self.db.query_row(
+            "SELECT keybindings FROM preferences WHERE singleton=1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )?;
         Ok(Settings {
             keybindings: serde_json::from_str(&bindings)?,
-            pause_after_drawing,
             theme: match theme.as_str() {
                 "system" => Theme::System,
                 "light" => Theme::Light,
@@ -528,6 +530,13 @@ impl Store {
                 project == draft.project_id && video == draft.video_id,
                 "Replies must belong to the same project and video as their parent"
             );
+            let parent_comment = self
+                .comment(parent)?
+                .context("Reply parent does not exist")?;
+            ensure!(
+                draft.anchor == parent_comment.draft.anchor,
+                "Replies must use their conversation's frame"
+            );
             // Existing immutable rows cannot point forward to a new ID. Bounded
             // traversal also refuses a corrupted/imported cyclic graph.
             let mut seen = std::collections::HashSet::new();
@@ -589,7 +598,7 @@ impl Store {
         );
         let profile = self.profile()?;
         validation::label(&profile.name, "Display name")?;
-        // Presentation state does not enter the immutable body or v1 digest.
+        // Presentation state does not enter the immutable body or v2 digest.
         let position = draft.position.take();
         let mut comment = Comment {
             comment_id: draft.id.clone(),
@@ -599,9 +608,9 @@ impl Store {
             name_at_posting: profile.name,
             created_at_reported: now()?,
             digest: String::new(),
-            schema_version: 1,
+            schema_version: 2,
         };
-        // Canonical v1: lexicographically sorted object keys at every depth,
+        // Canonical v2: lexicographically sorted object keys at every depth,
         // UTF-8 compact JSON and decimal integers, with digest omitted.
         let mut canonical = serde_json::to_value(&comment)?;
         canonical

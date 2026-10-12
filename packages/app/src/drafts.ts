@@ -1,5 +1,10 @@
 import type {Draft} from './types';
 
+/** New conversations start with a drawing; replies may be text-only. */
+export function canPostDraft(draft: Pick<Draft, 'parent_comment_id' | 'text' | 'drawings'>): boolean {
+  return draft.drawings.length > 0 || (!!draft.parent_comment_id && !!draft.text.trim());
+}
+
 /** The most recently created unfinished comment. Empty tool selections are not work. */
 export function resumableDraft(drafts: readonly Draft[], videoId: string, parentId?: string | null): Draft | undefined {
   for (let index = drafts.length - 1; index >= 0; index--) {

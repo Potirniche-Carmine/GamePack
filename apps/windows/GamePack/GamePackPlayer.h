@@ -2,6 +2,14 @@
 #include "pch.h"
 namespace gamepack::windows {
 struct PlayerState;
+struct GlassManager : winrt::implements<GlassManager,
+  winrt::Microsoft::ReactNative::IViewManager,
+  winrt::Microsoft::ReactNative::IViewManagerWithNativeProperties> {
+  winrt::hstring Name() noexcept { return L"GamePackGlass"; }
+  winrt::Windows::UI::Xaml::FrameworkElement CreateView() noexcept;
+  winrt::Windows::Foundation::Collections::IMapView<winrt::hstring, winrt::Microsoft::ReactNative::ViewManagerPropertyType> NativeProps() noexcept;
+  void UpdateProperties(winrt::Windows::UI::Xaml::FrameworkElement const& view, winrt::Microsoft::ReactNative::IJSValueReader const& reader) noexcept;
+};
 struct PlayerManager : winrt::implements<PlayerManager,
   winrt::Microsoft::ReactNative::IViewManager,
   winrt::Microsoft::ReactNative::IViewManagerWithReactContext,

@@ -1,11 +1,12 @@
 import defaults from './shortcut-defaults.json';
 export const shortcuts = defaults;
 export type Keybindings = Record<string, string | null>;
-export type ShortcutEvent = {chord: string; repeat: boolean; text?: string};
+export type ShortcutEvent = {chord: string; repeat: boolean; text?: string; action?: 'undo' | 'redo'};
+const availableShortcuts = (mode: 'watch' | 'review') => shortcuts.filter(item => mode === 'review' || item.group !== 'Comments & drawing');
 /** New defaults must not take a key already assigned in an older library. */
 export function migrateReviewBindings(overrides: Keybindings): Keybindings {
   const next = {...overrides};
-  for (const id of ['present', 'onVideoNotes', 'allReplies', 'laser', 'zoomIn', 'zoomOut', 'zoomReset']) {
+  for (const id of ['present', 'allReplies', 'laser', 'zoomIn', 'zoomOut', 'zoomReset']) {
     const chord = shortcuts.find(item => item.id === id)?.key;
     if (chord && !Object.prototype.hasOwnProperty.call(next, id) && Object.values(overrides).includes(chord)) next[id] = null;
   }
@@ -18,13 +19,13 @@ function hasZoomInAlias(overrides: Keybindings): boolean {
   return binding('zoomIn', overrides) === '=' && !shortcuts.some(item => item.id !== 'zoomIn' && binding(item.id, overrides) === 'Shift+=');
 }
 /** Accept the printed + key as well as = without taking a custom assignment. */
-export function effectiveShortcutChords(overrides: Keybindings): string[] {
-  const chords = shortcuts.map(item => binding(item.id, overrides)).filter((chord): chord is string => !!chord);
+export function effectiveShortcutChords(overrides: Keybindings, mode: 'watch' | 'review' = 'review'): string[] {
+  const chords = availableShortcuts(mode).map(item => binding(item.id, overrides)).filter((chord): chord is string => !!chord);
   if (hasZoomInAlias(overrides)) chords.push('Shift+=');
   return [...new Set(chords)];
 }
-export function shortcutAction(event: ShortcutEvent, overrides: Keybindings): string | undefined {
-  const item = shortcuts.find(item => binding(item.id, overrides) === event.chord);
+export function shortcutAction(event: ShortcutEvent, overrides: Keybindings, mode: 'watch' | 'review' = 'review'): string | undefined {
+  const item = availableShortcuts(mode).find(item => binding(item.id, overrides) === event.chord);
   if (item) return !event.repeat || item.repeat ? item.id : undefined;
   return event.chord === 'Shift+=' && hasZoomInAlias(overrides) ? 'zoomIn' : undefined;
 }

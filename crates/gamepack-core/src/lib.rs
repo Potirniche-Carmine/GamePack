@@ -1,6 +1,7 @@
 //! Offline GamePack engine. All durable state belongs to the explicit root.
 mod evaluator;
 mod json;
+mod migration;
 pub mod model;
 mod shortcuts;
 mod store;

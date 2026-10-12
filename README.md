@@ -1,8 +1,8 @@
 # GamePack
 
-Offline video review with immutable comments and timed drawings. GamePack uses React Native desktop screens, a shared Rust/SQLite engine, and native media players. No account, upload service, telemetry, or runtime server is required.
+Offline video review with immutable comments and freeze-frame drawings. GamePack uses React Native desktop screens, a shared Rust/SQLite engine, and native media players. No account, upload service, telemetry, or runtime server is required.
 
-The app is under active development and is not a stable MVP. It supports local video review, comments with optional end times, pen/arrow/ellipse markup, nested replies, and persistent appearance and keyboard settings. Posted comments cannot be edited; deleting their video or project removes them. ZIP exchange is not implemented.
+The app is under active development and is not a stable MVP. It supports local video review, comments anchored to a single frame, pen/arrow/ellipse markup, nested replies, and persistent appearance and keyboard settings. Posted comments cannot be edited; deleting their video or project removes them. ZIP exchange is not implemented.
 
 ## Download
 
@@ -40,25 +40,23 @@ See [Windows installation](docs/windows.md) for the dependency installer, source
 ## Review a video
 
 1. Open a project, then a folder or video. **New project**, **New folder**, and **Add video** keep the library organized. The breadcrumb returns to a project or folder; the GamePack mark opens all projects. Search stays within the current location.
-2. Click empty video space or press Space to play or pause. Drawing tools sit at the left of the video. Choose **Comment** or press M, then click the footage to place a comment pin. M focuses an existing draft; Escape returns focus to the video so Space resumes playback.
-3. Add markup. Playback pauses as soon as a stroke starts when **Pause when drawing starts** is enabled. Finishing a stroke opens a compact comment beside the drawing and keeps the drawing tool selected. Continue playing, pausing, and drawing; the captured media time sets the range automatically. Drag the pin or card header to reposition it. The separate laser tool (B) makes a temporary pulse.
-4. Choose **Post** or press Command/Control+Return to capture the final stroke and publish. Set your display name when prompted.
-5. Click a numbered pin to show or hide its conversation. Cards show the reviewer’s avatar and name; their pin color follows the author. Timing stays on the filmstrip. Opening a thread shows its nested replies. Use **Reply** to respond. The numbered filmstrip markers and Up/Down keys navigate original comments. Replies stay inside their on-video conversation; there is no discussion side panel.
-6. Use the fullscreen icon at the right of playback controls or press F. Space plays/pauses, Up/Down or a Page Up/Page Down presenter advances through original comments, and Escape closes an open menu or exits fullscreen.
+2. Click empty video space or press Space to play or pause. **Watch** hides comments, drawings, review shortcuts, and filmstrip markers and plays continuously; **Review** stops at commented frames and waits for Play. Several comments at the same frame share one stop. Seeking back lets you review them again.
+3. Choose Pen, Arrow, or Ellipse and draw on the frozen frame to start a comment. New conversations require a drawing; replies may contain only text. All drawings use the same blue ink. The laser (B) is temporary.
+4. Add text and choose **Post**, or press Command/Control+Return. Set your display name when prompted. A comment holds completed drawings at one instant; drawing while the video plays and timed stroke replay are not supported.
+5. Read comments in the floating glass column. One number per conversation connects its drawings, card, and filmstrip marker. Selecting a card emphasizes its drawings. **Reply** opens a composer on the same frame; replies stay with their conversation. Scroll the column for additional comments, or hide it with the comment control beside the drawing tools.
+6. Use F for fullscreen. Space resumes playback; Up/Down or Page Up/Page Down in fullscreen moves between original comments. Escape closes menus, leaves text focus, or exits fullscreen.
 
-Opening a video gives the footage the full workspace. The video title opens the other videos in its current folder, with actions to browse that location or add a video. Unfinished comments reopen when you return to their video; Add comment or Reply also resumes an unfinished comment for that conversation. **Discard** removes the current comment and its drawings; **Post** publishes them. Spaces typed in the composer remain text. Replies are visible inside expanded conversations and never become separate playback annotations.
+The complete video frame fits the available workspace without cropping at Fit. Floating glass controls sit over a blurred extension of the footage; comments do not reserve space above or below the player. The title opens videos in the current folder. An unposted “+” filmstrip marker restores a saved draft. Playing or seeking away saves the current draft without moving its timestamp. **Discard** removes that draft and its drawings; **Post** publishes them.
 
-Zoom with the percentage control, the mouse wheel, or a trackpad pinch. The footage and drawings zoom together; card positions follow the footage. Playback speed has its own dropdown.
+Zoom using Fit/percentage, the mouse wheel, or a trackpad pinch. Footage and drawings zoom together; comment cards retain their size. Playback speed has its own dropdown. Native frosted surfaces and a blurred extension of the video's colors provide the surround in both themes.
 
 Projects contain videos and one level of folders. Item menus provide rename, move, and delete actions. Removing a folder returns its videos to the project without changing comments. Moving a video stays within its project.
 
-A stroke drawn while paused appears complete at that frame's timestamp. During an interval, samples are revealed by source media time; speed changes, seeks, and pauses do not use a separate annotation timer. The end of a range is exclusive. Review playback pauses on instant comments and just before ranges finish, keeping the final drawings visible. Play continues past that stop; seeking back rearms it. Drawings retain their original stroke colors in every appearance. Point annotations have a two-second visibility window, capped at the video end; pausing keeps them visible on their frame.
+Existing timed comments are converted once to a completed drawing on the final included instant of their clip. Original posted records are retained for recovery. New records have no intervals, drawing colors, sample timestamps, or live-replay fallback.
 
-Pins with drawings appear from the first visible drawing sample until the final drawing ends. Text-only pins follow their moment or range. Older notes are placed in nearby free space. The pin stays fixed while its card grows or flips inward at the video edge. Moving a pin changes only its local placement, preserving the posted content and digest. Videos open at 00:00 without a composer; click an unposted “+” marker on the timeline to resume saved work.
+Open the settings cog for a centered preferences window to choose System, Light, or Dark appearance and edit keyboard shortcuts. The profile avatar opens your name and initials settings. Click a shortcut and press its replacement; conflicts and reserved system/text keys are rejected. Clear unneeded bindings or reset all defaults. Appearance and bindings are stored in SQLite.
 
-Open the settings cog for a centered preferences window to choose System, Light, or Dark appearance and edit keyboard shortcuts. The profile avatar opens your name and initials settings. Click a shortcut and press its replacement; conflicts and reserved system/text keys are rejected. Clear unneeded bindings or reset all defaults. Appearance, bindings, and drawing behavior are stored in SQLite.
-
-Defaults: Space plays/pauses; J/K/L shuttle backward, stop, and shuttle forward; Left/Right step frames; Shift+Left/Right seek five seconds; M places a comment pin or focuses the active draft; P/A/E select drawing tools; V selects the standard pointer; B selects the laser; + or = zooms in, − zooms out, and 0 fits the footage; Command/Control+Z and +Shift+Z undo/redo drawings. Command/Control+1–9 opens projects; Option/Alt+Up/Down changes videos within the current folder in the displayed order. F toggles fullscreen; Shift+M toggles on-video comments; Command/Control+Shift+R expands or collapses replies. Existing custom assignments take precedence over these new defaults. Full assignments are searchable in Settings. Shortcuts do not intercept text editing, except the configured post shortcut.
+Defaults: Space plays/pauses; J/K/L shuttle backward, stop, and shuttle forward; Left/Right step frames; Shift+Left/Right seek five seconds; P/A/E select drawing tools; V selects the standard pointer; B selects the laser; + or = zooms in, − zooms out, and 0 fits the footage; Command/Control+Z and +Shift+Z undo/redo drawings. Command/Control+1–9 opens projects; Option/Alt+Up/Down changes videos within the current folder in the displayed order. F toggles fullscreen; Shift+M toggles comment cards; Command/Control+Shift+R expands or collapses replies. Existing custom assignments take precedence over these new defaults. Full assignments are searchable in Settings. Shortcuts do not intercept text editing, except the configured post shortcut.
 
 Item menus delete a project or video after confirmation, including its comments and drafts. Original files and content-addressed managed media are retained; shared footage remains available to other projects and re-imports. This action does not reclaim disk space.
 
@@ -86,7 +84,7 @@ bash scripts/build-macos.sh
 The release build embeds a production JavaScript bundle. `npm start` and `npm run macos` are development tools only.
 
 - `packages/app/src`: shared React Native interface and typed native contract.
-- `native/macos`: AVPlayer, media-clock overlay, file picker, and CXX module.
+- `native/macos`: AVPlayer, freeze-frame overlay, file picker, and CXX module.
 - `apps/windows`: Win32/XAML React Native Windows host and native player.
 - `crates/gamepack-core`: domain validation, canonical records, SQLite, media identity, evaluator, and CLI.
 - `docs/mvp-contract.md`: concrete integration contract.

@@ -1,3 +1,4 @@
+import {compareComments} from './playback';
 import type {Comment} from './types';
 
 export type TimelineCluster = {
@@ -10,8 +11,34 @@ export type TimelineCluster = {
 };
 
 const minimumGap = 6;
-const start = (comment: Comment) => comment.anchor.kind === 'point' ? comment.anchor.at_us : comment.anchor.start_us;
+const start = (comment: Comment) => comment.anchor.at_us;
 const safeWidth = (width: number) => Number.isFinite(width) ? Math.max(0, width) : 0;
+
+/** Short clips get a compact dock; long videos gain room without filling the window. */
+export function timelineDockWidth(available: number, duration: number, reviewing: boolean): number {
+  const minutes = Number.isFinite(duration) ? Math.max(.5, duration / 60000000) : .5;
+  const width = (reviewing ? 560 : 520) + Math.max(0, Math.log2(minutes * 2)) * 40;
+  return Math.max(1, Math.min(available - 48, reviewing ? 760 : 640, width));
+}
+
+export type TimelineSample = {time: number; duration: number; paused: boolean; rate: number; seekToken: number};
+export function timelineMotion(previous: TimelineSample | null, current: TimelineSample) {
+  const {time, duration, paused, rate, seekToken} = current;
+  const discontinuity = !previous || previous.seekToken !== seekToken || previous.duration !== duration
+    || Math.abs(time - previous.time) > 500000 * Math.max(1, Math.abs(rate));
+  if (discontinuity) return {kind: 'snap' as const, time};
+  // The pause request still carries the previous periodic sample. Freeze the
+  // presentation until native reports the stopped frame, instead of rewinding.
+  if (paused && time === previous.time) return {kind: 'hold' as const, time};
+  return {kind: 'animate' as const, time: paused ? time : time + rate * 140000, duration: paused ? 100 : 140};
+}
+
+/** Pointer positions use the same inset as markers and the playback thumb. */
+export function timelineSeekTime(x: number, duration: number, width: number): number {
+  if (!Number.isFinite(x) || !Number.isFinite(duration) || duration <= 0) return 0;
+  const available = safeWidth(width), inset = Math.min(12, available / 2);
+  return Math.round(Math.max(0, Math.min(1, (x - inset) / Math.max(1, available - 2 * inset))) * duration);
+}
 
 export function timelinePosition(time: number, duration: number, width: number): number {
   const available = safeWidth(width), inset = Math.min(12, available / 2);
@@ -23,7 +50,7 @@ export function timelinePosition(time: number, duration: number, width: number):
  * label and clamping at either edge. Groups keep chronological numbering and
  * an exact first-comment anchor; no comment is displaced or dropped. */
 export function clusterTimelineComments(comments: readonly Comment[], duration: number, width: number): TimelineCluster[] {
-  const ordered = [...comments].sort((a, b) => start(a) - start(b) || a.comment_id.localeCompare(b.comment_id));
+  const ordered = [...comments].sort(compareComments);
   const available = safeWidth(width);
   type Range = {first: number; last: number};
   const bounds = ({first, last}: Range) => {

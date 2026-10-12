@@ -1,6 +1,5 @@
 [
   {"id":"present","label":"Enter / exit full screen","group":"Playback","key":"F","repeat":false},
-  {"id":"onVideoNotes","label":"Show / hide comments on video","group":"Comments & drawing","key":"Shift+M","repeat":false},
   {"id":"allReplies","label":"Expand / collapse all replies","group":"Comments & drawing","key":"Mod+Shift+R","repeat":false},
   {"id":"play","label":"Play / pause","group":"Playback","key":"Space","repeat":false},
   {"id":"reverse","label":"Shuttle backward","group":"Playback","key":"J","repeat":false},
@@ -12,7 +11,6 @@
   {"id":"ahead","label":"Forward five seconds","group":"Playback","key":"Shift+ArrowRight","repeat":true},
   {"id":"start","label":"Go to beginning","group":"Playback","key":"Home","repeat":false},
   {"id":"end","label":"Go to end","group":"Playback","key":"End","repeat":false},
-  {"id":"comment","label":"New comment","group":"Comments & drawing","key":"M","repeat":false},
   {"id":"submit","label":"Post comment","group":"Comments & drawing","key":"Mod+Enter","repeat":false},
   {"id":"pen","label":"Pen","group":"Comments & drawing","key":"P","repeat":false},
   {"id":"arrow","label":"Arrow","group":"Comments & drawing","key":"A","repeat":false},

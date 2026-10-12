@@ -1,97 +1,88 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {conversationTarget, noteWindow, notesAtTime, adjacentNote, nextReviewStop} from '../packages/app/src/presentation.ts';
-import {commentThreads, replyBranches, toggleReplies, visibleThreads} from '../packages/app/src/review.ts';
-
+import {conversationPins, conversationTarget, notesAtTime, adjacentNote, nextReviewStop} from '../packages/app/src/presentation.ts';
 const second = 1_000_000;
-const comment = (id, start = 0, end = 12) => ({comment_id: id, parent_comment_id: null, anchor: {kind: 'interval', start_us: start * second, end_us: end * second}, drawings: []});
-const mark = (from, until, x = 750000) => ({visible_from_us: from * second, visible_until_us: until * second, samples: [{x, y: 100000, t_us: from * second}]});
+const comment = (id, at = 0, parent = null) => ({comment_id: id, parent_comment_id: parent, anchor: {kind: 'point', at_us: at * second}, drawings: []});
 
-test('video comments begin with the first drawing sample and last until the final mark ends', () => {
-  const note = {...comment('coach', 2, 20), drawings: [mark(3, 6), mark(5, 12)]};
-  const original = JSON.stringify(note);
-  assert.deepEqual(noteWindow(note, 30 * second), {start: 5 * second, end: 14 * second});
-  for (const [time, count] of [[4.99, 0], [5, 1], [7, 1], [13.99, 1], [14, 0], [6, 1], [1, 0]]) {
-    assert.equal(notesAtTime([note], time * second, 30 * second).length, count);
-  }
-  assert.equal(JSON.stringify(note), original);
+test('simultaneous notes show on one frame, including at EOF, without a two-second window', () => {
+  const notes = [comment('a', 3), comment('b', 3), comment('c', 10)];
+  assert.deepEqual(notesAtTime(notes, 3 * second).map(note => note.comment_id), ['a', 'b']);
+  assert.equal(notesAtTime(notes, 4 * second).length, 0);
+  assert.equal(notesAtTime(notes, 3 * second + 16667).length, 0);
+  assert.equal(notesAtTime(notes, 10 * second).length, 1);
 });
 
-test('text-only ranges, simultaneous notes and EOF moments remain reachable', () => {
-  const range = comment('range', 3, 8);
-  const point = {...comment('point'), anchor: {kind: 'point', at_us: 3 * second}};
-  assert.deepEqual(notesAtTime([range, point], 4 * second, 10 * second).map(item => item.comment_id), ['point', 'range']);
-  assert.deepEqual(notesAtTime([range, point], 5 * second, 10 * second).map(item => item.comment_id), ['range']);
-  const eof = {...point, anchor: {kind: 'point', at_us: 10 * second}};
-  assert.equal(notesAtTime([eof], 10 * second, 10 * second).length, 1);
-});
-
-test('note navigation uses the playhead when unselected and visits equal-time notes in both directions', () => {
-  const notes = [comment('b', 2), comment('c', 8), comment('a', 2)];
+test('navigation visits equal-time notes and skips replies in both directions', () => {
+  const notes = [comment('b', 2), comment('c', 8), comment('a', 2), comment('reply', 2, 'a')];
   assert.equal(adjacentNote(notes, null, 0, 30 * second, 1).comment_id, 'a');
   assert.equal(adjacentNote(notes, 'a', 2 * second, 30 * second, 1).comment_id, 'b');
   assert.equal(adjacentNote(notes, 'b', 2 * second, 30 * second, -1).comment_id, 'a');
+  assert.equal(adjacentNote(notes, 'reply', 2 * second, 30 * second, 1).comment_id, 'b');
   assert.equal(adjacentNote(notes, null, 7 * second, 30 * second, -1).comment_id, 'b');
   assert.equal(adjacentNote(notes, 'c', 8 * second, 30 * second, 1), undefined);
-  assert.equal(adjacentNote(notes, 'a', 2 * second, 30 * second, -1), undefined);
 });
 
-test('individual and global disclosure show and remove real reply rows, including nested replies', () => {
-  const records = [comment('root'), {...comment('reply'), parent_comment_id: 'root'}, {...comment('nested'), parent_comment_id: 'reply'}, comment('other')];
-  const roots = commentThreads(records), collapsed = new Set();
-  const ids = state => visibleThreads(roots, state).map(item => item.node.comment.comment_id);
-  const opened = toggleReplies(collapsed, 'root');
-  assert.deepEqual(ids(opened), ['root', 'reply', 'other']);
-  assert.deepEqual(ids(toggleReplies(opened, 'root')), ['root', 'other']);
-  assert.deepEqual(ids(replyBranches(roots)), ['root', 'reply', 'nested', 'other']);
-  assert.equal(collapsed.size, 0);
-});
-
-test('replies remain in discussion and never become playback overlays or navigation stops', () => {
-  const root = comment('coach', 2, 8), next = comment('next', 9, 12);
-  const reply = {...comment('player', 3, 7), parent_comment_id: 'coach'};
-  const nested = {...comment('follow-up', 4, 6), parent_comment_id: 'player', drawings: [mark(0, 1)]};
-  const records = [nested, reply, next, root];
-  assert.deepEqual(notesAtTime(records, 4 * second, 30 * second).map(item => item.comment_id), ['coach']);
-  assert.equal(adjacentNote(records, 'coach', 2 * second, 30 * second, 1).comment_id, 'next');
-  assert.equal(adjacentNote(records, 'follow-up', 4 * second, 30 * second, 1).comment_id, 'next');
-  assert.equal(adjacentNote(records, 'next', 9 * second, 30 * second, -1).comment_id, 'coach');
-});
-
-test('reply creation and publication target the root first visible drawing, including stale state', () => {
-  const root = {...comment('coach', 0, 10), drawings: [mark(3, 8)]};
-  const child = {...comment('reply', 0, 10), parent_comment_id: 'coach'};
-  const nested = {...comment('new-reply', 9, 10), parent_comment_id: 'reply'};
-  for (const [records, item] of [[[root], child], [[root, child], child], [[root, child], nested]]) {
-    const target = conversationTarget(records, item, 15 * second);
-    assert.equal(target.comment.comment_id, 'coach');
-    assert.equal(target.time, 3 * second);
-    assert.equal(notesAtTime(records, target.time, 15 * second)[0].comment_id, 'coach');
+test('nested and just-posted replies open the root conversation at its frame', () => {
+  const root = comment('root', 3), child = comment('reply', 3, 'root'), nested = comment('nested', 3, 'reply');
+  for (const [records, item] of [[[root], child], [[root, child], nested]]) {
+    assert.deepEqual(conversationTarget(records, item, 15 * second), {comment: root, time: 3 * second});
+    assert.deepEqual(notesAtTime(records, 3 * second).map(note => note.comment_id), ['root']);
   }
-  assert.deepEqual(conversationTarget([root], root, 15 * second), {comment: root, time: 3 * second});
-  const orphan = {...comment('orphan', 5, 6), parent_comment_id: 'missing'};
-  assert.deepEqual(conversationTarget([], orphan, 15 * second), {comment: orphan, time: 5 * second});
 });
 
-const note = (id, anchor) => ({...comment(id), anchor});
-
-test('review playback stops for points and at the final visible frame of ranges', () => {
-  const comments = [
-    note('moment', {kind: 'point', at_us: 1000000}),
-    note('range', {kind: 'interval', start_us: 2000000, end_us: 6000000}),
-    note('short', {kind: 'interval', start_us: 7000000, end_us: 8000000}),
-  ];
-  assert.deepEqual(nextReviewStop(comments, 0, 10000000), {time: 1000000, commentIds: ['moment']});
-  assert.deepEqual(nextReviewStop(comments, 1000000, 10000000, 1, true), {time: 5999999, commentIds: ['range']});
-  assert.deepEqual(nextReviewStop(comments, 6000000, 10000000), {time: 7999999, commentIds: ['short']});
-  assert.equal(nextReviewStop(comments, 8000000, 10000000), null);
-  assert.deepEqual(nextReviewStop(comments, 6000000, 10000000, -1), {time: 5999999, commentIds: ['range']});
+test('review stops group comments, resume skips that frame, seeking back rearms it', () => {
+  const records = [comment('a', 1), comment('b', 1), comment('reply', 1, 'a'), comment('next', 6)];
+  const stop = {time: second, commentIds: ['a', 'b']};
+  assert.deepEqual(nextReviewStop(records, 0, 10 * second), stop);
+  assert.deepEqual(nextReviewStop(records, second, 10 * second, 1, true), {time: 6 * second, commentIds: ['next']});
+  assert.deepEqual(nextReviewStop(records, 0, 10 * second), stop);
+  assert.deepEqual(nextReviewStop(records, 7 * second, 10 * second, -1), {time: 6 * second, commentIds: ['next']});
+  assert.equal(nextReviewStop(records, second + 177, 10 * second, -1, true), null);
+  assert.equal(nextReviewStop(records, 6 * second, 10 * second, 1, true), null);
 });
 
-test('simultaneous comments share a pause, replies do not add stops, and seeking back rearms it', () => {
-  const comments = ['a', 'b', 'reply'].map(id => note(id, {kind: 'point', at_us: 0}));
-  comments[2].parent_comment_id = 'a';
-  assert.deepEqual(nextReviewStop(comments, 0, 10000000), {time: 0, commentIds: ['a', 'b']});
-  assert.equal(nextReviewStop(comments, 0, 10000000, 1, true), null);
-  assert.deepEqual(nextReviewStop(comments, 0, 10000000), {time: 0, commentIds: ['a', 'b']});
+test('zero-time and final-frame comments are valid review stops', () => {
+  const records = [comment('first'), comment('last', 10)];
+  assert.deepEqual(nextReviewStop(records, 0, 10 * second), {time: 0, commentIds: ['first']});
+  assert.deepEqual(nextReviewStop(records, 0, 10 * second, 1, true), {time: 10 * second, commentIds: ['last']});
+  assert.equal(nextReviewStop(records, 0, 0), null);
+});
+
+test('Play leaves every comment on the visible frame and still stops at the next frame', () => {
+  const records = [comment('opening'), comment('also-opening'), comment('next', 1), comment('last', 10)];
+  for (const from of [0, 177, 2000]) {
+    assert.deepEqual(nextReviewStop(records, from, 10 * second, 1, true), {time: second, commentIds: ['next']});
+  }
+  // An opening annotation is still reached when playing backward from later.
+  assert.deepEqual(nextReviewStop(records, second, 10 * second, -1, true), {time: 0, commentIds: ['opening', 'also-opening']});
+  assert.equal(nextReviewStop(records.slice(0, 2), 0, 10 * second, 1, true), null);
+  // Scrubbing onto another annotated frame should have the same resume behavior.
+  assert.deepEqual(nextReviewStop(records, second - 177, 10 * second, 1, true), {time: 10 * second, commentIds: ['last']});
+  assert.deepEqual(nextReviewStop(records, second - 16667, 10 * second, 1, true), {time: second, commentIds: ['next']});
+});
+
+
+test('one conversation marker covers all root and reply drawings without changing their records', () => {
+  const stroke = (id, x = 500000, y = 500000) => ({id, samples: [{x, y}]});
+  const root = {...comment('root'), drawings: [stroke('ellipse'), stroke('line')]};
+  const reply = {...comment('reply', 0, 'root'), drawings: [stroke('arrow')]};
+  const nested = {...comment('nested', 0, 'reply'), drawings: [stroke('pen')]};
+  const other = {...comment('other'), drawings: [stroke('other-ellipse')]};
+  const records = [nested, reply, root, other];
+  const before = structuredClone(records);
+  const pins = conversationPins(records, [root, other], 1);
+  assert.deepEqual(pins.map(pin => pin.note.comment_id), ['root', 'other']);
+  assert.equal(pins[0].point, root.drawings[0].samples[0]);
+  assert.deepEqual(records, before);
+  assert.deepEqual(conversationPins(records, [], 1), []);
+});
+
+test('a marker uses visible reply geometry when the root has none or is outside the zoomed frame', () => {
+  const root = {...comment('root'), drawings: [{samples: [{x: 0, y: 0}]}]};
+  const reply = {...comment('reply', 0, 'root'), drawings: [{samples: [{x: 500000, y: 500000}]}]};
+  assert.equal(conversationPins([reply, root], [root], 2)[0].point, reply.drawings[0].samples[0]);
+  assert.deepEqual(conversationPins([root], [root], 2), []);
+  const textRoot = comment('text-root');
+  const child = {...reply, parent_comment_id: 'text-root'};
+  assert.equal(conversationPins([textRoot, child], [textRoot], 1)[0].note, textRoot);
 });

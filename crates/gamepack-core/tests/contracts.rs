@@ -69,7 +69,7 @@ fn themes_are_strict_persisted_and_migrate_existing_libraries() {
     let initial = fixture.boot();
     assert_eq!(
         initial["settings"],
-        json!({"theme":"system","keybindings":{},"pause_after_drawing":true})
+        json!({"theme":"system","keybindings":{}})
     );
     // Recreate an actual pre-settings library, retaining its existing records.
     let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
@@ -79,16 +79,13 @@ fn themes_are_strict_persisted_and_migrate_existing_libraries() {
     let migrated = fixture.boot();
     assert_eq!(
         migrated["settings"],
-        json!({"theme":"system","keybindings":{},"pause_after_drawing":true})
+        json!({"theme":"system","keybindings":{}})
     );
     assert_eq!(migrated["profile"], initial["profile"]);
     assert_eq!(migrated["videos"], initial["videos"]);
     for theme in ["dark", "light", "system"] {
         let saved = success(fixture.root(), json!({"command":"set_theme","theme":theme}));
-        assert_eq!(
-            saved,
-            json!({"theme":theme,"keybindings":{},"pause_after_drawing":true})
-        );
+        assert_eq!(saved, json!({"theme":theme,"keybindings":{}}));
         assert_eq!(fixture.boot()["settings"], saved);
     }
     for invalid in [
@@ -109,12 +106,12 @@ fn themes_are_strict_persisted_and_migrate_existing_libraries() {
     );
     assert_eq!(
         fixture.boot()["settings"],
-        json!({"theme":"system","keybindings":{},"pause_after_drawing":true})
+        json!({"theme":"system","keybindings":{}})
     );
     let other = TempDir::new().unwrap();
     assert_eq!(
         success(other.path(), json!({"command":"bootstrap"}))["settings"],
-        json!({"theme":"system","keybindings":{},"pause_after_drawing":true})
+        json!({"theme":"system","keybindings":{}})
     );
 }
 
@@ -350,107 +347,83 @@ fn pen() -> Drawing {
     Drawing {
         id: "stroke".into(),
         tool: Tool::Pen,
-        color: "#FF4400".into(),
         width: 4000,
-        visible_from_us: 2,
-        visible_until_us: 9,
         samples: vec![
-            Sample {
-                x: 0,
-                y: 0,
-                t_us: 2,
-            },
-            Sample {
-                x: 5,
-                y: 5,
-                t_us: 4,
-            },
-            Sample {
-                x: 10,
-                y: 10,
-                t_us: 4,
-            },
-            Sample {
-                x: 20,
-                y: 20,
-                t_us: 7,
-            },
+            Sample { x: 0, y: 0 },
+            Sample { x: 5, y: 5 },
+            Sample { x: 20, y: 20 },
         ],
     }
 }
 
 #[test]
-fn evaluator_reconstructs_prefix_on_seek_and_uses_exclusive_ends() {
-    let anchor = Anchor::Interval {
-        start_us: 100,
-        end_us: 110,
-    };
+fn completed_drawings_exist_only_at_their_frame_after_any_seek() {
+    let anchor = Anchor::Point { at_us: 100 };
     let drawings = vec![pen()];
-    for source in [99, 100, 101, 109, 110, 111] {
+    for source in [99, 101, 10000, 0] {
         assert!(evaluate_drawings(&anchor, &drawings, source).is_empty());
     }
-    assert_eq!(
-        evaluate_drawings(&anchor, &drawings, 102)[0].samples.len(),
-        1
-    );
-    assert_eq!(
-        evaluate_drawings(&anchor, &drawings, 104)[0].samples.len(),
-        3
-    );
-    assert_eq!(
-        evaluate_drawings(&anchor, &drawings, 108)[0].samples.len(),
-        4
-    );
-    assert_eq!(
-        evaluate_drawings(&anchor, &drawings, 102)[0].samples.len(),
-        1
-    );
-    let mut shape = pen();
-    shape.tool = Tool::Arrow;
-    shape.samples.truncate(2);
-    assert_eq!(
-        evaluate_drawings(&anchor, &[shape], 102)[0].samples.len(),
-        2
-    );
-    let point = Anchor::Point { at_us: 100 };
-    assert_eq!(evaluate_drawings(&point, &drawings, 100), drawings);
-    assert!(evaluate_drawings(&point, &drawings, 101).is_empty());
+    assert_eq!(evaluate_drawings(&anchor, &drawings, 100), drawings);
+    assert!(evaluate_drawings(&anchor, &drawings, 101).is_empty());
+    assert_eq!(evaluate_drawings(&anchor, &drawings, 100), drawings);
 }
 
 #[test]
-fn drawing_validation_rejects_bad_geometry_bounds_order_and_duplicate_ids() {
+fn drawing_validation_rejects_bad_geometry_and_duplicate_ids() {
     let fixture = Fixture::new();
     let mut draft = fixture.draft("drawings");
-    draft["anchor"] = json!({"kind":"interval","start_us":100,"end_us":110});
     draft["drawings"] = json!([pen()]);
     fixture.save(draft.clone());
-    for (field, invalid) in [
-        ("x", json!(-1)),
-        ("y", json!(1_000_001)),
-        ("t_us", json!(10)),
-    ] {
+    for (field, invalid) in [("x", json!(-1)), ("y", json!(1_000_001))] {
         let mut bad = draft.clone();
         bad["drawings"][0]["samples"][0][field] = invalid;
-        failure(fixture.root(), json!({"command":"save_draft","draft":bad}));
+        failure(fixture.root(), json!({"command":"save_draft", "draft":bad}));
     }
-    let mut bad = draft.clone();
-    bad["drawings"][0]["samples"][1]["t_us"] = json!(1);
-    assert!(
-        failure(fixture.root(), json!({"command":"save_draft","draft":bad}))
-            .contains("nondecreasing")
-    );
     let mut bad = draft.clone();
     bad["drawings"] = json!([pen(), pen()]);
     assert!(
         failure(fixture.root(), json!({"command":"save_draft","draft":bad}))
             .contains("Duplicate drawing")
     );
-    let mut bad = draft;
-    bad["anchor"] = json!({"kind":"point","at_us":100});
+    let mut bad = draft.clone();
+    bad["drawings"][0]["tool"] = json!("arrow");
     assert!(
         failure(fixture.root(), json!({"command":"save_draft","draft":bad}))
-            .contains("visibility must be zero")
+            .contains("two samples")
     );
+    fixture.named("Maya");
+    let posted = fixture.post("drawings");
+    assert_eq!(posted["drawings"], draft["drawings"]);
+    assert_eq!(posted["schema_version"], 2);
+    assert_eq!(fixture.boot()["comments"], json!([posted]));
+}
+
+#[test]
+fn runtime_rejects_all_timed_and_color_fields_instead_of_converting_them() {
+    let fixture = Fixture::new();
+    let mut draft = fixture.draft("static");
+    draft["drawings"] = json!([pen()]);
+    fixture.save(draft.clone());
+    let mut bad = draft.clone();
+    bad["anchor"] = json!({"kind":"interval","start_us":100,"end_us":200});
+    failure(fixture.root(), json!({"command":"save_draft","draft":bad}));
+    for (key, value) in [
+        ("color", json!("#FFFFFF")),
+        ("visible_from_us", json!(0)),
+        ("visible_until_us", json!(100)),
+    ] {
+        let mut bad = draft.clone();
+        bad["drawings"][0][key] = value;
+        failure(fixture.root(), json!({"command":"save_draft","draft":bad}));
+    }
+    let mut bad = draft.clone();
+    bad["drawings"][0]["samples"][0]["t_us"] = json!(0);
+    failure(fixture.root(), json!({"command":"save_draft","draft":bad}));
+    failure(
+        fixture.root(),
+        json!({"command":"set_preferences","keybindings":{},"pause_after_drawing":false}),
+    );
+    assert_eq!(fixture.boot()["drafts"], json!([draft]));
 }
 
 #[test]
@@ -537,12 +510,11 @@ fn preferences_persist_and_reject_conflicts_without_partial_writes() {
     let save = |bindings| {
         request(
             fixture.root(),
-            json!({"command":"set_preferences","keybindings":bindings,"pause_after_drawing":false}),
+            json!({"command":"set_preferences","keybindings":bindings}),
         )
     };
     assert_eq!(save(json!({"play":"Shift+P"}))["ok"], true);
     assert_eq!(fixture.boot()["settings"]["keybindings"]["play"], "Shift+P");
-    assert_eq!(fixture.boot()["settings"]["pause_after_drawing"], false);
     for invalid in [
         json!({"play":"J"}),
         json!({"play":"Mod+Q"}),
@@ -621,4 +593,131 @@ fn deleting_scope_removes_threads_and_drafts_but_preserves_other_projects() {
         fixture.root(),
         json!({"command":"delete_project","project_id":fixture.project}),
     );
+}
+
+fn legacy_record(fixture: &Fixture, id: &str, parent: Option<&str>, end: i64) -> Value {
+    let mut draft = fixture.draft(id);
+    draft["parent_comment_id"] = json!(parent);
+    fixture.save(draft);
+    let mut record = fixture.post(id);
+    record["schema_version"] = json!(1);
+    record["anchor"] = json!({"kind":"interval","start_us":100,"end_us":end});
+    record["drawings"] = json!([{"id":"old-pen","tool":"pen","color":"#FF0000","width":3500,
+        "visible_from_us":0,"visible_until_us":end-100,
+        "samples":[{"x":100000,"y":200000,"t_us":0},{"x":800000,"y":700000,"t_us":20}]}]);
+    record.as_object_mut().unwrap().remove("digest");
+    record["digest"] = json!(blake3::hash(&serde_json::to_vec(&record).unwrap())
+        .to_hex()
+        .to_string());
+    record
+}
+
+fn install_legacy(fixture: &Fixture, records: &[Value]) {
+    let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
+    db.execute_batch("DROP TRIGGER comments_no_update; ALTER TABLE preferences ADD COLUMN pause_after_drawing INTEGER NOT NULL DEFAULT 0;").unwrap();
+    for record in records {
+        db.execute(
+            "UPDATE comments SET body=?1,digest=?2 WHERE id=?3",
+            rusqlite::params![
+                record.to_string(),
+                record["digest"].as_str().unwrap(),
+                record["comment_id"].as_str().unwrap()
+            ],
+        )
+        .unwrap();
+    }
+    db.execute_batch("CREATE TRIGGER comments_no_update BEFORE UPDATE ON comments BEGIN SELECT RAISE(ABORT,'Posted comments are immutable'); END; PRAGMA user_version=5;").unwrap();
+}
+
+#[test]
+fn v6_migration_freezes_geometry_keeps_threads_and_archives_original_records_once() {
+    let fixture = Fixture::new();
+    fixture.named("Coach");
+    let root = legacy_record(&fixture, "root", None, 5000000);
+    let reply = legacy_record(&fixture, "reply", Some("root"), 7000000);
+    let mut pending = fixture.draft("pending");
+    pending["parent_comment_id"] = json!("reply");
+    fixture.save(pending);
+    install_legacy(&fixture, &[root.clone(), reply.clone()]);
+    let migrated = fixture.boot();
+    for record in migrated["comments"].as_array().unwrap() {
+        assert_eq!(record["schema_version"], 2);
+        assert_eq!(record["anchor"], json!({"kind":"point","at_us":4999999}));
+        assert_eq!(
+            record["drawings"][0]["samples"],
+            json!([{"x":100000,"y":200000},{"x":800000,"y":700000}])
+        );
+        assert!(record["drawings"][0].get("color").is_none());
+        assert!(record["drawings"][0].get("visible_until_us").is_none());
+        let mut canonical = record.clone();
+        canonical.as_object_mut().unwrap().remove("digest");
+        assert_eq!(
+            record["digest"],
+            blake3::hash(&serde_json::to_vec(&canonical).unwrap())
+                .to_hex()
+                .to_string()
+        );
+    }
+    assert_eq!(
+        migrated["drafts"][0]["anchor"],
+        migrated["comments"][0]["anchor"]
+    );
+    assert!(migrated["settings"].get("pause_after_drawing").is_none());
+    assert_eq!(fixture.boot()["comments"], migrated["comments"]);
+    let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM review_v1_archive", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    for record in [root, reply] {
+        let (body, digest): (String, String) = db
+            .query_row(
+                "SELECT body,digest FROM review_v1_archive WHERE comment_id=?1",
+                [record["comment_id"].as_str().unwrap()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), record);
+        assert_eq!(digest, record["digest"].as_str().unwrap());
+    }
+    assert!(db
+        .execute("UPDATE comments SET body='changed'", [])
+        .is_err());
+    assert_eq!(
+        db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "ok"
+    );
+}
+
+#[test]
+fn failed_migration_rolls_back_records_archive_version_and_immutability_guard() {
+    let fixture = Fixture::new();
+    fixture.named("Coach");
+    let mut old = legacy_record(&fixture, "root", None, 5000000);
+    old["drawings"][0]["samples"] = json!([{"x":"corrupt","y":0,"t_us":0}]);
+    install_legacy(&fixture, &[old.clone()]);
+    failure(fixture.root(), json!({"command":"bootstrap"}));
+    let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        5
+    );
+    assert_eq!(
+        db.query_row("SELECT body FROM comments", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        old.to_string()
+    );
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM review_v1_archive", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert!(db
+        .execute("UPDATE comments SET body='changed'", [])
+        .is_err());
 }

@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Animated, Platform, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {GlassSurface} from './Glass';
 import {Avatar} from './Avatar';
 import {Button, TextField} from './components';
 import {easeOut, MotionPressable, useReducedMotion} from './motion';
@@ -49,6 +50,7 @@ export function SettingsPage({settings, profile, recording, error, busy, onProfi
   const visibleError = error || (tab === 'profile' ? profileError : '');
 
   return <Animated.View style={[s.page, {opacity: entrance}, !reduceMotion && {transform: [{scale: entrance.interpolate({inputRange: [0, 1], outputRange: [0.985, 1]})}]}]}>
+    <GlassSurface radius={28} />
     <View style={s.header}>
       <Button icon="close" quiet compact label="Close settings" autoFocus onPress={onClose} style={s.close} />
       <Text accessibilityRole="header" style={s.title}>Settings</Text>
@@ -79,11 +81,7 @@ export function SettingsPage({settings, profile, recording, error, busy, onProfi
         <View style={s.themeOptions}>
           {(['system', 'light', 'dark'] as const).map(choice => <AppearanceOption key={choice} choice={choice} selected={settings.theme === choice} disabled={busy} onPress={() => onTheme(choice)} />)}
         </View>
-        <View style={s.preference}>
-          <Text style={s.preferenceLabel}>Pause when drawing starts</Text>
-          <PreferenceToggle label="Pause when drawing starts" value={settings.pause_after_drawing} disabled={busy}
-            onChange={value => onChange({...settings, pause_after_drawing: value})} />
-        </View>
+
       </View>}
       {tab === 'shortcuts' && <View>
         <View style={s.searchRow}>
@@ -144,32 +142,6 @@ function AppearanceOption({choice, selected, disabled, onPress}: {choice: ThemeC
   </MotionPressable>;
 }
 
-function PreferenceToggle({label, value, disabled, onChange}: {label: string; value: boolean; disabled: boolean; onChange: (value: boolean) => void}) {
-  const {colors} = useTheme();
-  const reduceMotion = useReducedMotion();
-  const [focused, setFocused] = useState(false);
-  const offset = useRef(new Animated.Value(value ? 16 : 0)).current;
-  const opacity = useRef(new Animated.Value(1)).current;
-  const keyboard = useRef(false);
-  useEffect(() => {
-    offset.stopAnimation(); opacity.stopAnimation();
-    if (keyboard.current || reduceMotion) {
-      offset.setValue(value ? 16 : 0);
-      if (!keyboard.current) {
-        opacity.setValue(0.84);
-        Animated.timing(opacity, {toValue: 1, duration: 100, easing: easeOut, useNativeDriver: true}).start();
-      }
-    } else Animated.timing(offset, {toValue: value ? 16 : 0, duration: 140, easing: easeOut, useNativeDriver: true}).start();
-  }, [value, reduceMotion, offset, opacity]);
-  return <MotionPressable accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{checked: value, disabled}} focusable={!disabled}
-    disabled={disabled} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-    onPress={event => { keyboard.current = 'key' in event.nativeEvent; onChange(!value); }}
-    style={{height: 24, width: 40, borderRadius: 12, borderWidth: 1, borderColor: focused ? colors.text : value ? colors.selectedLine : colors.line,
-      backgroundColor: value ? colors.selectedLine : colors.button, justifyContent: 'center', opacity: disabled ? 0.5 : 1}}>
-    <Animated.View style={{width: 18, height: 18, borderRadius: 9, marginLeft: 2, backgroundColor: value ? colors.panel : colors.text,
-      opacity, transform: [{translateX: offset}]}} />
-  </MotionPressable>;
-}
 
 function AppearancePreview({dark}: {dark: boolean}) {
   const palette = dark ? {background: '#292c30', line: '#626971', stage: '#181b1e', card: '#42474e', accent: '#c0c8d0'}
@@ -178,12 +150,13 @@ function AppearancePreview({dark}: {dark: boolean}) {
     <View style={previewStyles.topBar}><View style={[previewStyles.brand, {backgroundColor: palette.accent}]} /><View style={[previewStyles.topAction, {backgroundColor: palette.line}]} /></View>
     <View style={previewStyles.workspace}>
       <View style={previewStyles.main}>
-        <View style={[previewStyles.stage, {backgroundColor: palette.stage}]}>
+        <View style={previewStyles.videoRow}>
           <View style={[previewStyles.tools, {backgroundColor: palette.card}]}>{[0, 1, 2].map(index => <View key={index} style={[previewStyles.tool, {backgroundColor: palette.line}]} />)}</View>
-          <View style={[previewStyles.comment, {backgroundColor: palette.card}]}>
-            <View style={[previewStyles.commentAvatar, {backgroundColor: palette.line}]} /><View style={[previewStyles.commentLine, {backgroundColor: palette.line}]} />
-          </View>
+          <View style={[previewStyles.stage, {backgroundColor: palette.stage}]} />
         </View>
+        <View style={previewStyles.comments}>{[0, 1].map(index => <View key={index} style={[previewStyles.comment, {backgroundColor: palette.card}]}>
+            <View style={[previewStyles.commentAvatar, {backgroundColor: palette.line}]} /><View style={[previewStyles.commentLine, {backgroundColor: palette.line}]} />
+          </View>)}</View>
         <View style={previewStyles.filmstrip}>{[0, 1, 2, 3, 4].map(index => <View key={index} style={[previewStyles.frame, {backgroundColor: palette.stage}]} />)}</View>
       </View>
     </View>
@@ -191,14 +164,14 @@ function AppearancePreview({dark}: {dark: boolean}) {
 }
 
 const createSettingsStyles = (c: Colors) => StyleSheet.create({
-  page: {width: 640, height: 520, maxWidth: '92%', maxHeight: '90%', alignSelf: 'center', paddingHorizontal: 26, paddingTop: 18, borderWidth: 1, borderColor: c.line, borderRadius: 18, backgroundColor: c.panel, overflow: 'hidden'},
+  page: {width: 640, height: 460, maxWidth: '92%', maxHeight: '90%', alignSelf: 'center', paddingHorizontal: 26, paddingTop: 18, borderRadius: 28},
   header: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22},
   title: {color: c.text, fontSize: 17, lineHeight: 23, letterSpacing: -0.35, fontWeight: '600'},
   close: {width: 30, height: 30, minHeight: 30, padding: 0},
-  navigation: {flexDirection: 'row', padding: 3, borderRadius: 10, backgroundColor: c.inset, gap: 2, marginBottom: 24},
-  tab: {flex: 1, minHeight: 33, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', borderRadius: 7, borderWidth: 1, borderColor: 'transparent'},
+  navigation: {flexDirection: 'row', padding: 3, borderRadius: 18, backgroundColor: c.glassInset, gap: 2, marginBottom: 24},
+  tab: {flex: 1, minHeight: 33, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', borderRadius: 15, borderWidth: 1, borderColor: 'transparent'},
   tabHover: {backgroundColor: c.inset},
-  tabSelected: {backgroundColor: c.panel, borderColor: c.separator},
+  tabSelected: {backgroundColor: c.glassSelected, borderColor: 'transparent'},
   tabLabel: {fontSize: 13, lineHeight: 19, fontWeight: '500', color: c.muted},
   tabLabelSelected: {color: c.text, fontWeight: '600'},
   scroll: {flex: 1},
@@ -207,7 +180,7 @@ const createSettingsStyles = (c: Colors) => StyleSheet.create({
   profilePanel: {width: '100%', maxWidth: 360, alignSelf: 'center'},
   identity: {alignItems: 'center', marginTop: 8, marginBottom: 26},
   fieldLabel: {fontSize: 13, lineHeight: 19, fontWeight: '500', color: c.text, marginBottom: 9},
-  input: {height: 42, minHeight: 42, paddingHorizontal: 12, paddingVertical: 0, borderWidth: 1, borderColor: c.line, borderRadius: 9, color: c.text, backgroundColor: c.input, fontSize: 14},
+  input: {height: 42, minHeight: 42, paddingHorizontal: 12, paddingVertical: 0, borderWidth: 1, borderColor: c.line, borderRadius: 9, color: c.text, backgroundColor: c.glassInset, fontSize: 14},
   inputFocused: {borderColor: c.selectedLine},
   profileActions: {flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 20},
   themeOptions: {flexDirection: 'row', gap: 12},
@@ -223,8 +196,6 @@ const createSettingsStyles = (c: Colors) => StyleSheet.create({
   radio: {width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: c.line, alignItems: 'center', justifyContent: 'center'},
   radioSelected: {borderColor: c.selectedLine, backgroundColor: c.selectedLine},
   radioDot: {width: 6, height: 6, borderRadius: 3, backgroundColor: c.panel},
-  preference: {flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 28, paddingVertical: 21, borderTopWidth: 1, borderTopColor: c.separator},
-  preferenceLabel: {flex: 1, fontSize: 14, lineHeight: 21, color: c.text},
   searchRow: {flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 8},
   search: {flex: 1},
   shortcutGroup: {marginTop: 23},
@@ -244,10 +215,12 @@ const previewStyles = StyleSheet.create({
   topAction: {width: 10, height: 4, borderRadius: 2},
   workspace: {flex: 1, flexDirection: 'row', gap: 5},
   main: {flex: 1, gap: 5},
-  stage: {flex: 1, borderRadius: 3, padding: 6, justifyContent: 'center', alignItems: 'flex-end'},
-  tools: {position: 'absolute', left: 5, top: 7, bottom: 7, width: 12, borderRadius: 6, alignItems: 'center', justifyContent: 'space-evenly'},
+  videoRow: {flex: 1, flexDirection: 'row', gap: 5},
+  stage: {flex: 1, borderRadius: 3},
+  tools: {width: 10, borderRadius: 5, alignItems: 'center', justifyContent: 'space-evenly'},
   tool: {height: 4, width: 4, borderRadius: 1},
-  comment: {height: 23, width: '68%', borderRadius: 4, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, gap: 4},
+  comments: {height: 15, flexDirection: 'row', gap: 4},
+  comment: {flex: 1, borderRadius: 4, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, gap: 4},
   commentAvatar: {width: 8, height: 8, borderRadius: 4},
   commentLine: {height: 3, borderRadius: 2, flex: 1},
   filmstrip: {flexDirection: 'row', height: 13, gap: 2},

@@ -72,7 +72,7 @@ async function collectNpm() {
     fail('package-lock.json must contain npm lockfile v2/v3 packages metadata. Regenerate it with the project npm version and run npm ci.');
   for (const [locator, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b))) {
     // Lucide is a build-time dependency whose generated icons ship in the app.
-    if (!locator || (entry.dev && locator !== 'node_modules/lucide-static')) continue;
+    if (!locator || entry.dev) continue;
     const directory = path.resolve(repository, locator);
     const relative = path.relative(repository, directory);
     if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) fail(`npm lockfile package path escapes the repository: ${locator}`);

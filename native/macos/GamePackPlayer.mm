@@ -1,4 +1,5 @@
 #import <React/RCTViewManager.h>
+#import <React/RCTView.h>
 #import <React/RCTComponent.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
@@ -6,25 +7,84 @@
 @interface GPPlayer : NSView
 @property(nonatomic,copy) NSString *source;
 @property(nonatomic) BOOL paused;
-@property(nonatomic) BOOL pauseOnDrawing;
 @property(nonatomic) float rate;
 @property(nonatomic) double zoom;
 @property(nonatomic) double seekUs;
 @property(nonatomic) NSInteger seekToken;
-@property(nonatomic) NSInteger captureToken;
+@property(nonatomic) NSInteger flushToken;
 @property(nonatomic) NSInteger stepToken;
 @property(nonatomic) NSInteger stepFrames;
 @property(nonatomic) double reviewEndUs;
 @property(nonatomic,copy) NSString *sceneJson;
 @property(nonatomic,copy) NSString *tool;
-@property(nonatomic,copy) NSString *strokeColor;
 @property(nonatomic,copy) RCTDirectEventBlock onTime;
 @property(nonatomic,copy) RCTDirectEventBlock onDrawing;
 @property(nonatomic,copy) RCTDirectEventBlock onDrawingStart;
 @property(nonatomic,copy) RCTDirectEventBlock onPointer;
 @property(nonatomic,copy) RCTDirectEventBlock onZoom;
-@property(nonatomic,copy) RCTDirectEventBlock onCaptureFinished;
+@property(nonatomic,copy) RCTDirectEventBlock onSceneReady;
+@property(nonatomic,copy) RCTDirectEventBlock onActivity;
+- (void)pointerActivity;
+@property(nonatomic,copy) RCTDirectEventBlock onStrokeFlushFinished;
 - (void)zoomByFactor:(double)factor;
+@end
+
+@interface GPGlass : RCTView
+@property(nonatomic) BOOL dark;
+@property(nonatomic) BOOL desktop;
+@property(nonatomic) double cornerRadius;
+@end
+@implementation GPGlass { NSView *_materialView; }
+- (instancetype)initWithFrame:(NSRect)frame {
+  if ((self = [super initWithFrame:frame])) {
+    if (@available(macOS 26.0, *)) {
+      NSGlassEffectView *glass = [[NSGlassEffectView alloc] initWithFrame:self.bounds];
+      glass.style = NSGlassEffectViewStyleRegular;
+      _materialView = glass;
+    } else {
+      NSVisualEffectView *frost = [[NSVisualEffectView alloc] initWithFrame:self.bounds];
+      frost.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+      frost.state = NSVisualEffectStateActive;
+      frost.material = NSVisualEffectMaterialHUDWindow;
+      _materialView = frost;
+    }
+    _materialView.wantsLayer = YES;
+    _materialView.layer.masksToBounds = YES;
+    _materialView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [self addSubview:_materialView];
+  }
+  return self;
+}
+- (void)setDesktop:(BOOL)desktop {
+  if (_desktop == desktop) return;
+  _desktop = desktop;
+  if (!desktop) return;
+  [_materialView removeFromSuperview];
+  NSVisualEffectView *frost = [[NSVisualEffectView alloc] initWithFrame:self.bounds];
+  frost.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+  frost.state = NSVisualEffectStateFollowsWindowActiveState;
+  frost.material = NSVisualEffectMaterialUnderWindowBackground;
+  frost.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  _materialView = frost; [self addSubview:frost];
+  [self setDark:_dark];
+}
+- (void)setCornerRadius:(double)cornerRadius {
+  _cornerRadius = cornerRadius;
+  if (@available(macOS 26.0, *)) { if ([_materialView isKindOfClass:NSGlassEffectView.class]) ((NSGlassEffectView *)_materialView).cornerRadius = cornerRadius; }
+  else _materialView.layer.cornerRadius = cornerRadius;
+}
+- (void)setDark:(BOOL)dark {
+  _dark = dark;
+  _materialView.appearance = [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+}
+@end
+@interface GamePackGlassManager : RCTViewManager @end
+@implementation GamePackGlassManager
+RCT_EXPORT_MODULE(GamePackGlass)
+- (NSView *)view { return [GPGlass new]; }
+RCT_EXPORT_VIEW_PROPERTY(dark, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(desktop, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 @end
 @interface GPOverlay : NSView
 @property(nonatomic,weak) GPPlayer *owner;
@@ -37,8 +97,6 @@
   NSDictionary *_scene;
   NSMutableArray *_samples;
   NSString *_drawingTool;
-  NSString *_drawingColor;
-  int64_t _drawingStart;
   NSTimeInterval _lastEvent;
   BOOL _seeking;
   BOOL _finished;
@@ -46,25 +104,35 @@
   NSInteger _seekGeneration;
   double _duration;
   CGSize _videoSize;
-  NSInteger _pendingCaptureToken;
+  NSInteger _pendingStrokeFlushToken;
   NSInteger _pendingStepFrames;
-  NSDictionary *_pendingCaptureDrawing;
+  NSDictionary *_pendingStrokeFlushDrawing;
+  NSMutableDictionary<NSString *, NSDictionary *> *_pendingDrawings;
+  NSString *_readyKey;
+  NSTimeInterval _lastActivity;
+  id _activityMonitor;
 }
 - (BOOL)isFlipped { return YES; }
 - (instancetype)initWithFrame:(NSRect)frame {
   if ((self = [super initWithFrame:frame])) {
     self.wantsLayer = YES; self.layer.backgroundColor = NSColor.blackColor.CGColor; self.layer.masksToBounds = YES;
-    _paused = YES; _rate = 1; _zoom = 1; _reviewEndUs = -1; _tool = @"pointer"; _strokeColor = @"#FFCC66";
+    _paused = YES; _rate = 1; _zoom = 1; _reviewEndUs = -1; _tool = @"pointer";
+    _pendingDrawings = [NSMutableDictionary new];
     _player = [AVPlayer new]; _player.actionAtItemEnd = AVPlayerActionAtItemEndPause;
     _videoLayer = [AVPlayerLayer playerLayerWithPlayer:_player]; _videoLayer.videoGravity = AVLayerVideoGravityResizeAspect;
     [self.layer addSublayer:_videoLayer];
     _overlay = [[GPOverlay alloc] initWithFrame:self.bounds]; _overlay.owner = self; _overlay.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable; [self addSubview:_overlay];
     __weak GPPlayer *weakSelf = self;
+    _activityMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown handler:^NSEvent *(NSEvent *event) {
+      GPPlayer *self = weakSelf;
+      if (self && event.window == self.window) [self pointerActivity];
+      return event;
+    }];
     _timeObserver = [_player addPeriodicTimeObserverForInterval:CMTimeMake(1, 60) queue:dispatch_get_main_queue() usingBlock:^(CMTime time) { [weakSelf tick]; }];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(ended:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
   } return self;
 }
-- (void)dealloc { if (_timeObserver) [_player removeTimeObserver:_timeObserver]; [[NSNotificationCenter defaultCenter] removeObserver:self]; }
+- (void)dealloc { if (_activityMonitor) [NSEvent removeMonitor:_activityMonitor]; if (_timeObserver) [_player removeTimeObserver:_timeObserver]; [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 - (void)layout { [super layout]; [CATransaction begin]; [CATransaction setDisableActions:YES]; _videoLayer.frame = [self contentRect]; _overlay.frame = self.bounds; [CATransaction commit]; [_overlay setNeedsDisplay:YES]; }
 - (void)setSource:(NSString *)source {
   if ([_source isEqualToString:source]) return; _source = [source copy]; _seekGeneration++; _loadGeneration++; NSInteger generation = _loadGeneration;
@@ -87,8 +155,8 @@
     });
   }];
 }
-- (void)setPaused:(BOOL)paused { _paused = paused; _finished = NO; if (paused || _pendingCaptureToken) [_player pause]; else if (!_seeking) _player.rate = _rate; [_overlay setNeedsDisplay:YES]; }
-- (void)setRate:(float)rate { _rate = (rate < 0 ? fmax(-4, rate) : fmax(0.25, fmin(4.0, rate))); if (!_paused && !_seeking && !_pendingCaptureToken) _player.rate = _rate; }
+- (void)setPaused:(BOOL)paused { _paused = paused; _finished = NO; if (paused || _pendingStrokeFlushToken) [_player pause]; else if (!_seeking) _player.rate = _rate; [_overlay setNeedsDisplay:YES]; if (!_seeking) [self emitTime:NO]; }
+- (void)setRate:(float)rate { _rate = (rate < 0 ? fmax(-4, rate) : fmax(0.25, fmin(4.0, rate))); if (!_paused && !_seeking && !_pendingStrokeFlushToken) _player.rate = _rate; }
 - (void)setZoom:(double)zoom {
   double value = isfinite(zoom) ? fmin(4, fmax(1, zoom)) : 1;
   if (fabs(value - _zoom) < 0.00001) return;
@@ -102,13 +170,14 @@
 - (void)setSeekUs:(double)seekUs { _seekUs = seekUs; }
 - (void)setSeekToken:(NSInteger)seekToken { _seekToken = seekToken; }
 - (void)didSetProps:(NSArray<NSString *> *)changedProps {
-  if ([changedProps containsObject:@"captureToken"] && _captureToken > 0) [self finishCapture];
+  if ([changedProps containsObject:@"flushToken"] && _flushToken > 0) [self finishStrokeFlush];
   if ([changedProps containsObject:@"sceneJson"]) {
     NSDictionary *next = _sceneJson.length ? [NSJSONSerialization JSONObjectWithData:[_sceneJson dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
     NSDictionary *anchor = _scene[@"anchor"], *nextAnchor = next[@"anchor"];
-    NSString *key = [anchor[@"kind"] isEqual:@"interval"] ? @"start_us" : @"at_us";
-    BOOL sameScene = _scene && next && [(_scene[@"id"] ?: @"") isEqual:(next[@"id"] ?: @"")] && [anchor[@"kind"] isEqual:nextAnchor[@"kind"]] && [anchor[key] isEqual:nextAnchor[key]];
+    BOOL sameScene = _scene && next && [(_scene[@"id"] ?: @"") isEqual:(next[@"id"] ?: @"")] && [anchor[@"kind"] isEqual:nextAnchor[@"kind"]] && [anchor[@"at_us"] isEqual:nextAnchor[@"at_us"]];
     if (!sameScene) [self finishStroke];
+    if (!sameScene) [_pendingDrawings removeAllObjects];
+    for (NSDictionary *drawing in next[@"drawings"]) [_pendingDrawings removeObjectForKey:drawing[@"id"]];
     _scene = next; [_overlay setNeedsDisplay:YES];
   }
   if ([changedProps containsObject:@"tool"]) [self finishStroke];
@@ -116,7 +185,7 @@
   if ([changedProps containsObject:@"stepToken"] && _stepToken > 0) {
     _pendingStepFrames += _stepFrames; [self applyFrameSteps];
   }
-  [self emitCaptureIfReady];
+  [self emitStrokeFlushIfReady];
 }
 - (void)applyFrameSteps {
   if (_seeking || !_pendingStepFrames || !_player.currentItem) return;
@@ -128,7 +197,7 @@
   _seeking = YES; _finished = NO; NSInteger generation = ++_seekGeneration; [_player pause];
   __weak GPPlayer *weakSelf = self;
   [_player seekToTime:CMTimeMake((int64_t)fmax(0, _seekUs), 1000000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL complete) {
-    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; if (!self.paused && complete && !self->_pendingCaptureToken) self->_player.rate = self.rate; [self applyFrameSteps]; [self emitCaptureIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:NO]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; if (!self.paused && complete && !self->_pendingStrokeFlushToken) self->_player.rate = self.rate; [self applyFrameSteps]; [self emitStrokeFlushIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:NO]; });
   }];
 }
 - (void)setSceneJson:(NSString *)sceneJson { _sceneJson = [sceneJson copy]; }
@@ -144,7 +213,7 @@
 - (void)ended:(NSNotification *)notification { if (!_seeking && notification.object == _player.currentItem) { [self finishStroke]; _finished = YES; [self emitTime:YES]; } }
 - (void)emitTime:(BOOL)ended {
   _lastEvent = NSDate.timeIntervalSinceReferenceDate;
-  if (self.onTime) self.onTime(@{@"time_us":@([self timeUs]), @"duration_us":@(isfinite(_duration) ? llround(_duration*1000000):0), @"width":@(_videoSize.width), @"height":@(_videoSize.height), @"playing":@(_player.rate != 0), @"ended":@(ended)});
+  if (self.onTime) self.onTime(@{@"time_us":@([self timeUs]), @"duration_us":@(isfinite(_duration) ? llround(_duration*1000000):0), @"width":@(_videoSize.width), @"height":@(_videoSize.height), @"seekToken":@(_seekToken), @"playing":@(_player.rate != 0), @"ended":@(ended)});
 }
 - (NSRect)contentRect {
   CGSize size = _videoSize; if (size.width <= 0 || size.height <= 0) return self.bounds;
@@ -152,17 +221,10 @@
   CGSize fitted = CGSizeMake(size.width*scale,size.height*scale);
   return NSMakeRect((self.bounds.size.width-fitted.width)/2,(self.bounds.size.height-fitted.height)/2,fitted.width,fitted.height);
 }
-- (int64_t)offsetUs {
-  NSDictionary *anchor = _scene[@"anchor"];
-  if (![anchor[@"kind"] isEqual:@"interval"]) return 0;
-  return MAX(0,[self timeUs]-[anchor[@"start_us"] longLongValue]);
-}
 - (NSDictionary *)sample:(NSEvent *)event {
   NSRect rect = [self contentRect]; NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
   double x = fmin(1,fmax(0,(p.x-rect.origin.x)/fmax(1,rect.size.width))), y = fmin(1,fmax(0,(p.y-rect.origin.y)/fmax(1,rect.size.height)));
-  int64_t time = [self offsetUs]; if (_samples.count) time = MAX(time, [_samples.lastObject[@"t_us"] longLongValue]);
-  NSDictionary *anchor = _scene[@"anchor"]; if ([anchor[@"kind"] isEqual:@"interval"]) time = MIN(time, MAX(0,[anchor[@"end_us"] longLongValue]-[anchor[@"start_us"] longLongValue]-1));
-  return @{@"x":@(llround(x*1000000)),@"y":@(llround(y*1000000)),@"t_us":@(time)};
+  return @{@"x":@(llround(x*1000000)),@"y":@(llround(y*1000000))};
 }
 - (void)beginStroke:(NSEvent *)event {
   if ([_tool isEqual:@"pointer"] || [_tool isEqual:@"laser"]) {
@@ -172,25 +234,23 @@
   }
   if ([_tool isEqual:@"none"] || !_tool.length || !_scene || _seeking) return;
   NSPoint p = [self convertPoint:event.locationInWindow fromView:nil]; if (!NSPointInRect(p,[self contentRect])) return;
-  NSDictionary *anchor = _scene[@"anchor"]; if ([anchor[@"kind"] isEqual:@"interval"] && ([self timeUs] < [anchor[@"start_us"] longLongValue] || [self timeUs] >= [anchor[@"end_us"] longLongValue])) return;
-  // Freeze the native frame before the first sample, without waiting for JS.
-  if (_pauseOnDrawing) { [_player pause]; _paused = YES; }
-  _samples = [NSMutableArray new]; _drawingTool = [_tool copy]; _drawingColor = [_strokeColor copy];
-  [_samples addObject:[self sample:event]]; _drawingStart = [_samples.firstObject[@"t_us"] longLongValue]; [_overlay setNeedsDisplay:YES];
+  if (!_paused || llabs([self timeUs]-[_scene[@"anchor"][@"at_us"] longLongValue]) > 2000) return;
+  [_player pause]; _paused = YES;
+  _samples = [NSMutableArray new]; _drawingTool = [_tool copy];
+  [_samples addObject:[self sample:event]]; [_overlay setNeedsDisplay:YES];
   if (self.onDrawingStart) self.onDrawingStart(@{@"time_us":@([self timeUs]), @"paused":@(_paused)});
 }
 - (void)continueStroke:(NSEvent *)event { if (_samples) { if (_samples.count < 50000) [_samples addObject:[self sample:event]]; [_overlay setNeedsDisplay:YES]; } }
 - (NSDictionary *)currentDrawing {
-  NSDictionary *anchor = _scene[@"anchor"];
-  int64_t until = [anchor[@"kind"] isEqual:@"interval"] ? [anchor[@"end_us"] longLongValue]-[anchor[@"start_us"] longLongValue] : 0;
   NSArray *points = _samples;
   if (![_drawingTool isEqual:@"pen"] && points.count > 1) points = @[points.firstObject,points.lastObject];
-  return @{@"id":NSUUID.UUID.UUIDString.lowercaseString,@"tool":_drawingTool ?: @"pen",@"color":_drawingColor ?: @"#FFCC66",@"width":@3500,@"visible_from_us":@(_drawingStart),@"visible_until_us":@(until),@"samples":points ?: @[]};
+  return @{@"id":NSUUID.UUID.UUIDString.lowercaseString,@"tool":_drawingTool ?: @"pen",@"width":@3500,@"samples":points ?: @[]};
 }
 - (NSDictionary *)takeStroke {
   if (!_samples) return nil;
   if (_samples.count == 1) [_samples addObject:_samples.firstObject];
   NSDictionary *drawing = [self currentDrawing]; _samples = nil;
+  _pendingDrawings[drawing[@"id"]] = drawing;
   [_overlay setNeedsDisplay:YES];
   return drawing;
 }
@@ -199,34 +259,29 @@
   if (!drawing) return;
   if (self.onDrawing) { NSData *json = [NSJSONSerialization dataWithJSONObject:drawing options:0 error:nil]; self.onDrawing(@{@"drawingJson":[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding]}); }
 }
-- (void)finishCapture {
+- (void)finishStrokeFlush {
   [_player pause]; _paused = YES;
-  _pendingCaptureToken = _captureToken;
-  _pendingCaptureDrawing = [self takeStroke];
+  _pendingStrokeFlushToken = _flushToken;
+  _pendingStrokeFlushDrawing = [self takeStroke];
 }
-- (void)emitCaptureIfReady {
-  if (!_pendingCaptureToken || _seeking) return;
+- (void)emitStrokeFlushIfReady {
+  if (!_pendingStrokeFlushToken || _seeking) return;
   [_player pause]; _paused = YES;
   int64_t time = [self timeUs];
-  NSDictionary *drawing = _pendingCaptureDrawing;
-  NSMutableDictionary *event = [@{@"captureToken":@(_pendingCaptureToken), @"time_us":@(time)} mutableCopy];
-  _pendingCaptureToken = 0; _pendingCaptureDrawing = nil;
+  NSDictionary *drawing = _pendingStrokeFlushDrawing;
+  NSMutableDictionary *event = [@{@"flushToken":@(_pendingStrokeFlushToken), @"time_us":@(time)} mutableCopy];
+  _pendingStrokeFlushToken = 0; _pendingStrokeFlushDrawing = nil;
   if (drawing) {
     NSData *json = [NSJSONSerialization dataWithJSONObject:drawing options:0 error:nil];
     event[@"drawingJson"] = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
   }
-  if (self.onCaptureFinished) self.onCaptureFinished(event);
+  if (self.onStrokeFlushFinished) self.onStrokeFlushFinished(event);
   [self emitTime:NO];
 }
-- (NSColor *)color:(NSString *)hex { unsigned int value=0; if (hex.length==7) [[NSScanner scannerWithString:[hex substringFromIndex:1]] scanHexInt:&value]; return [NSColor colorWithRed:((value>>16)&255)/255.0 green:((value>>8)&255)/255.0 blue:(value&255)/255.0 alpha:1]; }
 - (NSPoint)point:(NSDictionary *)sample rect:(NSRect)rect { return NSMakePoint(rect.origin.x+[sample[@"x"] doubleValue]/1000000*rect.size.width,rect.origin.y+[sample[@"y"] doubleValue]/1000000*rect.size.height); }
-- (void)drawDrawing:(NSDictionary *)drawing rect:(NSRect)rect offset:(int64_t)offset live:(BOOL)live {
-  NSArray *samples=drawing[@"samples"]; if (!samples.count) return;
-  BOOL interval=[_scene[@"anchor"][@"kind"] isEqual:@"interval"];
-  if (!live && interval && (offset<[drawing[@"visible_from_us"] longLongValue] || offset>=[drawing[@"visible_until_us"] longLongValue])) return;
-  NSString *tool=drawing[@"tool"]; NSMutableArray *visible=[NSMutableArray new];
-  for (NSDictionary *sample in samples) { if (live || !interval || ![tool isEqual:@"pen"] || [sample[@"t_us"] longLongValue]<=offset) [visible addObject:sample]; }
-  if (!visible.count) return;
+- (void)drawDrawing:(NSDictionary *)drawing rect:(NSRect)rect {
+  NSArray *visible=drawing[@"samples"]; if (!visible.count) return;
+  NSString *tool=drawing[@"tool"];
   CGFloat width=fmax(1.5,[drawing[@"width"] doubleValue]/1000000*rect.size.width);
   NSBezierPath *path=[NSBezierPath bezierPath]; path.lineWidth=width; path.lineCapStyle=NSLineCapStyleRound; path.lineJoinStyle=NSLineJoinStyleRound;
   NSPoint first=[self point:visible.firstObject rect:rect],last=[self point:visible.lastObject rect:rect];
@@ -234,22 +289,42 @@
   else { [path moveToPoint:first]; for (NSDictionary *sample in visible) [path lineToPoint:[self point:sample rect:rect]];
     if ([tool isEqual:@"arrow"]) { CGFloat angle=atan2(last.y-first.y,last.x-first.x),head=MAX(12,width*4); [path moveToPoint:NSMakePoint(last.x-head*cos(angle-0.48),last.y-head*sin(angle-0.48))]; [path lineToPoint:last]; [path lineToPoint:NSMakePoint(last.x-head*cos(angle+0.48),last.y-head*sin(angle+0.48))]; }
   }
-  [[NSColor colorWithWhite:0 alpha:0.5] setStroke]; path.lineWidth=width+2; [path stroke]; [[self color:drawing[@"color"]] setStroke]; path.lineWidth=width; [path stroke];
+  CGFloat opacity=drawing[@"opacity"] ? [drawing[@"opacity"] doubleValue] : 1;
+  [[NSColor colorWithWhite:0 alpha:0.5*opacity] setStroke]; path.lineWidth=width+2; [path stroke]; [[NSColor colorWithRed:121.0/255 green:191.0/255 blue:253.0/255 alpha:opacity] setStroke]; path.lineWidth=width; [path stroke];
+}
+- (void)pointerActivity {
+  NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
+  if (self.onActivity && now - _lastActivity > 0.12) { _lastActivity = now; self.onActivity(@{}); }
 }
 - (void)drawOverlay {
   NSRect rect=[self contentRect]; [NSGraphicsContext saveGraphicsState]; NSRectClip(rect);
-  NSDictionary *anchor=_scene[@"anchor"]; int64_t time=[self timeUs],offset=[self offsetUs];
-  BOOL visible=[anchor[@"kind"] isEqual:@"interval"] ? (time>=[anchor[@"start_us"] longLongValue] && time<[anchor[@"end_us"] longLongValue]) : (llabs(time-[anchor[@"at_us"] longLongValue]) <= 2000);
-  if (visible) for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect offset:offset live:NO];
-  if (_samples) [self drawDrawing:[self currentDrawing] rect:rect offset:offset live:YES];
+  BOOL visible=_paused && !_seeking && llabs([self timeUs]-[_scene[@"anchor"][@"at_us"] longLongValue]) <= 2000;
+  if (visible && _scene) {
+    for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect];
+    for (NSDictionary *drawing in _pendingDrawings.allValues) [self drawDrawing:drawing rect:rect];
+    NSString *key = [NSString stringWithFormat:@"%@:%lu:%ld", _scene[@"id"], (unsigned long)[_scene[@"drawings"] count], (long)_seekToken];
+    if (![_readyKey isEqual:key]) {
+      _readyKey = key;
+      dispatch_async(dispatch_get_main_queue(), ^{ if (self.onSceneReady) self.onSceneReady(@{@"key":key}); });
+    }
+  } else _readyKey = nil;
+  if (_samples) [self drawDrawing:[self currentDrawing] rect:rect];
   [NSGraphicsContext restoreGraphicsState];
 }
 @end
 @implementation GPOverlay {
   BOOL _pointerDown;
+  NSTrackingArea *_tracking;
 }
 - (BOOL)isFlipped { return YES; }
 - (BOOL)isOpaque { return NO; }
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  if (_tracking) [self removeTrackingArea:_tracking];
+  _tracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseMoved | NSTrackingActiveInActiveApp | NSTrackingInVisibleRect owner:self userInfo:nil];
+  [self addTrackingArea:_tracking];
+}
+- (void)mouseMoved:(NSEvent *)event { [self.owner pointerActivity]; }
 - (void)viewDidChangeEffectiveAppearance {
   [super viewDidChangeEffectiveAppearance];
   // AppKit invalidates the transparent backing layer when appearance changes.
@@ -294,22 +369,22 @@ RCT_EXPORT_MODULE(GamePackPlayer)
 - (NSView *)view { return [GPPlayer new]; }
 RCT_EXPORT_VIEW_PROPERTY(source, NSString)
 RCT_EXPORT_VIEW_PROPERTY(paused, BOOL)
-RCT_EXPORT_VIEW_PROPERTY(pauseOnDrawing, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(rate, float)
 RCT_EXPORT_VIEW_PROPERTY(zoom, double)
 RCT_EXPORT_VIEW_PROPERTY(seekUs, double)
 RCT_EXPORT_VIEW_PROPERTY(seekToken, NSInteger)
-RCT_EXPORT_VIEW_PROPERTY(captureToken, NSInteger)
+RCT_EXPORT_VIEW_PROPERTY(flushToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(stepToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(stepFrames, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(reviewEndUs, double)
 RCT_EXPORT_VIEW_PROPERTY(sceneJson, NSString)
 RCT_EXPORT_VIEW_PROPERTY(tool, NSString)
-RCT_EXPORT_VIEW_PROPERTY(strokeColor, NSString)
 RCT_EXPORT_VIEW_PROPERTY(onTime, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawing, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawingStart, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onPointer, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onZoom, RCTDirectEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onCaptureFinished, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onSceneReady, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onActivity, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onStrokeFlushFinished, RCTDirectEventBlock)
 @end

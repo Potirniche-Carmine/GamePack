@@ -2,9 +2,9 @@ import React, {useEffect, useRef, useState, type RefObject} from 'react';
 import {findNodeHandle, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Avatar} from './Avatar';
 import {Button, TextField} from './components';
-import {DragHandle} from './SpatialCard';
 import {useTheme} from './theme';
 import {measureCommentInput} from './native';
+import {canPostDraft} from './drafts';
 import type {Draft} from './types';
 
 export function CommentComposer({draft, name, input, disabled, saving, failed, onText, onFocus, onHide, onDiscard, onRetry, onPost}: {
@@ -24,22 +24,22 @@ export function CommentComposer({draft, name, input, disabled, saving, failed, o
     const frame = requestAnimationFrame(measure);
     return () => { cancelAnimationFrame(frame); measurement.current++; };
   }, [draft.text]);
-  return <View style={[styles.composer, {backgroundColor: colors.panel}]}>
+  return <View style={[styles.composer, {backgroundColor: 'transparent'}]}>
     <View style={styles.header}>
-      <DragHandle style={styles.identity}><Avatar name={name} size={24} /><Text numberOfLines={1} style={[styles.author, {color: colors.muted}]}>{name}</Text></DragHandle>
+      <View style={styles.identity}><Avatar name={name} size={24} /><Text numberOfLines={1} style={[styles.author, {color: colors.text}]}>{name}</Text></View>
       <Button quiet compact icon="close" label="Hide comment" disabled={disabled} onPress={onHide} />
     </View>
     <View style={[styles.textArea, nativeHeight !== undefined && {height: nativeHeight}]}>
       <Text accessible={false} pointerEvents="none" style={styles.measure}>{`${draft.text} `}</Text>
-      <TextField ref={input} accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Add a reply…' : 'Add a comment…'}
+      <TextField ref={input} autoFocus accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Add a reply…' : 'Add a comment…'}
         onLayout={measure}
-        multiline editable={!disabled} style={[styles.field, {backgroundColor: colors.panel}]} inputStyle={styles.editor}
+        multiline editable={!disabled} style={[styles.field, {backgroundColor: 'transparent'}]} inputStyle={styles.editor}
         value={draft.text} onFocus={onFocus} onChangeText={onText} maxLength={16000} />
     </View>
     <View style={styles.footer}>
       <Button quiet compact icon="trash" label="Discard comment" disabled={disabled} onPress={onDiscard} />
       {failed && <Button compact disabled={disabled} onPress={onRetry}>Retry</Button>}
-      <View style={{flex: 1}} /><Button primary compact shortcut="submit" disabled={disabled || (!draft.text.trim() && !draft.drawings.length)} onPress={onPost}>{saving ? 'Saving…' : 'Post'}</Button>
+      <View style={{flex: 1}} /><Button primary compact shortcut="submit" disabled={disabled || !canPostDraft(draft)} onPress={onPost}>{saving ? 'Saving…' : 'Post'}</Button>
     </View>
   </View>;
 }

@@ -1,8 +1,8 @@
 # Local schema and canonical comments
 
-`local-v1.sql` is the Rust-owned SQLite base schema. Additive migrations retain existing records: v2 adds theme settings, v3 adds preferences, v4 adds project folders and video placement, and v5 adds local comment positions. Opening a library upgrades it to `PRAGMA user_version=5`. Older binaries reject this newer schema.
+`local-v1.sql` is the Rust-owned SQLite base schema. Additive migrations retain existing records: v2 adds theme settings, v3 adds preferences, v4 adds project folders and video placement, and v5 adds local comment positions. Version 6 converts all drawings to static frame reviews. Opening a library upgrades it to `PRAGMA user_version=6`. Older binaries reject this newer schema.
 
-Bootstrap includes `settings: {theme: 'system' | 'light' | 'dark'}`. `set_theme {theme}` persists and returns these settings. Preferences belong to the chosen root's database.
+Bootstrap includes `settings: {theme: 'system' | 'light' | 'dark', keybindings: Record<string,string|null>}`. `set_theme {theme}` persists and returns these settings. Preferences belong to the chosen root's database.
 It is local application storage, not an exchange format. ZIP import/export is not
 implemented. SQLite uses WAL, foreign keys, a ten-second busy timeout, and FULL
 synchronous writes. Posting acquires an immediate write transaction, validates the
@@ -36,7 +36,7 @@ microseconds; creation fields use Unix epoch time. Metadata may initially be zer
 Bounds against known duration are checked on save and again on post. Metadata
 updates cannot invalidate a posted anchor in any membership sharing the media.
 
-Canonical comment digest v1 is BLAKE3 of compact UTF-8 JSON representing the
+Canonical comment digest v2 is BLAKE3 of compact UTF-8 JSON representing the
 complete stored Comment with its `digest` member omitted. Returned comments may also contain a local `position`; omit it when verifying the digest. Object keys are sorted
 lexicographically at every depth; array order is preserved. Integer values use
 unquoted decimal JSON numbers. Strings use serde_json's JSON escaping without
@@ -45,22 +45,17 @@ absent. No trailing newline is included. Scope, IDs, profile snapshot, creation
 time, anchor, text, drawings, and schema version are covered. Paths and UI state
 are absent. The digest detects changes; it does not authenticate a person.
 
-Drawing evaluation uses source time with no interpolation. Point scenes show all
-samples only at their exact anchor; the UI clears them on ordinary playback.
-Interval scenes use `[start_us,end_us)`. A drawing uses
-`[visible_from_us,visible_until_us)` relative to the anchor. Pen samples appear
-when `t_us <= offset`; equal-time samples appear together. Arrows and ellipses
-appear completely at `visible_from_us`. Array order is layer order. Seeking
-reconstructs the same scene independently of prior playback.
+Drawing evaluation returns completed geometry only at `{kind:"point",at_us}`. Samples contain only `x` and `y`; drawings have an ID, tool, width, and samples. There are no persisted colors or sample clocks. The app uses one blue ink. Native views render only when paused within 2 ms of the anchor, to accommodate clock rounding; this is not a playback visibility window.
+
+The v6 migration maps old interval anchors to `end_us - 1`, strips color and timing fields, aligns replies to their root frame, and recomputes schema-2 digests. `review_v1_archive` retains the original posted bodies/digests for recovery and cascades with comment removal. It is never read by the renderer or normal request handling. All conversion work and immutability-trigger changes happen in one transaction, rolled back on failure. The drawing pause preference is removed. Runtime deserialization rejects old interval, color, and sample-time fields instead of converting them.
 
 Validation limits: request 8 MiB, text 65,536 UTF-8 bytes, 2,048 drawings, 100,000
 total samples per draft, 128 ancestors, 512 bytes per display name/project title,
 128 ASCII characters per local ID. Times and byte counts must fit the JavaScript
 safe integer range. Coordinates and widths use the inclusive range 0–1,000,000.
 Arrow and ellipse geometry has exactly two samples. Drawing IDs are unique within
-a comment. Samples are nondecreasing and lie inside the drawing's visibility
-window; all point sample times and visibility fields are zero. Unknown fields,
-duplicate JSON keys at any depth, fractional integer fields, invalid tools/colors,
+a comment. Replies must use their parent's frame. Unknown fields,
+duplicate JSON keys at any depth, fractional integer fields, invalid tools,
 invalid references, and control characters in labels/text are rejected. Text
 permits newline, carriage return, and tab. Blank drafts are allowed; posts require
 text or a drawing and a nonempty profile name. Profile names are trimmed when set;

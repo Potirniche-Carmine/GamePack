@@ -1,6 +1,7 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+#import <React/RCTRootView.h>
 #import <ReactAppDependencyProvider/RCTAppDependencyProvider.h>
 
 @implementation AppDelegate
@@ -20,11 +21,17 @@
 {
   NSView *root = [self.rootViewFactory viewWithModuleName:self.moduleName initialProperties:self.initialProps launchOptions:launchOptions];
   root.frame = NSMakeRect(0, 0, 1400, 840);
+  root.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   self.window = [[NSWindow alloc] initWithContentRect:root.frame styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskResizable | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
-  self.window.title = @"GamePack";
+  self.window.title = @"";
+  self.window.titleVisibility = NSWindowTitleHidden;
   self.window.minSize = NSMakeSize(1080, 700);
+  self.window.opaque = NO;
   self.window.backgroundColor = NSColor.windowBackgroundColor;
-  self.window.titlebarAppearsTransparent = YES;
+  self.window.acceptsMouseMovedEvents = YES;
+  root.wantsLayer = YES; root.layer.backgroundColor = NSColor.clearColor.CGColor;
+  if ([root respondsToSelector:@selector(setBackgroundColor:)]) [(RCTRootView *)root setBackgroundColor:NSColor.clearColor];
+  self.window.titlebarAppearsTransparent = NO;
   NSViewController *controller = [NSViewController new]; controller.view = root;
   self.window.contentViewController = controller;
   [self.window center]; [self.window makeKeyAndOrderFront:self];

@@ -228,5 +228,6 @@ void GamePackModule::ChooseVideo(ReactPromise<JSValue> promise) noexcept {
 void PackageProvider::CreatePackage(IReactPackageBuilder const& builder) noexcept {
   AddAttributedModules(builder, true);
   builder.AddViewManager(L"GamePackPlayer", [] { return make<PlayerManager>(); });
+  builder.AddViewManager(L"GamePackGlass", [] { return make<GlassManager>(); });
 }
 }
