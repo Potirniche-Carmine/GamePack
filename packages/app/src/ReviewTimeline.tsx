@@ -1,6 +1,7 @@
 import {WatchTimeline} from './WatchTimeline';
 import React, {useMemo, useState} from 'react';
 import {Animated, Image, Pressable, StyleSheet, Text, View} from 'react-native';
+import Svg, {Rect} from 'react-native-svg';
 import {anchorStart, timeLabel} from './components';
 import {ANNOTATION_COLOR, compareComments} from './playback';
 import {useTheme} from './theme';
@@ -21,17 +22,17 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
   time: number; duration: number; comments: Comment[]; selectedId: string | null; disabled: boolean;
   onSelect: (comment: Comment) => void; onCluster?: (comments: Comment[]) => void; onSeek: (time: number) => void;
 }) {
-  const {colors, dark} = useTheme();
+  const {colors} = useTheme();
   const {width, setWidth, position, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, disabled, onSeek});
   const [focused, setFocused] = useState<string | null>(null);
   const thumbnails = useVideoThumbnails(video);
   const aspectRatio = video && video.width > 0 && video.height > 0 ? video.width / video.height : 16 / 9;
-  const frameWidth = 30 * aspectRatio;
+  const frameWidth = 40 * aspectRatio;
   const frames = useMemo(() => {
     if (!thumbnails.length) return [];
     // Keep every tile at the source ratio. The track clips the final tile
     // instead of stretching the images to divide its width evenly.
-    const count = Math.max(1, Math.ceil((width - 26) / (frameWidth + 2)));
+    const count = Math.max(1, Math.ceil((width - 24) / (frameWidth + 2)));
     return Array.from({length: count}, (_, index) => thumbnails[Math.min(thumbnails.length - 1, Math.floor((index + 0.5) * thumbnails.length / count))]);
   }, [thumbnails, width, frameWidth]);
   const ordered = useMemo(() => [...comments].sort(compareComments), [comments]);
@@ -45,7 +46,7 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
         accessibilityActions={[{name: 'increment', label: 'Forward five seconds'}, {name: 'decrement', label: 'Back five seconds'}]}
         onAccessibilityAction={event => onSeek(Math.max(0, Math.min(duration, time + (event.nativeEvent.actionName === 'increment' ? 5000000 : -5000000))))}
         onFocus={() => setFocused('track')} onBlur={() => setFocused(null)}
-        style={[styles.track, {backgroundColor: colors.inset, borderColor: focused === 'track' ? colors.selectedLine : colors.separator}]}
+        style={[styles.track, {backgroundColor: colors.inset}]}
         onStartShouldSetResponder={() => canSeek} onMoveShouldSetResponder={() => canSeek}
         onResponderGrant={event => start({...event, nativeEvent: {...event.nativeEvent, locationX: event.nativeEvent.locationX + 12}})}
         onResponderMove={move} onResponderTerminationRequest={() => false} onResponderRelease={finish} onResponderTerminate={cancel}>
@@ -54,6 +55,9 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
         </View>)}</View> : <View pointerEvents="none" style={styles.ticks}>
           {Array.from({length: 31}, (_, i) => <View key={i} style={[styles.tick, {backgroundColor: colors.separator, height: i % 5 ? 8 : 15}]} />)}
         </View>}
+        <Svg pointerEvents="none" accessible={false} width="100%" height={40} style={StyleSheet.absoluteFill}>
+          <Rect x={.5} y={.5} width={Math.max(0, width - 25)} height={39} rx={7.5} fill="none" stroke={focused === 'track' ? colors.selectedLine : colors.separator} strokeWidth={1} />
+        </Svg>
       </View>
       {clusters.map(cluster => {
         const comment = cluster.comments[0], multiple = cluster.comments.length > 1;
@@ -71,10 +75,12 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
                 onSelect(cluster.comments[next]);
               } else onSelect(comment);
             }}
-            style={({pressed}) => [styles.marker, {left: cluster.left, width: cluster.width,
-              backgroundColor: multiple ? (selected ? colors.selected : colors.panel) : ANNOTATION_COLOR,
-              borderColor: focused === comment.comment_id || selected ? colors.text : multiple ? colors.line : colors.panel},
-              multiple && styles.cluster, pressed && {opacity: .65}]}>
+            style={({pressed}) => [styles.marker, {left: cluster.left, width: cluster.width}, pressed && {opacity: .65}]}>
+            <Svg pointerEvents="none" accessible={false} width={cluster.width} height={24} style={StyleSheet.absoluteFill}>
+              <Rect x={.75} y={.75} width={Math.max(0, cluster.width - 1.5)} height={22.5} rx={11.25}
+                fill={multiple ? (selected ? colors.selected : colors.panel) : ANNOTATION_COLOR}
+                stroke={focused === comment.comment_id || selected ? colors.text : multiple ? colors.line : 'transparent'} strokeWidth={1.5} />
+            </Svg>
             <Text style={[styles.number, {color: multiple ? colors.text : '#163048'}]}>{cluster.firstNumber}</Text>
             {multiple && <Text style={[styles.extra, {color: colors.muted}]}>+{cluster.comments.length - 1}</Text>}
           </Pressable>
@@ -82,25 +88,24 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
       })}
       <Animated.View pointerEvents="none" style={[styles.playhead, {left: 12, backgroundColor: colors.text, transform: [{translateX: position.interpolate({inputRange: [0, 1], outputRange: [0, Math.max(0, width - 24)]})}]}]} />
     </View>
-    {<View style={styles.labels}>{Array.from({length: width < 500 ? 4 : 7}, (_, i) => <Text key={i} style={[styles.label, {color: dark ? colors.faint : colors.text}]}>{timeLabel(duration * i / (width < 500 ? 3 : 6))}</Text>)}</View>}
+    <View style={styles.labels}>{Array.from({length: width < 580 ? 4 : 7}, (_, i) => <Text key={i} style={[styles.label, {color: colors.text}]}>{timeLabel(duration * i / (width < 580 ? 3 : 6))}</Text>)}</View>
   </View>;
 }
 const styles = StyleSheet.create({
-  root: {height: 70, paddingTop: 2, paddingHorizontal: 4},
-  lane: {height: 52, justifyContent: 'flex-end'},
-  track: {height: 32, marginHorizontal: 12, borderWidth: 1, borderRadius: 7, overflow: 'hidden'},
+  root: {height: 92, paddingTop: 2, paddingHorizontal: 4},
+  lane: {height: 68, justifyContent: 'flex-end'},
+  track: {height: 40, marginHorizontal: 12, borderRadius: 8, overflow: 'hidden'},
   filmstrip: {...StyleSheet.absoluteFillObject, flexDirection: 'row', gap: 2},
-  frame: {flexShrink: 0, height: '100%', borderRadius: 4, overflow: 'hidden', backgroundColor: '#000'},
+  frame: {flexShrink: 0, height: '100%', overflow: 'hidden', backgroundColor: '#000'},
   frameImage: {width: '100%', height: '100%'},
   ticks: {flex: 1, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 8, paddingBottom: 5},
   tick: {width: 1},
-  marker: {position: 'absolute', top: 0, height: 20, width: 24, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center', zIndex: 2},
-  cluster: {borderWidth: 1, flexDirection: 'row', gap: 4},
-  clusterRange: {position: 'absolute', top: 49, height: 1, opacity: 0.7},
-  stem: {position: 'absolute', top: 19, height: 32, width: 1, opacity: 0.9},
-  number: {fontSize: 10, lineHeight: 14, textAlign: 'center', includeFontPadding: false, fontVariant: ['tabular-nums'], fontWeight: '700'},
-  extra: {fontSize: 9, lineHeight: 14, textAlign: 'center', includeFontPadding: false, fontVariant: ['tabular-nums'], fontWeight: '500'},
-  playhead: {position: 'absolute', top: 20, bottom: -1, width: 2},
-  labels: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 4},
-  label: {fontSize: 10, lineHeight: 12, fontVariant: ['tabular-nums']},
+  marker: {position: 'absolute', top: 0, height: 24, flexDirection: 'row', gap: 4, alignItems: 'center', justifyContent: 'center', zIndex: 2},
+  clusterRange: {position: 'absolute', bottom: 1, height: 1, opacity: 0.7},
+  stem: {position: 'absolute', top: 24, bottom: 0, width: 1, opacity: 0.9},
+  number: {fontSize: 11, lineHeight: 16, textAlign: 'center', includeFontPadding: false, fontVariant: ['tabular-nums'], fontWeight: '700'},
+  extra: {fontSize: 10, lineHeight: 16, textAlign: 'center', includeFontPadding: false, fontVariant: ['tabular-nums'], fontWeight: '500'},
+  playhead: {position: 'absolute', top: 28, bottom: 0, width: 2, borderRadius: 1},
+  labels: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
+  label: {fontSize: 11, lineHeight: 16, fontWeight: '500', fontVariant: ['tabular-nums']},
 });

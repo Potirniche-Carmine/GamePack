@@ -14,11 +14,23 @@ const minimumGap = 6;
 const start = (comment: Comment) => comment.anchor.at_us;
 const safeWidth = (width: number) => Number.isFinite(width) ? Math.max(0, width) : 0;
 
-/** Short clips get a compact dock; long videos gain room without filling the window. */
-export function timelineDockWidth(available: number, duration: number, reviewing: boolean): number {
+export function timelineDockBounds(available: number) {
+  const max = Math.max(1, safeWidth(available) - 48);
+  return {min: Math.min(560, max), max};
+}
+
+/** A manual width survives mode and window changes, bounded by the current workspace. */
+export function timelineDockWidth(available: number, duration: number, reviewing: boolean, preferred?: number | null): number {
   const minutes = Number.isFinite(duration) ? Math.max(.5, duration / 60000000) : .5;
-  const width = (reviewing ? 560 : 520) + Math.max(0, Math.log2(minutes * 2)) * 40;
-  return Math.max(1, Math.min(available - 48, reviewing ? 760 : 640, width));
+  const automatic = Math.min(reviewing ? 840 : 720, (reviewing ? 640 : 600) + Math.max(0, Math.log2(minutes * 2)) * 40);
+  const width = preferred != null && Number.isFinite(preferred) ? preferred : automatic;
+  const {min, max} = timelineDockBounds(available);
+  return Math.max(min, Math.min(max, width));
+}
+
+/** The grabbed edge tracks the pointer 1:1; the opposite edge mirrors it. */
+export function resizeTimelineDock(width: number, deltaX: number, side: -1 | 1, available: number): number {
+  return timelineDockWidth(available, 0, true, width + (Number.isFinite(deltaX) ? deltaX : 0) * side * 2);
 }
 
 export type TimelineSample = {time: number; duration: number; paused: boolean; rate: number; seekToken: number};
@@ -55,8 +67,8 @@ export function clusterTimelineComments(comments: readonly Comment[], duration: 
   type Range = {first: number; last: number};
   const bounds = ({first, last}: Range) => {
     const count = last - first + 1;
-    const numberWidth = String(first + 1).length * 6;
-    const labelWidth = count === 1 ? Math.max(24, numberWidth + 12) : Math.max(44, numberWidth + String(count - 1).length * 6 + 27);
+    const numberWidth = String(first + 1).length * 7;
+    const labelWidth = count === 1 ? Math.max(28, numberWidth + 14) : Math.max(50, numberWidth + String(count - 1).length * 7 + 30);
     const markerWidth = Math.min(available, labelWidth);
     const anchor = timelinePosition(start(ordered[first]), duration, available);
     return {width: markerWidth, anchor, left: Math.max(0, Math.min(available - markerWidth, anchor - markerWidth / 2))};

@@ -8,3 +8,5 @@ GamePack is an offline desktop video review app for macOS and Windows (ARM64 and
 - Preserve the simple review workflow. Do not add unsolicited product explanations, tutorials, promotional copy, or extra sections.
 
 Verify native behavior and inspect screenshots in both themes before calling UI work complete. Keep demo footage and local verification screenshots out of the public repository.
+
+Commit completed work on `main` in logical checkpoints as you go.

@@ -6,7 +6,7 @@ import {conversationRoot, discussionReplies} from './discussion';
 import {Glass} from './Glass';
 import {ANNOTATION_COLOR, compareComments} from './playback';
 import {conversationPlacement, moveConversation, reviewViewport, type Point, type Size} from './spatial';
-import {timelineDockWidth} from './timeline';
+import {PlaybackDock} from './PlaybackDock';
 import {useReducedMotion} from './motion';
 import {conversationPins} from './presentation';
 import {useTheme} from './theme';
@@ -29,8 +29,6 @@ export function ReviewWorkspace(props: Props) {
   const {colors, dark} = useTheme();
   const [area, setArea] = useState({width: 1, height: 1});
   const reviewing = props.reviewMode === 'review';
-  const controlsHeight = reviewing ? 122 : 80;
-  const dockWidth = timelineDockWidth(area.width, duration, reviewing);
   const rect = reviewViewport(area, video.width && video.height ? video : {width: 16, height: 9}, reviewing, props.presenting);
   const reduce = useReducedMotion();
   const [idle, setIdle] = useState(false);
@@ -85,10 +83,8 @@ export function ReviewWorkspace(props: Props) {
       area={area} placement={placement} fullscreen={props.presenting}>
       <NoteColumn {...props} notes={props.sceneReady ? visibleNotes : []} draft={visibleDraft} numbers={numbers} composer={visibleDraft ? composer : null} />
     </FloatingConversation>}
-    <Animated.View pointerEvents={hidden ? 'none' : 'auto'} accessibilityElementsHidden={hidden} importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
-      {...{onMouseEnter: () => { setOverControls(true); wake(); }, onMouseLeave: () => setOverControls(false)}}
-      style={[styles.controls, {width: dockWidth, left: (area.width - dockWidth) / 2, opacity}]}>
-    <Glass style={{borderRadius: 20}}>
+    <PlaybackDock available={area.width} duration={duration} reviewing={reviewing} disabled={disabled} hidden={hidden} opacity={opacity}
+      onInteractionChange={setOverControls} popover={props.popover}>
       <View style={styles.transport}>
         <Button compact quiet shortcut="play" label={props.paused ? 'Play video' : 'Pause video'} icon={props.paused ? 'play' : 'pause'} disabled={disabled} onPress={props.onPlay} />
         <Text style={[styles.time, {color: colors.text}]}>{timeLabel(time)}<Text style={{color: colors.muted}}> / {timeLabel(duration)}</Text></Text>
@@ -106,8 +102,7 @@ export function ReviewWorkspace(props: Props) {
         <Button quiet compact icon={props.presenting ? 'minimize' : 'maximize'} label={props.presenting ? 'Exit full screen' : 'Enter full screen'} shortcut="present" disabled={disabled} onPress={props.onPresent} />
       </View>
       <View style={styles.timeline}>{props.timeline}</View>
-    </Glass></Animated.View>
-    {!!props.popover && <Glass style={[styles.popover, {bottom: controlsHeight + 26, right: (area.width - dockWidth) / 2 + 12}]}>{props.popover}</Glass>}
+    </PlaybackDock>
   </View>;
 }
 
@@ -225,13 +220,11 @@ const styles = StyleSheet.create({
   replyHeader: {flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 5},
   replyAuthor: {fontSize: 11, fontWeight: '600', flex: 1},
   replyText: {fontSize: 12, lineHeight: 18},
-  controls: {position: 'absolute', bottom: 18, borderRadius: 24},
-  transport: {height: 44, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10},
+  transport: {height: 44, flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4},
   transportSpace: {flex: 1, minWidth: 4},
-  time: {fontSize: 12, lineHeight: 18, fontWeight: '500', letterSpacing: .2, fontVariant: ['tabular-nums']},
+  time: {fontSize: 13, lineHeight: 18, fontWeight: '500', letterSpacing: .2, fontVariant: ['tabular-nums']},
   mode: {flexDirection: 'row', padding: 3, borderRadius: 18},
   modeButton: {paddingHorizontal: 12, paddingVertical: 5, borderRadius: 15},
   modeLabel: {fontSize: 12, fontWeight: '600'},
-  popover: {position: 'absolute', padding: 6, borderRadius: 16, zIndex: 20},
-  timeline: {paddingHorizontal: 10, paddingBottom: 4},
+  timeline: {paddingHorizontal: 0},
 });

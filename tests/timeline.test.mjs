@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {clusterTimelineComments, timelineDockWidth, timelineMotion, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
+import {clusterTimelineComments, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
 
 test('pausing holds the presented position until the stopped native frame arrives; resume never snaps', () => {
   const playing = {time: 2000000, duration: 30000000, paused: false, rate: 1, seekToken: 1};
@@ -16,11 +16,38 @@ test('pausing holds the presented position until the stopped native frame arrive
 test('dock sizing fits short and long clips without tracking the current playhead', () => {
   for (const review of [false, true]) {
     const short = timelineDockWidth(1400, 30000000, review);
-    assert.ok(short <= 560);
+    assert.ok(short <= 640);
     assert.ok(timelineDockWidth(1400, 600000000, review) > short);
-    assert.ok(timelineDockWidth(1080, 7200000000, review) <= 760);
+    assert.ok(timelineDockWidth(1080, 7200000000, review) <= 840);
     assert.ok(timelineDockWidth(600, 7200000000, review) <= 552);
     assert.ok(Number.isFinite(timelineDockWidth(1400, NaN, review)));
+  }
+});
+
+test('either resize edge follows the pointer while keeping the timeline centered', () => {
+  for (const side of [-1, 1]) {
+    const before = 640, available = 1400, delta = side * 73.5;
+    const after = resizeTimelineDock(before, delta, side, available);
+    const oldEdge = available / 2 + side * before / 2;
+    const newEdge = available / 2 + side * after / 2;
+    assert.equal(newEdge - oldEdge, delta);
+    assert.equal(resizeTimelineDock(after, -delta, side, available), before);
+    assert.equal(resizeTimelineDock(before, side * 10000, side, available), 1352);
+    assert.equal(resizeTimelineDock(before, -side * 10000, side, available), 560);
+  }
+});
+
+test('a chosen width survives mode changes and fits resized or unmeasured windows', () => {
+  for (const review of [false, true]) {
+    assert.equal(timelineDockWidth(1400, 30000000, review, 920), 920);
+    assert.equal(timelineDockWidth(800, 30000000, review, 920), 752);
+    assert.equal(timelineDockWidth(1400, 30000000, review, 920), 920);
+  }
+  for (const available of [0, 400, 600, 1080, NaN, Infinity]) {
+    const bounds = timelineDockBounds(available);
+    assert.ok(bounds.min > 0 && bounds.min <= bounds.max);
+    const width = timelineDockWidth(available, NaN, true, Infinity);
+    assert.ok(Number.isFinite(width) && width >= bounds.min && width <= bounds.max);
   }
 });
 

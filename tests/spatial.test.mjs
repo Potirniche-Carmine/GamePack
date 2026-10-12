@@ -24,13 +24,13 @@ test('the picture stays horizontally centered with floating comments across aspe
         assert.ok(Math.abs(rect.x + rect.width / 2 - view.width / 2) < .001);
         assert.ok(rect.y >= (fullscreen ? 16 : 76));
         assert.ok(rect.x + rect.width <= view.width - 16 + .001);
-        assert.ok(rect.y + rect.height <= view.height - (review ? 152 : 110) + .001);
+        assert.ok(rect.y + rect.height <= view.height - (review ? 190 : 118) + .001);
         assert.ok(Math.abs(rect.width / rect.height - media.width / media.height) < .001);
         if (review) for (const y of [0, 500000, 1000000]) {
           const card = conversationPlacement(view, rect, {x: 500000, y}, fullscreen);
           assert.ok(card.left + card.width <= view.width - 16);
           assert.ok(card.top >= (fullscreen ? 16 : 76));
-          assert.ok(card.top + card.maxHeight <= view.height - 164);
+          assert.ok(card.top + card.maxHeight <= view.height - 204);
         }
       }
     }
@@ -43,7 +43,7 @@ test('moving conversations clamps to the workspace without changing the media or
   const placement = conversationPlacement(view, rect, {x: 500000, y: 500000}, false);
   const before = JSON.stringify({rect, placement});
   assert.deepEqual(moveConversation(view, placement, {x: -10000, y: -10000}, false), {left: 76, top: 76});
-  assert.deepEqual(moveConversation(view, placement, {x: 10000, y: 10000}, false), {left: 760, top: 236});
+  assert.deepEqual(moveConversation(view, placement, {x: 10000, y: 10000}, false), {left: 760, top: 196});
   assert.equal(JSON.stringify({rect, placement}), before);
 });
 
