@@ -50,7 +50,7 @@ export function usePlaybackTimeline({time, duration, paused, rate, seekToken, di
     start: (event: GestureResponderEvent) => {
       slider.current?.focus(); position.stopAnimation();
       drag.current = {pageX: event.nativeEvent.pageX, locationX: event.nativeEvent.locationX, time};
-      lastSeek.current = 0; lastTarget.current = null; setScrubbing(true); updateDrag(event);
+      lastSeek.current = 0; lastTarget.current = paused ? time : null; setScrubbing(true); updateDrag(event);
     },
     move: updateDrag,
     finish: (event: GestureResponderEvent) => {

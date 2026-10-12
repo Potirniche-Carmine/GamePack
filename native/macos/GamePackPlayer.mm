@@ -129,7 +129,10 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
     _player = [AVPlayer new]; _player.actionAtItemEnd = AVPlayerActionAtItemEndPause;
     _videoLayer = [AVPlayerLayer playerLayerWithPlayer:_player]; _videoLayer.videoGravity = AVLayerVideoGravityResizeAspect;
     [self.layer addSublayer:_videoLayer];
-    _overlay = [[GPOverlay alloc] initWithFrame:self.bounds]; _overlay.owner = self; _overlay.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable; [self addSubview:_overlay];
+    _overlay = [[GPOverlay alloc] initWithFrame:self.bounds]; _overlay.owner = self;
+    // Give ink its own backing layer so AVPlayer's seek redraw cannot cover it.
+    _overlay.wantsLayer = YES; _overlay.layer.zPosition = 1;
+    _overlay.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable; [self addSubview:_overlay];
     __weak GPPlayer *weakSelf = self;
     _activityMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown handler:^NSEvent *(NSEvent *event) {
       GPPlayer *self = weakSelf;
@@ -203,6 +206,10 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   [_player.currentItem stepByCount:(int)_pendingStepFrames]; _pendingStepFrames = 0;
 }
 - (void)performSeek {
+  if (!_seeking && _paused && _duration > 0 && [self timeUs] == llround(_seekUs)) {
+    _finished = NO; _settlingReviewStop = NO;
+    [_overlay setNeedsDisplay:YES]; [self emitTime:NO]; return;
+  }
   [self seekToUs:_seekUs reviewStop:NO];
 }
 - (void)seekToUs:(double)target reviewStop:(BOOL)reviewStop {
