@@ -70,19 +70,22 @@ test('one conversation marker covers all root and reply drawings without changin
   const other = {...comment('other'), drawings: [stroke('other-ellipse')]};
   const records = [nested, reply, root, other];
   const before = structuredClone(records);
-  const pins = conversationPins(records, [root, other], 1);
+  const pins = conversationPins(records, [root, other]);
   assert.deepEqual(pins.map(pin => pin.note.comment_id), ['root', 'other']);
   assert.equal(pins[0].point, root.drawings[0].samples[0]);
   assert.deepEqual(records, before);
-  assert.deepEqual(conversationPins(records, [], 1), []);
+  assert.deepEqual(conversationPins(records, []), []);
 });
 
-test('a marker uses visible reply geometry when the root has none or is outside the zoomed frame', () => {
-  const root = {...comment('root'), drawings: [{samples: [{x: 0, y: 0}]}]};
+test('a marker keeps the root anchor at the frame edge and only falls back when it has no geometry', () => {
+  const root = {...comment('root'), drawings: [{samples: []}, {samples: [{x: 0, y: 0}, {x: 500000, y: 500000}]}]};
   const reply = {...comment('reply', 0, 'root'), drawings: [{samples: [{x: 500000, y: 500000}]}]};
-  assert.equal(conversationPins([reply, root], [root], 2)[0].point, reply.drawings[0].samples[0]);
-  assert.deepEqual(conversationPins([root], [root], 2), []);
+  assert.equal(conversationPins([reply, root], [root])[0].point, root.drawings[1].samples[0]);
+  assert.equal(conversationPins([root], [root])[0].point, root.drawings[1].samples[0]);
   const textRoot = comment('text-root');
   const child = {...reply, parent_comment_id: 'text-root'};
-  assert.equal(conversationPins([textRoot, child], [textRoot], 1)[0].note, textRoot);
+  const [pin] = conversationPins([textRoot, child], [textRoot]);
+  assert.equal(pin.note, textRoot);
+  assert.equal(pin.point, child.drawings[0].samples[0]);
+  assert.deepEqual(conversationPins([textRoot], [textRoot]), []);
 });

@@ -15,18 +15,15 @@ export function notesAtTime(comments: readonly Comment[], time: number): Comment
 }
 
 /** A conversation has one marker, even when its comment and replies contain
- * several drawings. Prefer the root's geometry, falling back to a visible reply. */
-export function conversationPins(comments: readonly Comment[], notes: readonly Comment[], zoom: number) {
+ * several drawings. Keep its anchor independent of zoom so it cannot jump to
+ * another stroke as the video is magnified. Fall back to reply geometry. */
+export function conversationPins(comments: readonly Comment[], notes: readonly Comment[]) {
   return notes.flatMap(note => {
     const drawings = [note, ...comments.filter(comment => comment.comment_id !== note.comment_id
       && conversationRoot(comments, comment.comment_id)?.comment_id === note.comment_id).sort(compareComments)]
       .flatMap(comment => comment.drawings);
     for (const drawing of drawings) {
-      const point = drawing.samples.find(sample => {
-        const x = sample.x / 1000000 * zoom - (zoom - 1) / 2;
-        const y = sample.y / 1000000 * zoom - (zoom - 1) / 2;
-        return x >= 0 && x <= 1 && y >= 0 && y <= 1;
-      });
+      const point = drawing.samples[0];
       if (point) return [{note, point}];
     }
     return [];

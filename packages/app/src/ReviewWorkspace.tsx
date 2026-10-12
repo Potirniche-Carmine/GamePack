@@ -57,7 +57,7 @@ export function ReviewWorkspace(props: Props) {
   const visibleDraft = reviewing && composer && draft && (draft.parent_comment_id || draft.drawings.length) ? draft : null;
   const replyingTo = draft?.parent_comment_id ? conversationRoot(comments, draft.parent_comment_id) : null;
   const visibleNotes = replyingTo ? notes.filter(note => note.comment_id === replyingTo.comment_id) : notes;
-  const pins = conversationPins(comments, visibleNotes, props.zoom);
+  const pins = conversationPins(comments, visibleNotes);
   const anchor = visibleDraft ?? visibleNotes.find(note => note.comment_id === selectedId) ?? visibleNotes[0];
   const lastDrawing = anchor?.drawings[anchor.drawings.length - 1];
   const endpoint = lastDrawing?.samples[lastDrawing.samples.length - 1] ?? (anchor?.position ? {x: anchor.position.x * 1000000, y: anchor.position.y * 1000000} : undefined);
@@ -70,8 +70,8 @@ export function ReviewWorkspace(props: Props) {
         {reviewing && props.sceneReady && props.paused && props.drawingsVisible && (!draft || !!draft.parent_comment_id) && pins.map(({note, point}) => <Pressable key={note.comment_id} accessibilityRole="button"
           accessibilityLabel={`Drawing for comment ${numbers.get(note.comment_id)}: ${note.text || 'Drawing'}`}
           accessibilityState={{selected: note.comment_id === selectedId}} disabled={disabled} onPress={() => props.onSelect(note)}
-          style={({pressed}) => [styles.pin, {left: Math.max(2, Math.min(rect.width - 26, (point.x / 1000000 * props.zoom - (props.zoom - 1) / 2) * rect.width + 8)),
-            top: Math.max(2, Math.min(rect.height - 26, (point.y / 1000000 * props.zoom - (props.zoom - 1) / 2) * rect.height - 28)),
+          style={({pressed}) => [styles.pin, {left: Math.max(2, Math.min(rect.width - 26, point.x / 1000000 * rect.width + 8)),
+            top: Math.max(2, Math.min(rect.height - 26, point.y / 1000000 * rect.height - 28)),
             opacity: pressed ? .6 : selectedId && selectedId !== note.comment_id ? .4 : 1}]}>
           <Text style={styles.pinNumber}>{numbers.get(note.comment_id)}</Text>
         </Pressable>)}
