@@ -760,7 +760,7 @@ export default function App() {
           popoverKind={speedOpen ? 'speed' : 'zoom'}
           popover={speedOpen || zoomOpen ? <View style={{gap: 2}}>{(speedOpen ? [.5, 1, 1.5, 2] : [1, 1.5, 2, 3, 4]).map(value => <Button quiet compact key={value} shortcut={!speedOpen && value === 1 ? 'zoomReset' : undefined} active={(speedOpen ? rate : zoom) === value} label={speedOpen ? `Playback speed ${value}×` : `Zoom ${value * 100}%`} onPress={() => { if (speedOpen) { setRate(value); armReview(time, value); } else setZoom(value); setSpeedOpen(false); setZoomOpen(false); }}>{speedOpen ? `${value}×` : value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}</View> : null}
           >
-          <GamePackPlayer key={video.id} style={StyleSheet.absoluteFill} source={video.path} zoom={zoom} zoomToken={zoomState.token} onZoom={event => setZoomState(previous => receiveZoom(previous, event.nativeEvent))} paused={paused} rate={rate}
+          <GamePackPlayer key={video.id} style={StyleSheet.absoluteFill} source={video.path} zoom={zoom} zoomToken={zoomState.token} onZoom={({nativeEvent}) => setZoomState(previous => receiveZoom(previous, nativeEvent))} paused={paused} rate={rate}
             seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson}
             flushToken={flushToken} stepToken={step.token} stepFrames={step.frames} onStrokeFlushFinished={event => void onStrokeFlushFinished(event.nativeEvent)}
             tool={reviewMode === 'watch' ? busy ? 'none' : 'pointer' : (!busy || !!flushRequest.current) && (draft || tool === 'pointer' || tool === 'laser') ? tool : 'none'}
