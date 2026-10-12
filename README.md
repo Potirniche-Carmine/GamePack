@@ -4,11 +4,7 @@ An offline desktop app for reviewing video. Organize footage into projects, draw
 
 **Pre-MVP**, in active development for macOS and Windows.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/review-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/review-light.jpg">
-  <img alt="GamePack on macOS, showing a video with frame annotations, a comment, and the review timeline" src="docs/assets/review-dark.jpg" width="1280">
-</picture>
+![GamePack showing frame annotations, a comment and reply, and the review timeline](docs/assets/review.png)
 
 ## Built with
 
