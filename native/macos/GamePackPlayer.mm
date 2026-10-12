@@ -52,6 +52,8 @@
     _materialView.layer.masksToBounds = YES;
     _materialView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [self addSubview:_materialView];
+    // Initialize the default appearance before React applies a dark override.
+    [self setDark:NO];
   }
   return self;
 }
@@ -76,6 +78,11 @@
 - (void)setDark:(BOOL)dark {
   _dark = dark;
   _materialView.appearance = [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+  if (@available(macOS 26.0, *)) {
+    // Glass can adapt to the black video backdrop after a fullscreen transition.
+    // Preserve enough light behind the app's dark foreground controls.
+    if ([_materialView isKindOfClass:NSGlassEffectView.class]) ((NSGlassEffectView *)_materialView).tintColor = dark ? nil : [NSColor colorWithWhite:1 alpha:.75];
+  }
 }
 @end
 @interface GamePackGlassManager : RCTViewManager @end

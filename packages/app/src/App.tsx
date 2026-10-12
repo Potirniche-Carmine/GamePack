@@ -155,7 +155,7 @@ export default function App() {
     return () => cancelAnimationFrame(frame);
   }, [draft?.id, composerOpen, focusRequest]);
   useEffect(() => {
-    if (presenting && !video && !loading) { setPresenting(false); setFullScreen(false); }
+    if (presenting && !video && !loading) setFullScreen(false);
   }, [presenting, !!video, loading]);
   useEffect(() => {
     mounted.current = true;
@@ -163,6 +163,8 @@ export default function App() {
   }, []);
   useEffect(() => {
     const listener = listenWindowState(event => {
+      // Restore the header only after the native window has its final bounds.
+      // Mounting it during macOS's fullscreen exit can retain the wider layout.
       if (event.fullScreen !== undefined) setPresenting(event.fullScreen);
     });
     return () => listener.remove();
@@ -524,12 +526,12 @@ export default function App() {
   const browse = (nextProjectId: string | null, nextFolderId: string | null = null) => leaveDraft(() => {
     ++sourceGeneration.current; setProjectId(nextProjectId); setFolderId(nextFolderId); setVideoId(null);
     setPaused(true); setDuration(0); seek(0); dismissSelectionNow(); setLibraryOpen(false);
-    if (presenting) { setPresenting(false); setFullScreen(false); }
+    if (presenting) setFullScreen(false);
   });
   const openProject = (project: Project) => browse(project.id);
   const openSettings = (tab: 'profile' | 'appearance' = 'appearance', animate = true) => leaveDraft(() => {
     setPaused(true); setSettingsError(''); setSettingsTab(tab); setSettingsAnimate(animate); setLibraryOpen(false); setZoomOpen(false); setSpeedOpen(false);
-    if (presenting) { setPresenting(false); setFullScreen(false); }
+    if (presenting) setFullScreen(false);
     setSettingsOpen(true);
   });
   const saveSettingsProfile = async (name: string) => {
@@ -599,7 +601,7 @@ export default function App() {
   };
   const toggleAllReplies = () => setExpanded(allRepliesExpanded ? new Set() : new Set(originalComments.map(item => item.comment_id)));
   const togglePresentation = () => leaveDraft(() => {
-     setLibraryOpen(false); setPresenting(!presenting); setFullScreen(!presenting);
+     setLibraryOpen(false); setFullScreen(!presenting);
   });
   const replyToNote = (item: Comment) => {
     leaveDraft(() => {
@@ -629,7 +631,7 @@ export default function App() {
       else if (settingsOpen) setSettingsOpen(false);
       else if (commentInput.current?.isFocused()) { commentInput.current.blur(); }
       else if (libraryOpen || zoomOpen || speedOpen) { setLibraryOpen(false); setZoomOpen(false); setSpeedOpen(false); }
-      else if (presenting) { setPresenting(false); setFullScreen(false); }
+      else if (presenting) setFullScreen(false);
       else { setTool('pointer'); commentInput.current?.blur(); }
       return;
     }
