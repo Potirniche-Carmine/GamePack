@@ -57,4 +57,4 @@ The profile avatar opens your name and initials settings. Appearance and shortcu
 
 Legacy timed comments are converted once to a completed drawing on the final included instant of their clip. Original posted records are retained for recovery. New comments use a single frame with no intervals or timed stroke replay.
 
-GamePack is pre-MVP. Close it before backing up the library folder, especially before trying a new build. ZIP import/export is not available.
+Close GamePack before backing up the library folder, especially before trying a new build. ZIP import/export is not available.

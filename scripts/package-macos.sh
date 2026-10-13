@@ -41,9 +41,9 @@ Open ~/.gamepack/Launch GamePack.command to launch it later.
 To choose another location: GAMEPACK_HOME=/absolute/folder ./Install.command
 
 No Node, Rust, CocoaPods, Metro, or server is needed to run this release.
-This open-source MVP is ad-hoc signed, not Apple-notarized. macOS may require
+This build is ad-hoc signed, not Apple-notarized. macOS may require
 approval in System Settings > Privacy & Security before opening a downloaded build.
-ZIP interchange is not implemented. The Import ZIP/Export ZIP controls are disabled.
+ZIP library exchange is not included in this version.
 Removing the application does not remove your video library or comments.
 
 Source and verification: https://github.com/Potirniche-Carmine/GamePack
