@@ -1,6 +1,6 @@
 # GamePack
 
-GamePack is an offline desktop video review app for macOS and Windows (ARM64 and x64). The shared React Native interface lives in `packages/app`; native AVPlayer/MediaPlayer hosts bridge through CXX to the Rust/SQLite engine in `crates/gamepack-core`. Keep application data and configuration inside `GAMEPACK_HOME` or `~/.gamepack`. Work on `main`; GitHub Actions is paused while the app is under active development. Do not create releases, tags, publish packages, or enable release automation unless the user explicitly requests it. Build and packaging workflows must only run from `main` and remain disabled until explicitly re-enabled.
+GamePack is an offline desktop video review app for macOS and Windows (ARM64 and x64). The shared React Native interface lives in `packages/app`; native AVPlayer/MediaPlayer hosts bridge through CXX to the Rust/SQLite engine in `crates/gamepack-core`. Keep application data and configuration inside `GAMEPACK_HOME` or `~/.gamepack`. CI is enabled. Develop new features and fixes on focused branches (use `codex/` for agent branches) and open pull requests targeting `main`. Shared checks run on pull requests; native builds and packaging only run from `main`. Release preparation is manual and creates a draft from a successful CI run. Do not publish releases, create public tags, or publish packages without an explicit user request.
 
 ## Interface rules
 - Omit ornamental eyebrow headings, redundant subheadings, explanatory helper paragraphs, instructional status lines, selection-state captions, drawing-count badges, storage statistics, technical media metadata, roadmap disclaimers, and permanence/autosave reassurance copy.
@@ -9,4 +9,4 @@ GamePack is an offline desktop video review app for macOS and Windows (ARM64 and
 
 Verify native behavior and inspect screenshots in both themes before calling UI work complete. Keep demo footage and local verification screenshots out of the public repository.
 
-Commit completed work on `main` in logical checkpoints as you go.
+Commit completed work in logical checkpoints on the working branch. Complete the initial CI/1.0.0 preparation on `main`; use feature branches for subsequent work.

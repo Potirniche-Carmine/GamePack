@@ -19,3 +19,13 @@ if ! gamepack_has_supported_node; then
     fi
   done
 fi
+
+# CocoaPods is locked through Bundler; prefer Homebrew Ruby over macOS Ruby 2.6.
+if ! ruby -e 'exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("3.3") ? 0 : 1)' 2>/dev/null; then
+  for gamepack_ruby_dir in /opt/homebrew/opt/ruby/bin /usr/local/opt/ruby/bin; do
+    if [[ -x "$gamepack_ruby_dir/ruby" ]]; then
+      export PATH="$gamepack_ruby_dir:$PATH"
+      break
+    fi
+  done
+fi

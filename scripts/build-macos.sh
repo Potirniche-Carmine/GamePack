@@ -5,10 +5,12 @@ source scripts/macos-env.sh
 gamepack_has_supported_node || { echo 'Run bash scripts/bootstrap-macos.sh to install a supported Node version.' >&2; exit 1; }
 command -v cargo >/dev/null 2>&1 || source "$HOME/.cargo/env"
 [[ -d node_modules ]] || npm ci
-[[ -d macos/Pods ]] || pod install --project-directory=macos
+[[ -d macos/Pods ]] || bundle exec pod install --project-directory=macos
 MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release --locked -p gamepack-core
-npm run typecheck
-npm run test:ui
+if [[ "${GAMEPACK_SKIP_TESTS:-0}" != 1 ]]; then
+  npm run typecheck
+  npm run test:ui
+fi
 mkdir -p artifacts/local
 # Metro copies assets incrementally; clear stale raster files before bundling.
 rm -rf build/macos/Build/Products/Release/GamePack.app/Contents/Resources/assets

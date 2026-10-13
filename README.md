@@ -2,7 +2,7 @@
 
 An offline desktop app for reviewing video. Organize footage into projects, draw on a frame, and leave comments and replies. Review mode pauses at commented frames. Everything stays on your computer.
 
-**Pre-MVP**, in active development for macOS and Windows.
+Version **1.0.0** is being prepared for macOS and Windows.
 
 ![GamePack showing frame annotations, a comment and reply, and the review timeline](docs/assets/review.png)
 

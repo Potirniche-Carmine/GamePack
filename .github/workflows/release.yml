@@ -1,95 +1,89 @@
-name: Publish release packages
+name: Prepare draft release
 
-# Paused during development. Re-enabling requires explicit user authorization.
 on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: Existing version tag on the current main commit (release remains disabled)
+        description: Version to prepare (for example v1.0.0)
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful CI run for the current main commit, containing all four packages
         required: true
         type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: draft-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  preflight:
-    if: ${{ false && github.ref == 'refs/heads/main' }}
-    name: Verify Windows JSON transport
-
-    uses: ./.github/workflows/windows.yml
-    with:
-      contract_only: true
-
-  macos:
-    if: ${{ false && github.ref == 'refs/heads/main' }}
-    needs: preflight
-
-    uses: ./.github/workflows/macos.yml
-
-  windows:
-    if: ${{ false && github.ref == 'refs/heads/main' }}
-    needs: preflight
-
-    uses: ./.github/workflows/windows.yml
-
-  publish:
-    if: ${{ false && github.ref == 'refs/heads/main' }}
-    name: Publish verified platform packages
-    needs: [macos, windows]
-    runs-on: macos-15
+  draft:
+    if: github.ref == 'refs/heads/main'
+    name: Prepare verified draft
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.version_tag }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Verify explicitly requested tag matches main
-        env:
-          RELEASE_TAG: ${{ inputs.version_tag }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Verify version and source CI run
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-          test "$(git rev-parse HEAD)" = "$(git rev-parse "$RELEASE_TAG^{commit}")"
-      - uses: actions/download-artifact@v4
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]]
+          npm run check:version
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-run.json"
+          jq -e --arg sha "$GITHUB_SHA" '
+            .head_sha == $sha and .head_branch == "main" and
+            .path == ".github/workflows/ci.yml" and
+            (.event == "push" or .event == "workflow_dispatch") and
+            .status == "completed" and .conclusion == "success"
+          ' "$RUNNER_TEMP/source-run.json"
+          if tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha 2>/dev/null); then
+            test "$tag_sha" = "$GITHUB_SHA"
+          fi
+      - name: Download the already verified packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run_id }}
           pattern: release-*
           merge-multiple: true
           path: release-packages
-      - name: Verify packages and checksums before publication
+      - name: Verify all four packages and checksums
         working-directory: release-packages
         run: |
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 8
           for package in GamePack-macos-arm64.tar.gz GamePack-macos-x64.tar.gz GamePack-windows-x64.zip GamePack-windows-arm64.zip; do
-            test -f "$package"
-            test -f "$package.sha256"
-            shasum -a 256 -c "$package.sha256"
+            test -s "$package"
+            test -s "$package.sha256"
+            sha256sum "$package" > "$RUNNER_TEMP/expected.sha256"
+            diff -u "$RUNNER_TEMP/expected.sha256" "$package.sha256"
           done
-      - name: Publish GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.version_tag }}
+      - name: Create or refresh the draft release
         run: |
-          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
-          GamePack desktop packages include the shared Rust engine and bundled JavaScript. No developer tools, database server, or application account are needed after installation.
-
-          - **macOS Apple silicon:** download `GamePack-macos-arm64.tar.gz`, extract it, and run `Install.command`.
-          - **macOS Intel:** download `GamePack-macos-x64.tar.gz`, extract it, and run `Install.command`.
-          - **Windows x64:** download `GamePack-windows-x64.zip`, extract it, and follow the included installer instructions.
-          - **Windows ARM64:** download `GamePack-windows-arm64.zip`, extract it, and follow the included installer instructions.
-
-          macOS packages use an ad hoc signature and are not notarized. Windows packages are unsigned; follow the bundled installation instructions for the required Windows settings. SHA-256 checksum files accompany each download.
-
-          Draw while a video plays, then choose Save to pause and add a comment to the captured clip. Normal playback shows timed drawings with matching comment highlights; Hide annotations shows the original footage. Replies are nested and collapsible, and light/dark appearance is saved with the library.
-
-          The MVP includes managed local media, autosaved drafts, immutable posts, and timed pen/arrow/ellipse drawings. Application files and library data stay under `~/.gamepack` or the configured `GAMEPACK_HOME`. ZIP collaboration import/export is not available yet.
-          NOTES
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          cp "docs/releases/${RELEASE_TAG#v}.md" "$RUNNER_TEMP/release-notes.md"
+          printf '\nBuilt from commit `%s` in [CI run %s](%s/%s/actions/runs/%s).\n' \
+            "$GITHUB_SHA" "$CI_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$CI_RUN_ID" >> "$RUNNER_TEMP/release-notes.md"
+          if gh release view "$RELEASE_TAG" --json isDraft,targetCommitish > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+            jq -e --arg sha "$GITHUB_SHA" '.isDraft == true and .targetCommitish == $sha' "$RUNNER_TEMP/release.json"
             gh release upload "$RELEASE_TAG" release-packages/* --clobber
+            gh release edit "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
           else
-            gh release create "$RELEASE_TAG" release-packages/* \
-              --verify-tag --title "GamePack $RELEASE_TAG" \
-              --notes-file "$RUNNER_TEMP/release-notes.md"
+            gh release create "$RELEASE_TAG" release-packages/* --draft --target "$GITHUB_SHA" \
+              --title "GamePack $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi

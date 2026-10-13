@@ -5,6 +5,7 @@ build/
 dist/
 .vendor/
 .bundle/
+vendor/bundle/
 .ruby/
 macos/Pods/
 macos/build/

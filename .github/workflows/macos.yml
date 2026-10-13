@@ -1,16 +1,10 @@
 name: macOS native builds
 
-# Paused during development. Re-enabling requires explicit user authorization.
 on:
-  workflow_dispatch:
   workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: macos-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   CARGO_INCREMENTAL: '0'
@@ -18,7 +12,7 @@ env:
 
 jobs:
   macos:
-    if: ${{ false && github.ref == 'refs/heads/main' }}
+    if: github.ref == 'refs/heads/main'
     name: macOS ${{ matrix.arch }} desktop app
     strategy:
       fail-fast: false
@@ -31,47 +25,69 @@ jobs:
             arch: x64
             build_jobs: 4
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 45
     env:
       MACOSX_DEPLOYMENT_TARGET: '14.0'
       GAMEPACK_BUILD_JOBS: ${{ matrix.build_jobs }}
       GAMEPACK_PACKAGE_ARCH: ${{ matrix.arch }}
+      GAMEPACK_SKIP_TESTS: '1'
+      USE_CCACHE: '1'
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 500M
+      HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: '22'
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: ruby/setup-ruby@v1
+          key: macos-${{ matrix.arch }}
+          env-vars: MACOSX_DEPLOYMENT_TARGET
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1
         with:
           ruby-version: '3.3'
-      - name: Install JavaScript and CocoaPods dependencies
+          bundler-cache: true
+      - name: Identify native tools and install compiler cache
+        id: tools
         run: |
-          gem install cocoapods -v 1.17.0 --no-document
-          npm ci
+          command -v ccache >/dev/null || brew install ccache
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+          echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Cache CocoaPods dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            macos/Pods
+            ~/Library/Caches/CocoaPods
+          key: pods-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('Gemfile.lock', 'macos/Podfile', 'macos/Podfile.lock', 'package-lock.json') }}
+          restore-keys: pods-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-
+      - name: Cache native compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('macos/Podfile.lock', 'package-lock.json') }}-${{ github.sha }}
+          restore-keys: ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('macos/Podfile.lock', 'package-lock.json') }}-
+      - name: Install locked JavaScript and CocoaPods dependencies
+        run: |
+          ccache --zero-stats
+          npm ci --prefer-offline --no-audit --no-fund
           cp macos/Podfile.lock "$RUNNER_TEMP/gamepack-Podfile.lock"
-          pod install --project-directory=macos
-          ruby - "$RUNNER_TEMP/gamepack-Podfile.lock" macos/Podfile.lock <<'RUBY'
-          require 'yaml'
-          expected, actual = ARGV.map { |path| YAML.load_file(path) }
-          # React Native evaluates local podspecs using installed runner tooling.
-          # Keep the complete dependency graph and source/version lock unchanged;
-          # only generated spec checksums may differ between build environments.
-          expected.delete('SPEC CHECKSUMS')
-          actual.delete('SPEC CHECKSUMS')
-          abort 'CocoaPods dependency lock drifted; update and review Podfile.lock explicitly.' unless expected == actual
-          RUBY
-      - name: Verify Rust contracts
-        run: |
-          cargo fmt --all --check
-          cargo test --workspace --locked
-          cargo clippy --workspace --all-targets --locked -- -D warnings
+          bundle exec pod install --project-directory=macos
+          bundle exec ruby scripts/ci/verify-pod-lock.rb "$RUNNER_TEMP/gamepack-Podfile.lock" macos/Podfile.lock
+      - name: Verify macOS Rust contracts
+        if: matrix.arch == 'arm64'
+        run: cargo test --workspace --locked
       - name: Build the native macOS app
         run: bash scripts/build-macos.sh
+      - name: Report compiler cache statistics
+        if: always()
+        run: ccache --show-stats
       - name: Verify native architecture and embedded resources
         run: |
           native_arch="$GAMEPACK_PACKAGE_ARCH"
@@ -82,15 +98,16 @@ jobs:
       - name: Package the app and installer
         run: bash scripts/package-macos.sh
       - name: Upload macOS desktop package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-macos-${{ matrix.arch }}
           path: dist/packages/*
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
+          compression-level: 0
       - name: Upload compiler diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: diagnostics-macos-${{ matrix.arch }}
           path: artifacts/local/macos-build.log

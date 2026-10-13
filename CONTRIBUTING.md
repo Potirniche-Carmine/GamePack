@@ -1,6 +1,6 @@
 # Contributing to GamePack
 
-GamePack is pre-MVP. Contributions that make the existing offline review flow clearer, more reliable, or easier to build are especially useful.
+GamePack is preparing version 1.0.0. Contributions that make the existing offline review flow clearer, more reliable, or easier to build are especially useful.
 
 ## Start with the review flow
 
@@ -25,7 +25,7 @@ Only attach footage or screenshots you have permission to share. Remove private 
 ## Make a change
 
 1. Follow the [development guide](docs/development.md) to build the current `main` checkout.
-2. Keep the change focused and follow [AGENTS.md](AGENTS.md). This repository's active development work happens on `main`; outside contributors can submit a pull request from their fork targeting `main`.
+2. Keep the change focused and follow [AGENTS.md](AGENTS.md). Create a focused feature or fix branch from current `main`, then submit a pull request targeting `main` (from a fork for outside contributors).
 3. Run the checks relevant to your change. For changes spanning the interface and engine, use the full check list in the development guide.
 4. For UI changes, build and exercise the native app and inspect screenshots in **both light and dark themes**. Shared JavaScript tests alone do not verify native playback or appearance. Windows changes need native Windows verification; state clearly when that is still outstanding.
 5. Commit in logical checkpoints. In the pull request, explain the problem, the resulting behavior, how you verified it, and any remaining limitations.
@@ -40,7 +40,7 @@ Documentation-only changes need accurate commands, working links, and a readable
 - Preserve the single-frame drawing model and the immutable posted-comment contract.
 - Do not commit footage, databases, build output, credentials, or local verification screenshots.
 
-GitHub Actions build and packaging jobs are intentionally disabled. Re-enabling automation, publishing packages, or creating releases and tags requires an explicit maintainer request. Build and packaging workflows must remain restricted to `main` when re-enabled.
+GitHub Actions runs shared interface, version, Rust, Windows transport, and workflow checks on pull requests. Require the `CI required` check before merging. Native packages are built after changes reach `main`; release preparation reuses those artifacts and creates a draft. Publication requires an explicit maintainer request. See [CI and releases](docs/ci.md).
 
 ## License
 

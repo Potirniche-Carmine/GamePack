@@ -22,7 +22,6 @@ New-Item -ItemType Directory -Path (Join-Path $root 'artifacts\windows') -Force 
 Push-Location $root
 try {
     if (-not $SkipNpmInstall) { Run 'npm.cmd' @('ci', '--no-audit', '--no-fund') }
-    Run 'rustup.exe' @('default', 'stable-msvc')
     Run 'rustup.exe' @('target', 'add', $rustTarget)
     if (-not $SkipTests) {
         Run 'cargo.exe' @('test', '--workspace', '--locked')

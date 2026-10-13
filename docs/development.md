@@ -2,11 +2,11 @@
 
 [← GamePack](../README.md) · [Contributing](../CONTRIBUTING.md)
 
-GamePack uses a shared React Native interface, native desktop media players, and a Rust/SQLite engine connected through CXX. Work from `main`. Build and release automation is paused; run checks locally.
+GamePack uses a shared React Native interface, native desktop media players, and a Rust/SQLite engine connected through CXX. Start a feature branch from current `main`. Pull requests run shared checks; native packages build on `main`. See [CI and releases](ci.md).
 
 ## macOS
 
-Requires macOS 14 or later and Xcode installed and opened once. The build uses Node 20.19.4 or newer, Rust, and CocoaPods. The bootstrap script installs missing tools through Homebrew and rustup, then installs JavaScript and CocoaPods dependencies.
+Requires macOS 14 or later and Xcode installed and opened once. The build uses Node 22, the Rust version in `rust-toolchain.toml`, and CocoaPods from `Gemfile.lock`. The bootstrap script installs missing tools through Homebrew and rustup, then installs JavaScript and CocoaPods dependencies.
 
 ```sh
 git clone https://github.com/Potirniche-Carmine/GamePack.git
@@ -73,7 +73,7 @@ $env:GAMEPACK_HOME = Join-Path $env:USERPROFILE 'GamePack'
 
 The Windows installer records the root alongside the installed executable. App-owned SQLite data, profile, settings, managed media, drafts, cache, and temporary files stay under the configured root. OS frameworks may also maintain their usual system caches and preferences.
 
-Close the app before backing up the library. ZIP exchange is not implemented, and the pre-MVP storage format may change.
+Close the app before backing up the library. ZIP exchange is not implemented, and the storage format can evolve between versions.
 
 ## Checks
 
@@ -81,6 +81,7 @@ Install dependencies, then run the shared interface and engine checks:
 
 ```sh
 npm ci
+npm run check:version
 npm run typecheck
 npm run test:ui
 cargo fmt --all --check

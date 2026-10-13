@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  javascript:
+    name: Shared interface and versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      native: ${{ steps.changes.outputs.native }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - run: npm run check:version
+      - run: npm run typecheck
+      - run: npm run test:ui
+      - name: Select native builds
+        id: changes
+        run: node scripts/ci/native-changes.mjs
+
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: checks-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo fmt --all --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Verify Windows PowerShell JSON transport
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          cargo build --locked --bin gamepack
+          if ($LASTEXITCODE -ne 0) { throw 'Could not compile the Rust fixture CLI.' }
+          ./scripts/windows/test-contract.ps1 -CoreExecutable (Join-Path (Get-Location) 'target\debug\gamepack.exe')
+
+  workflows:
+    name: Workflow validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.7.12 --repo rhysd/actionlint --dir "$RUNNER_TEMP/actionlint" \
+            --pattern actionlint_1.7.12_linux_amd64.tar.gz --pattern actionlint_1.7.12_checksums.txt
+          cd "$RUNNER_TEMP/actionlint"
+          sha256sum --check --ignore-missing actionlint_1.7.12_checksums.txt
+          tar -xzf actionlint_1.7.12_linux_amd64.tar.gz actionlint
+      - run: '"$RUNNER_TEMP/actionlint/actionlint" -color'
+
+  required:
+    name: CI required
+    if: always()
+    needs: [javascript, rust, workflows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every check to pass
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: jq -e 'all(. == "success")' <<< "$RESULTS"
+
+  macos:
+    needs: [javascript, required]
+    if: github.ref == 'refs/heads/main' && needs.javascript.outputs.native == 'true'
+    uses: ./.github/workflows/macos.yml
+
+  windows:
+    needs: [javascript, required]
+    if: github.ref == 'refs/heads/main' && needs.javascript.outputs.native == 'true'
+    uses: ./.github/workflows/windows.yml

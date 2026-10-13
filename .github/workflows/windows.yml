@@ -1,86 +1,65 @@
-name: Windows native build
-# Paused during development. Re-enabling requires explicit user authorization.
-on:
-  workflow_dispatch:
-    inputs:
-      contract_only:
-        type: boolean
-        default: false
-        description: Run protocol fixtures only
-  workflow_call:
-    inputs:
-      contract_only:
-        type: boolean
-        default: false
-        required: false
+name: Windows native builds
 
-concurrency:
-  group: windows-${{ github.ref }}-${{ inputs.contract_only == true && 'contracts' || 'native' }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+on:
+  workflow_call:
+
 permissions:
   contents: read
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: always
+
 jobs:
-  contracts:
-    if: ${{ false && github.ref == 'refs/heads/main' && inputs.contract_only == true }}
-    name: Windows PowerShell protocol fixtures
-
-    runs-on: windows-2022
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: windows-contracts
-          cache-on-failure: true
-      - name: Build host Rust CLI and test the native JSON transport
-        shell: powershell
-        run: |
-          cargo build --locked --bin gamepack
-          if ($LASTEXITCODE -ne 0) { throw 'Could not compile the Rust fixture CLI.' }
-          ./scripts/windows/test-contract.ps1 -CoreExecutable (Join-Path (Get-Location) 'target\debug\gamepack.exe')
   windows:
-    if: ${{ false && github.ref == 'refs/heads/main' && inputs.contract_only != true }}
-
+    if: github.ref == 'refs/heads/main'
     name: Windows ${{ matrix.architecture }}
     runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
         architecture: [x64, arm64]
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: '22'
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: windows-${{ matrix.architecture }}
-          cache-on-failure: true
+      - name: Cache NuGet dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-v1-${{ runner.os }}-${{ matrix.architecture }}-${{ hashFiles('package-lock.json', 'apps/windows/**/*.vcxproj', 'apps/windows/**/*.wapproj', 'apps/windows/**/*.props', 'apps/windows/**/NuGet.Config') }}
+          restore-keys: nuget-v1-${{ runner.os }}-${{ matrix.architecture }}-
+      - name: Install locked JavaScript dependencies
+        run: npm ci --prefer-offline --no-audit --no-fund
       - name: Build Rust, shared JS, Windows C++ host and MSIX layout
         shell: powershell
-        run: ./scripts/windows/build.ps1 -Architecture ${{ matrix.architecture }}
-      - name: Create installable Windows development ZIP
+        run: ./scripts/windows/build.ps1 -Architecture ${{ matrix.architecture }} -SkipNpmInstall -SkipTests
+      - name: Create installable Windows ZIP
         shell: powershell
         run: ./scripts/windows/package.ps1 -Architecture ${{ matrix.architecture }}
       - name: Upload Windows release package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-windows-${{ matrix.architecture }}
-          retention-days: 7
+          retention-days: 14
           if-no-files-found: error
+          compression-level: 0
           path: artifacts/windows/release/*
-      - name: Upload native package and compiler diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload compiler diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: GamePack-windows-${{ matrix.architecture }}
-          retention-days: 1
-          if-no-files-found: warn
-          path: |
-            artifacts/windows/packages/**
-            artifacts/windows/*.binlog
-            apps/windows/GamePack.Package/bin/**/Release/**
+          name: diagnostics-windows-${{ matrix.architecture }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: artifacts/windows/*.binlog

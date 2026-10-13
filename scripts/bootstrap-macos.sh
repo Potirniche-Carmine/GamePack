@@ -18,11 +18,17 @@ if ! gamepack_has_supported_node; then
   export PATH="$(brew --prefix node@22)/bin:$PATH"
 fi
 gamepack_has_supported_node || { echo 'Node 20.19.4 or newer is required.' >&2; exit 1; }
-command -v pod >/dev/null 2>&1 || brew install cocoapods
+if ! command -v ruby >/dev/null 2>&1 || ! ruby -e 'exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("3.3") ? 0 : 1)'; then
+  brew install ruby
+  export PATH="$(brew --prefix ruby)/bin:$PATH"
+fi
+command -v bundle >/dev/null 2>&1 || gem install bundler --no-document
+bundle config set --local path vendor/bundle
+bundle install
 if ! command -v cargo >/dev/null 2>&1; then
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
   source "$HOME/.cargo/env"
 fi
 npm ci
-pod install --project-directory=macos
+bundle exec pod install --project-directory=macos
 printf '\nDependencies ready. Run bash scripts/install-macos.sh to build and install.\n'

@@ -1,6 +1,6 @@
 {
   "name": "gamepack",
-  "version": "0.1.3",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "start": "react-native start",
@@ -9,7 +9,8 @@
     "test:ui": "node scripts/test-ui.mjs",
     "test:rust": "cargo test --workspace",
     "build:macos": "bash scripts/build-macos.sh",
-    "install:macos": "bash scripts/install-macos.sh"
+    "install:macos": "bash scripts/install-macos.sh",
+    "check:version": "node scripts/ci/check-version.mjs"
   },
   "dependencies": {
     "lucide-react-native": "^1.55.0",
