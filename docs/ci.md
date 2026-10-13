@@ -16,10 +16,10 @@ After shared checks pass, `main` builds macOS ARM64/Intel and Windows ARM64/x64 
 | Rust registry, Git dependencies, compiled dependencies | rust-cache, separated by platform/job/target, Cargo manifests, lockfile, compiler and build environment; PRs restore without saving. |
 | Ruby gems | setup-ruby Bundler cache with `Gemfile.lock`, Ruby version, OS and architecture. |
 | CocoaPods and downloaded pod sources | OS/architecture, Xcode, npm lockfile, Gemfile lockfile and Podfile/lock; `pod install` always reconciles the restored cache and verifies the dependency graph. |
-| macOS C/C++ compilation | ccache through React Native's supported `USE_CCACHE` integration; 500 MB per architecture, keyed by Xcode/dependencies/commit with dependency-matched fallback. Statistics appear in each build. |
+| macOS C/C++ compilation | ccache through Xcode's C/C++ compiler launchers; 500 MB per architecture, keyed by Xcode/dependencies/commit with dependency-matched fallback. Statistics appear in each build. |
 | Windows NuGet packages | OS, target architecture, npm lockfile, native projects, props and NuGet configuration; MSBuild always restores and resolves dependencies. |
 
-Caches are disposable accelerators; a cold run must still build successfully. Native outputs, signed applications, and JavaScript installations are rebuilt. npm/Rust use their checked-in locks. Rust is pinned in `rust-toolchain.toml`, Node in `.node-version`, and CocoaPods in `Gemfile.lock`. Third-party workflow actions use immutable commit revisions. Update the pins and their version comments together.
+Caches are disposable accelerators; a cold run must still build successfully. Native outputs, signed applications, and JavaScript installations are rebuilt. npm/Rust use their checked-in locks. Rust is pinned in `rust-toolchain.toml`, Node in `.node-version`, and CocoaPods in `Gemfile.lock`. CI selects Xcode 26.3 for the macOS 26 SDK needed by the existing glass views while retaining the macOS 14 deployment target. Third-party workflow actions use immutable commit revisions. Update the pins and their version comments together.
 
 Packages are retained for 14 days. Compressed archives upload without redundant compression. Compiler diagnostics upload on failure and expire after 7 days. The first run populates caches; compare later runs before claiming a speed improvement.
 

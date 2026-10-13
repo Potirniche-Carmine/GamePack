@@ -6,7 +6,7 @@ GamePack uses a shared React Native interface, native desktop media players, and
 
 ## macOS
 
-Requires macOS 14 or later and Xcode installed and opened once. The build uses Node 22, the Rust version in `rust-toolchain.toml`, and CocoaPods from `Gemfile.lock`. The bootstrap script installs missing tools through Homebrew and rustup, then installs JavaScript and CocoaPods dependencies.
+The app supports macOS 14 or later. Building requires Xcode 26 or later, installed and opened once, on a macOS version supported by that Xcode release. The build uses Node 22, the Rust version in `rust-toolchain.toml`, and CocoaPods from `Gemfile.lock`. The bootstrap script installs missing tools through Homebrew and rustup, then installs JavaScript and CocoaPods dependencies.
 
 ```sh
 git clone https://github.com/Potirniche-Carmine/GamePack.git

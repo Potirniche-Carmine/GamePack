@@ -31,9 +31,8 @@ jobs:
       GAMEPACK_BUILD_JOBS: ${{ matrix.build_jobs }}
       GAMEPACK_PACKAGE_ARCH: ${{ matrix.arch }}
       GAMEPACK_SKIP_TESTS: '1'
-      USE_CCACHE: '1'
-      CCACHE_BASEDIR: ${{ github.workspace }}
-      CCACHE_MAXSIZE: 500M
+      GAMEPACK_CCACHE: '1'
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,6 +48,7 @@ jobs:
         with:
           key: macos-${{ matrix.arch }}
           env-vars: MACOSX_DEPLOYMENT_TARGET
+          cache-on-failure: true
       - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1
         with:
           ruby-version: '3.3'
@@ -57,10 +57,16 @@ jobs:
         id: tools
         run: |
           command -v ccache >/dev/null || brew install ccache
-          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+          ccache --set-config "cache_dir=$RUNNER_TEMP/ccache"
+          ccache --set-config max_size=500M
+          ccache --set-config compression=true
+          ccache --set-config depend_mode=true
+          ccache --set-config sloppiness=clang_index_store,ivfsoverlay,pch_defines,modules,time_macros
+          echo "ccache=$(ccache --get-config cache_dir)" >> "$GITHUB_OUTPUT"
           echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: Cache CocoaPods dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: pods-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             macos/Pods
@@ -68,11 +74,12 @@ jobs:
           key: pods-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('Gemfile.lock', 'macos/Podfile', 'macos/Podfile.lock', 'package-lock.json') }}
           restore-keys: pods-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-
       - name: Cache native compilation
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: compiler-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('macos/Podfile.lock', 'package-lock.json') }}-${{ github.sha }}
-          restore-keys: ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('macos/Podfile.lock', 'package-lock.json') }}-
+          path: ${{ steps.tools.outputs.ccache }}
+          key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('macos/Podfile.lock', 'package-lock.json') }}-${{ github.sha }}
+          restore-keys: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('macos/Podfile.lock', 'package-lock.json') }}-
       - name: Install locked JavaScript and CocoaPods dependencies
         run: |
           ccache --zero-stats
@@ -80,6 +87,14 @@ jobs:
           cp macos/Podfile.lock "$RUNNER_TEMP/gamepack-Podfile.lock"
           bundle exec pod install --project-directory=macos
           bundle exec ruby scripts/ci/verify-pod-lock.rb "$RUNNER_TEMP/gamepack-Podfile.lock" macos/Podfile.lock
+      - name: Save verified CocoaPods dependencies
+        if: steps.pods-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            macos/Pods
+            ~/Library/Caches/CocoaPods
+          key: ${{ steps.pods-cache.outputs.cache-primary-key }}
       - name: Verify macOS Rust contracts
         if: matrix.arch == 'arm64'
         run: cargo test --workspace --locked
@@ -88,6 +103,12 @@ jobs:
       - name: Report compiler cache statistics
         if: always()
         run: ccache --show-stats
+      - name: Save compiler cache for the next build
+        if: ${{ !cancelled() && steps.compiler-cache.outcome == 'success' && steps.compiler-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.tools.outputs.ccache }}
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
       - name: Verify native architecture and embedded resources
         run: |
           native_arch="$GAMEPACK_PACKAGE_ARCH"
