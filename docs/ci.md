@@ -1,6 +1,6 @@
 # CI and releases
 
-Pull requests target `main`. Keep feature and fix branches focused; agent branches use `codex/`. Merge after **CI required** passes. That aggregate check fails if any shared check fails or is cancelled, and remains present on documentation-only PRs. Configure it as a required status check in the repository's branch rules when branch protection is enabled.
+Pull requests target `main`. Keep feature and fix branches focused; agent branches use `codex/`. Merge after **CI required** passes. That aggregate check fails if any shared check fails or is cancelled, and remains present on documentation-only PRs. `main` requires pull requests, an up-to-date passing `CI required` check from GitHub Actions, and resolved conversations. Force pushes and deletion are disabled. A second reviewer is optional for solo maintenance; repository administrators retain their emergency bypass.
 
 ## Checks and native builds
 

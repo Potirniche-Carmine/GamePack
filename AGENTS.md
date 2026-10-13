@@ -9,4 +9,4 @@ GamePack is an offline desktop video review app for macOS and Windows (ARM64 and
 
 Verify native behavior and inspect screenshots in both themes before calling UI work complete. Keep demo footage and local verification screenshots out of the public repository.
 
-Commit completed work in logical checkpoints on the working branch. Complete the initial CI/1.0.0 preparation on `main`; use feature branches for subsequent work.
+Commit completed work in logical checkpoints on the working branch.
