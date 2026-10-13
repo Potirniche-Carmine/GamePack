@@ -6,6 +6,9 @@ gamepack_has_supported_node || { echo 'Run bash scripts/bootstrap-macos.sh to in
 command -v cargo >/dev/null 2>&1 || source "$HOME/.cargo/env"
 [[ -d node_modules ]] || npm ci
 [[ -d macos/Pods ]] || bundle exec pod install --project-directory=macos
+# The offline notice collector resolves the complete target dependency graph,
+# including metadata for test dependencies when CI has skipped local tests.
+cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
 MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release --locked -p gamepack-core
 if [[ "${GAMEPACK_SKIP_TESTS:-0}" != 1 ]]; then
   npm run typecheck

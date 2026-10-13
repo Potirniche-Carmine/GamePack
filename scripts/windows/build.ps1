@@ -23,6 +23,9 @@ Push-Location $root
 try {
     if (-not $SkipNpmInstall) { Run 'npm.cmd' @('ci', '--no-audit', '--no-fund') }
     Run 'rustup.exe' @('target', 'add', $rustTarget)
+    # The offline notice collector needs all target dependency metadata even
+    # when the separate CI checks have already covered the test suite.
+    Run 'cargo.exe' @('fetch', '--locked', '--target', $rustTarget)
     if (-not $SkipTests) {
         Run 'cargo.exe' @('test', '--workspace', '--locked')
         Run 'npm.cmd' @('run', 'typecheck')
