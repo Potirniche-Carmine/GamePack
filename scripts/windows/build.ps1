@@ -4,6 +4,10 @@ $ErrorActionPreference = 'Stop'
 $nativePlatform = if ($Architecture -eq 'arm64') { 'ARM64' } else { 'x64' }
 $rustTarget = if ($Architecture -eq 'arm64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+# cxx-build otherwise detects the target-triple subdirectory as its root on a
+# cold cross build. Export the absolute directory so headers always match the
+# native project's target\cxxbridge include path, with or without host tests.
+$env:CARGO_TARGET_DIR = Join-Path $root 'target'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path $vswhere)) { throw 'Visual Studio build tools are missing. Run scripts/windows/bootstrap.ps1.' }
 $vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -35,6 +39,9 @@ try {
     }
     # Keep C++ and Rust on the dynamic MSVC runtime; staticlib includes the CXX wrapper.
     Run 'cargo.exe' @('build', '--locked', '--release', '--target', $rustTarget, '-p', 'gamepack-core')
+    if (-not (Test-Path (Join-Path $root 'target\cxxbridge\gamepack-core\src\lib.rs.h'))) {
+        throw 'Rust build did not generate the CXX header at the native include path.'
+    }
     $bundle = Join-Path $root 'apps\windows\GamePack\Bundle'
     New-Item -ItemType Directory -Path $bundle -Force | Out-Null
     Run 'npx.cmd' @('--no-install', 'react-native', 'bundle', '--entry-file', 'index.js', '--platform', 'windows', '--dev', 'false', '--minify', 'true', '--bundle-output', (Join-Path $bundle 'index.windows.bundle'), '--assets-dest', $bundle)
