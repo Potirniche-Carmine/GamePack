@@ -4,6 +4,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#include "../shared/PlayerViewport.h"
 
 @interface GPPlayer : NSView
 @property(nonatomic,copy) NSString *source;
@@ -28,7 +29,7 @@
 @property(nonatomic,copy) RCTDirectEventBlock onActivity;
 - (void)pointerActivity;
 @property(nonatomic,copy) RCTDirectEventBlock onStrokeFlushFinished;
-- (void)zoomByFactor:(double)factor smooth:(BOOL)smooth;
+- (void)zoomByFactor:(double)factor atPoint:(NSPoint)point smooth:(BOOL)smooth;
 - (void)animateZoom:(CADisplayLink *)link;
 @end
 
@@ -132,6 +133,8 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   id _activityMonitor;
   double _requestedZoom;
   double _zoomTarget;
+  gamepack::ViewportOffset _zoomOffset;
+  gamepack::ViewportAnchor _zoomAnchor;
   CADisplayLink *_zoomDisplayLink;
 }
 - (BOOL)isFlipped { return YES; }
@@ -165,7 +168,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   CGSize size = _videoSize;
   CGFloat fit = size.width > 0 && size.height > 0 ? fmin(self.bounds.size.width / size.width, self.bounds.size.height / size.height) : 1;
   _videoLayer.bounds = CGRectMake(0, 0, size.width > 0 ? size.width * fit : self.bounds.size.width, size.height > 0 ? size.height * fit : self.bounds.size.height);
-  _videoLayer.position = CGPointMake(NSMidX(self.bounds), NSMidY(self.bounds));
+  _videoLayer.position = CGPointMake(NSMidX(self.bounds) + _zoomOffset.x * self.bounds.size.width, NSMidY(self.bounds) + _zoomOffset.y * self.bounds.size.height);
   _videoLayer.affineTransform = CGAffineTransformMakeScale(_zoom, _zoom);
   _overlay.frame = self.bounds;
   [CATransaction commit]; [_overlay setNeedsDisplay:YES];
@@ -196,10 +199,13 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)setZoom:(double)zoom { _requestedZoom = isfinite(zoom) ? fmin(4, fmax(1, zoom)) : 1; }
 - (void)applyZoom:(double)value notify:(BOOL)notify {
   if (fabs(value - _zoom) < 0.00001) return;
-  [self finishStroke]; _zoom = value;
-  [CATransaction begin]; [CATransaction setDisableActions:YES];
-  _videoLayer.affineTransform = CGAffineTransformMakeScale(_zoom, _zoom);
-  [CATransaction commit]; [_overlay setNeedsDisplay:YES];
+  [self finishStroke];
+  NSRect rect = [self contentRect];
+  _zoomOffset = gamepack::zoomAt(_zoomOffset, _zoom, value, _zoomAnchor,
+    rect.size.width / _zoom / fmax(1, self.bounds.size.width), rect.size.height / _zoom / fmax(1, self.bounds.size.height));
+  _zoom = value;
+  // Apply video and ink geometry in the same display transaction.
+  [self layout]; [_overlay displayIfNeeded];
   if (notify && self.onZoom) self.onZoom(@{@"zoom":@(_zoom), @"zoomToken":@(_zoomToken)});
 }
 - (void)animateZoom:(CADisplayLink *)link {
@@ -208,9 +214,10 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   if (fabs(next - _zoomTarget) < 0.0005) { next = _zoomTarget; [_zoomDisplayLink invalidate]; _zoomDisplayLink = nil; }
   [self applyZoom:next notify:YES];
 }
-- (void)zoomByFactor:(double)factor smooth:(BOOL)smooth {
+- (void)zoomByFactor:(double)factor atPoint:(NSPoint)point smooth:(BOOL)smooth {
   if (!isfinite(factor) || factor <= 0 || !_player.currentItem) return;
   [self pointerActivity];
+  _zoomAnchor = {point.x / fmax(1, self.bounds.size.width), point.y / fmax(1, self.bounds.size.height)};
   // Continuous input follows the fingers directly. Only discrete wheel steps
   // accumulate into a short, interruptible native display-link transition.
   _zoomTarget = fmin(4, fmax(1, (smooth ? _zoomTarget : _zoom) * factor));
@@ -235,6 +242,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)didSetProps:(NSArray<NSString *> *)changedProps {
   if ([changedProps containsObject:@"zoomToken"]) {
     [_zoomDisplayLink invalidate]; _zoomDisplayLink = nil;
+    _zoomAnchor = {};
     _zoomTarget = _requestedZoom; [self applyZoom:_zoomTarget notify:NO];
   }
   if ([changedProps containsObject:@"reviewEndUs"] || [changedProps containsObject:@"rate"] || [changedProps containsObject:@"source"]) [self updateReviewBoundary];
@@ -308,7 +316,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   CGSize size = _videoSize; if (size.width <= 0 || size.height <= 0) return self.bounds;
   CGFloat scale = fmin(self.bounds.size.width/size.width, self.bounds.size.height/size.height) * _zoom;
   CGSize fitted = CGSizeMake(size.width*scale,size.height*scale);
-  return NSMakeRect((self.bounds.size.width-fitted.width)/2,(self.bounds.size.height-fitted.height)/2,fitted.width,fitted.height);
+  return NSMakeRect((self.bounds.size.width-fitted.width)/2 + _zoomOffset.x * self.bounds.size.width, (self.bounds.size.height-fitted.height)/2 + _zoomOffset.y * self.bounds.size.height, fitted.width, fitted.height);
 }
 - (NSDictionary *)sample:(NSEvent *)event {
   NSRect rect = [self contentRect]; NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
@@ -446,15 +454,15 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   [self.owner continueStroke:event]; [self.owner finishStroke];
 }
 - (void)magnifyWithEvent:(NSEvent *)event {
-  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:fmax(0.05, 1 + event.magnification) smooth:NO];
+  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:fmax(0.05, 1 + event.magnification) atPoint:[self convertPoint:event.locationInWindow fromView:nil] smooth:NO];
 }
 - (void)smartMagnifyWithEvent:(NSEvent *)event {
-  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:(self.owner.zoom > 1 ? 1 / self.owner.zoom : 2) smooth:NO];
+  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:(self.owner.zoom > 1 ? 1 / self.owner.zoom : 2) atPoint:[self convertPoint:event.locationInWindow fromView:nil] smooth:NO];
 }
 - (void)scrollWheel:(NSEvent *)event {
   if (![self eventTargetsOverlay:event] || fabs(event.scrollingDeltaY) < 0.001) return;
   double delta = event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 0.0025 : 0.08);
-  [self.owner zoomByFactor:exp(fmin(0.18, fmax(-0.18, delta))) smooth:!event.hasPreciseScrollingDeltas];
+  [self.owner zoomByFactor:exp(fmin(0.18, fmax(-0.18, delta))) atPoint:[self convertPoint:event.locationInWindow fromView:nil] smooth:!event.hasPreciseScrollingDeltas];
 }
 @end
 @interface GamePackPlayerManager : RCTViewManager @end

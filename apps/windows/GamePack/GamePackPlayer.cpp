@@ -1,6 +1,7 @@
 #include "pch.h"
 #include <winrt/Windows.UI.ViewManagement.h>
 #include "GamePackPlayer.h"
+#include "../../../native/shared/PlayerViewport.h"
 using namespace winrt;
 using namespace Windows::Foundation;
 using namespace Windows::Data::Json;
@@ -39,7 +40,9 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   Grid root;
   MediaPlayerElement element;
   Canvas overlay;
-  ScaleTransform zoomTransform;
+  CompositeTransform zoomTransform;
+  gamepack::ViewportOffset zoomOffset;
+  gamepack::ViewportAnchor zoomAnchor;
   RectangleGeometry viewportClip;
   Windows::Media::Playback::MediaPlayer player;
   DispatcherTimer timer;
@@ -87,18 +90,23 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     double vw = session.NaturalVideoWidth(), vh = session.NaturalVideoHeight();
     if (vw <= 0 || vh <= 0 || w <= 0 || h <= 0) return Rect{0, 0, 0, 0};
     double fit = std::min(w / vw, h / vh) * zoom;
-    return Rect{static_cast<float>((w-vw*fit)/2), static_cast<float>((h-vh*fit)/2), static_cast<float>(vw*fit), static_cast<float>(vh*fit)};
+    return Rect{static_cast<float>((w-vw*fit)/2 + zoomOffset.x*w), static_cast<float>((h-vh*fit)/2 + zoomOffset.y*h), static_cast<float>(vw*fit), static_cast<float>(vh*fit)};
   }
   void UpdateViewport() {
     double width=root.ActualWidth(), height=root.ActualHeight();
     zoomTransform.CenterX(width/2); zoomTransform.CenterY(height/2);
     zoomTransform.ScaleX(zoom); zoomTransform.ScaleY(zoom);
+    zoomTransform.TranslateX(zoomOffset.x*width); zoomTransform.TranslateY(zoomOffset.y*height);
     viewportClip.Rect(Rect{0,0,static_cast<float>(width),static_cast<float>(height)});
   }
   void SetZoom(double value, bool notify=false) {
     value=std::isfinite(value) ? std::clamp(value,1.0,4.0) : 1;
     if (std::abs(value-zoom)<0.00001) return;
-    Finish(); zoom=value; UpdateViewport(); Render();
+    Finish();
+    auto rect=ContentRect();
+    zoomOffset=gamepack::zoomAt(zoomOffset,zoom,value,zoomAnchor,
+      rect.Width/zoom/std::max(1.0,root.ActualWidth()),rect.Height/zoom/std::max(1.0,root.ActualHeight()));
+    zoom=value; UpdateViewport(); Render();
     if (notify) context.DispatchEvent(root,L"topZoom",JSValueObject{{"zoom",zoom},{"zoomToken",zoomToken}});
   }
   void AnimateZoom() {
@@ -246,8 +254,11 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     overlay.PointerCaptureLost([weak](auto const&, auto const&) { if (auto self=weak.lock()) self->Finish(); });
     overlay.PointerWheelChanged([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
       if (auto self=weak.lock(); self && !self->source.empty()) {
-        auto properties=args.GetCurrentPoint(self->overlay).Properties();
+        auto point=args.GetCurrentPoint(self->overlay);
+        auto properties=point.Properties();
         if (properties.IsHorizontalMouseWheel()) return;
+        auto position=point.Position();
+        self->zoomAnchor={position.X/std::max(1.0,self->root.ActualWidth()),position.Y/std::max(1.0,self->root.ActualHeight())};
         self->zoomTarget=std::clamp(self->zoomTarget*std::pow(1.1,properties.MouseWheelDelta()/120.0),1.0,4.0);
         if (!Windows::UI::ViewManagement::UISettings{}.AnimationsEnabled()) self->SetZoom(self->zoomTarget,true);
         args.Handled(true);
@@ -428,7 +439,7 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
     if (auto v=props.find("tool");v!=props.end()) { auto tool=to_hstring(v->second.AsString()); if (tool!=p->tool) p->Finish(); p->tool=tool; p->overlay.IsHitTestVisible(true); }
     if (auto v=props.find("zoom");v!=props.end()) p->requestedZoom=v->second.AsDouble();
     if (auto v=props.find("zoomToken");v!=props.end() && v->second.AsInt64()!=p->zoomToken) {
-      p->zoomToken=v->second.AsInt64(); p->SetZoom(p->requestedZoom); p->zoomTarget=p->zoom;
+      p->zoomToken=v->second.AsInt64(); p->zoomAnchor={}; p->SetZoom(p->requestedZoom); p->zoomTarget=p->zoom;
     }
     if (auto v=props.find("reviewEndUs");v!=props.end()) p->reviewEnd=v->second.AsInt64();
     if (auto v=props.find("stepFrames");v!=props.end()) p->stepFrames=v->second.AsInt64();
