@@ -65,9 +65,14 @@ test('Play leaves every comment on the visible frame and still stops at the next
 test('only same-frame root conversations receive stable local numbers', () => {
   const records = [comment('later', 5), comment('b', 3), comment('reply', 3, 'a'), comment('a', 3), comment('alone', 1)];
   const before = structuredClone(records);
-  assert.deepEqual([...conversationNumbers(records)], [['a', 1], ['b', 2]]);
-  assert.deepEqual([...conversationNumbers([...records].reverse())], [['a', 1], ['b', 2]]);
+  assert.deepEqual([...conversationNumbers(notesAtTime(records, 3 * second))], [['a', 1], ['b', 2]]);
+  assert.deepEqual([...conversationNumbers(notesAtTime([...records].reverse(), 3 * second))], [['a', 1], ['b', 2]]);
   assert.deepEqual([...conversationNumbers([comment('alone'), comment('reply', 0, 'alone')])], []);
   assert.deepEqual([...conversationNumbers([])], []);
   assert.deepEqual(records, before);
+});
+
+test('notes within native clock tolerance still receive distinct numbers', () => {
+  const records = [comment('a', 1), comment('b', 1.0015), comment('c', 1.003)];
+  assert.deepEqual([...conversationNumbers(notesAtTime(records, 1001500))], [['a', 1], ['b', 2], ['c', 3]]);
 });

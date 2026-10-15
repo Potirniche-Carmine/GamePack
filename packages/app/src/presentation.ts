@@ -17,10 +17,7 @@ export function notesAtTime(comments: readonly Comment[], time: number): Comment
 /** Numbers distinguish conversations on the current frame, never a lone note or reply. */
 export function conversationNumbers(notes: readonly Comment[]): ReadonlyMap<string, number> {
   const roots = notes.filter(note => !note.parent_comment_id).sort(compareComments);
-  return new Map(roots.flatMap(note => {
-    const siblings = roots.filter(other => sameFrame(other.anchor.at_us, note.anchor.at_us));
-    return siblings.length > 1 ? [[note.comment_id, siblings.indexOf(note) + 1] as const] : [];
-  }));
+  return new Map(roots.length > 1 ? roots.map((note, index) => [note.comment_id, index + 1]) : []);
 }
 
 export function adjacentNote(comments: readonly Comment[], selected: string | null, time: number, _duration: number, direction: -1 | 1): Comment | undefined {

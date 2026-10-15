@@ -16,7 +16,7 @@ import type {Comment, Draft, Video} from './types';
 
 type Props = {
   video: Video; time: number; duration: number; paused: boolean; reviewMode: 'watch' | 'review';
-  activityToken: number; sceneReady: boolean; drawingsVisible: boolean; comments: Comment[]; notes: Comment[]; selectedId: string | null; draft: Draft | null; expanded: ReadonlySet<string>;
+  activityToken: number; sceneReady: boolean; comments: Comment[]; notes: Comment[]; selectedId: string | null; draft: Draft | null; expanded: ReadonlySet<string>;
   disabled: boolean; header: ReactNode; composer: ReactNode; toolbar: ReactNode; timeline: ReactNode; popover: ReactNode; children: ReactNode;
   rate: number; zoom: number; presenting: boolean; popoverKind: 'speed' | 'zoom';
   onMode: (mode: 'watch' | 'review') => void; onSelect: (note: Comment) => void; onReply: (note: Comment) => void;
@@ -25,7 +25,7 @@ type Props = {
 };
 
 export function ReviewWorkspace(props: Props) {
-  const {video, time, duration, notes, comments, selectedId, draft, disabled, composer} = props;
+  const {video, time, duration, notes, comments, draft, disabled, composer} = props;
   const {colors, dark} = useTheme();
   const [area, setArea] = useState({width: 1, height: 1});
   const [menuAnchors, setMenuAnchors] = useState({speed: 0, zoom: 0});
@@ -62,7 +62,6 @@ export function ReviewWorkspace(props: Props) {
     <View pointerEvents="box-none" style={styles.stage}>
       <View style={[styles.video, {position: 'absolute', left: rect.x, top: rect.y, width: Math.max(1, rect.width), height: Math.max(1, rect.height)}]}>
         {props.children}
-
       </View>
     </View>
     {!props.presenting && <Glass style={styles.header}>{props.header}</Glass>}

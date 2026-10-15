@@ -746,7 +746,7 @@ export default function App() {
       <View style={s.stage}>
         {!video ? <LibraryBrowser {...libraryProps} /> : <>
         <ReviewWorkspace header={header} video={video} time={time} duration={duration} paused={paused} reviewMode={reviewMode} onMode={changeReviewMode}
-          comments={videoComments} activityToken={activityToken} sceneReady={!!presentedSceneKey} drawingsVisible={annotationsVisible} notes={onVideoNotes} selectedId={commentId} draft={draft}
+          comments={videoComments} activityToken={activityToken} sceneReady={!!presentedSceneKey} notes={onVideoNotes} selectedId={commentId} draft={draft}
           composer={composerOpen ? composer : null} expanded={expanded} disabled={!!busy || dialogOpen}
           onSelect={selectComment} onReply={replyToNote} onExpand={item => setExpanded(previous => { const next = new Set(previous); if (next.has(item.comment_id)) next.delete(item.comment_id); else next.add(item.comment_id); return next; })}
           onPlay={play} rate={rate} zoom={zoom} presenting={presenting}
