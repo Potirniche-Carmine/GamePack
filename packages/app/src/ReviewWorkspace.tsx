@@ -1,14 +1,14 @@
 import React, {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {Animated, Image, Pressable, ScrollView, StyleSheet, Text, View, type GestureResponderEvent} from 'react-native';
+import {Animated, Image, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {Avatar} from './Avatar';
 import {Button, timeLabel} from './components';
 import {conversationRoot, discussionReplies} from './discussion';
 import {Glass} from './Glass';
-import {ANNOTATION_COLOR, compareComments} from './playback';
-import {conversationPlacement, moveConversation, reviewViewport, type Point, type Size} from './spatial';
+import {ANNOTATION_COLOR} from './playback';
+import {conversationPlacement, reviewViewport} from './spatial';
 import {PlaybackDock} from './PlaybackDock';
 import {useReducedMotion} from './motion';
-import {conversationPins} from './presentation';
+import {conversationNumbers} from './presentation';
 import {useTheme} from './theme';
 import {useVideoThumbnails} from './useVideoThumbnails';
 import type {Comment, Draft, Video} from './types';
@@ -52,38 +52,24 @@ export function ReviewWorkspace(props: Props) {
   }, [hidden, reduce, opacity]);
   const thumbnails = useVideoThumbnails(video);
   const ambient = thumbnails[Math.min(thumbnails.length - 1, Math.floor(time / Math.max(1, duration) * thumbnails.length))];
-  const ordered = useMemo(() => comments.filter(note => !note.parent_comment_id).sort(compareComments), [comments]);
-  const numbers = useMemo(() => new Map(ordered.map((note, index) => [note.comment_id, index + 1])), [ordered]);
+  const numbers = useMemo(() => conversationNumbers(notes), [notes]);
   const visibleDraft = reviewing && composer && draft && (draft.parent_comment_id || draft.drawings.length) ? draft : null;
   const replyingTo = draft?.parent_comment_id ? conversationRoot(comments, draft.parent_comment_id) : null;
   const visibleNotes = replyingTo ? notes.filter(note => note.comment_id === replyingTo.comment_id) : notes;
-  const pins = conversationPins(comments, visibleNotes);
-  const anchor = visibleDraft ?? visibleNotes.find(note => note.comment_id === selectedId) ?? visibleNotes[0];
-  const lastDrawing = anchor?.drawings[anchor.drawings.length - 1];
-  const endpoint = lastDrawing?.samples[lastDrawing.samples.length - 1] ?? (anchor?.position ? {x: anchor.position.x * 1000000, y: anchor.position.y * 1000000} : undefined);
-  const placement = conversationPlacement(area, rect, endpoint, props.presenting, props.zoom);
+  const placement = conversationPlacement(area, props.presenting);
   return <View onTouchStart={wake} onPointerMove={wake} style={styles.workspace} onLayout={event => setArea(event.nativeEvent.layout)}>
     {!!ambient && <AmbientVideo key={video.id} uri={ambient} />}
     <View pointerEvents="box-none" style={styles.stage}>
       <View style={[styles.video, {position: 'absolute', left: rect.x, top: rect.y, width: Math.max(1, rect.width), height: Math.max(1, rect.height)}]}>
         {props.children}
-        {reviewing && props.sceneReady && props.paused && props.drawingsVisible && (!draft || !!draft.parent_comment_id) && pins.map(({note, point}) => <Pressable key={note.comment_id} accessibilityRole="button"
-          accessibilityLabel={`Drawing for comment ${numbers.get(note.comment_id)}: ${note.text || 'Drawing'}`}
-          accessibilityState={{selected: note.comment_id === selectedId}} disabled={disabled} onPress={() => props.onSelect(note)}
-          style={({pressed}) => [styles.pin, {left: Math.max(2, Math.min(rect.width - 26, point.x / 1000000 * rect.width + 8)),
-            top: Math.max(2, Math.min(rect.height - 26, point.y / 1000000 * rect.height - 28)),
-            opacity: pressed ? .6 : selectedId && selectedId !== note.comment_id ? .4 : 1}]}>
-          <Text style={styles.pinNumber}>{numbers.get(note.comment_id)}</Text>
-        </Pressable>)}
+
       </View>
     </View>
     {!props.presenting && <Glass style={styles.header}>{props.header}</Glass>}
     {reviewing && <View pointerEvents="box-none" style={[styles.toolRail, {top: props.presenting ? 16 : 76}]}><Glass style={styles.tools}>{props.toolbar}</Glass></View>}
-    {reviewing && ((props.sceneReady && !!visibleNotes.length) || !!visibleDraft) && <FloatingConversation
-      key={`${video.id}:${visibleDraft?.id ?? selectedId ?? visibleNotes[0]?.comment_id ?? ''}:${anchor?.anchor.at_us ?? 0}`}
-      area={area} placement={placement} fullscreen={props.presenting}>
+    {reviewing && ((props.sceneReady && !!visibleNotes.length) || !!visibleDraft) && <View style={[styles.conversations, placement]}>
       <NoteColumn {...props} notes={props.sceneReady ? visibleNotes : []} draft={visibleDraft} numbers={numbers} composer={visibleDraft ? composer : null} />
-    </FloatingConversation>}
+    </View>}
     <PlaybackDock available={area.width} duration={duration} reviewing={reviewing} disabled={disabled} hidden={hidden} opacity={opacity}
       onInteractionChange={setOverControls} popover={props.popover} popoverCenter={menuAnchors[props.popoverKind]}>
       <View style={styles.transport}>
@@ -107,31 +93,6 @@ export function ReviewWorkspace(props: Props) {
       </View>
       <View style={styles.timeline}>{props.timeline}</View>
     </PlaybackDock>
-  </View>;
-}
-
-function FloatingConversation({area, placement, fullscreen, children}: {
-  area: Size; placement: ReturnType<typeof conversationPlacement>; fullscreen: boolean; children: ReactNode;
-}) {
-  const {colors} = useTheme();
-  const [offset, setOffset] = useState<Point>({x: 0, y: 0});
-  const drag = useRef<{point: Point; left: number; top: number} | null>(null);
-  const position = moveConversation(area, placement, offset, fullscreen);
-  const move = (event: GestureResponderEvent) => {
-    const start = drag.current;
-    if (!start) return;
-    const next = moveConversation(area, placement, {x: start.left - placement.left + event.nativeEvent.pageX - start.point.x,
-      y: start.top - placement.top + event.nativeEvent.pageY - start.point.y}, fullscreen);
-    setOffset({x: next.left - placement.left, y: next.top - placement.top});
-  };
-  return <View style={[styles.conversations, placement, position]}>
-    <View accessibilityLabel="Move comments" style={styles.dragHandle}
-      onStartShouldSetResponder={() => true} onResponderTerminationRequest={() => false}
-      onResponderGrant={event => { drag.current = {point: {x: event.nativeEvent.pageX, y: event.nativeEvent.pageY}, ...position}; }}
-      onResponderMove={move} onResponderRelease={event => { move(event); drag.current = null; }} onResponderTerminate={() => { drag.current = null; }}>
-      <View pointerEvents="none" style={[styles.dragGrip, {backgroundColor: colors.muted}]} />
-    </View>
-    {children}
   </View>;
 }
 
@@ -171,9 +132,9 @@ function NoteColumn(props: Props & {numbers: ReadonlyMap<string, number>}) {
       {rows.map(({note, replies}, index) => {
         const expanded = props.expanded.has(note.comment_id);
         return <Glass key={note.comment_id} selected={props.selectedId === note.comment_id || replying?.comment_id === note.comment_id} style={[styles.note, {height: rowHeight(index)}]}>
-          <Pressable disabled={props.disabled} accessibilityRole="button" accessibilityLabel={`Select comment ${props.numbers.get(note.comment_id)} by ${note.name_at_posting}`}
+          <Pressable disabled={props.disabled} accessibilityRole="button" accessibilityLabel={`Select comment${props.numbers.has(note.comment_id) ? ` ${props.numbers.get(note.comment_id)}` : ''} by ${note.name_at_posting}`}
             onPress={() => props.onSelect(note)} style={styles.noteHeader}>
-            <View style={styles.number}><Text style={styles.pinNumber}>{props.numbers.get(note.comment_id)}</Text></View>
+            {props.numbers.has(note.comment_id) && <View style={styles.number}><Text style={styles.pinNumber}>{props.numbers.get(note.comment_id)}</Text></View>}
             <Avatar name={note.name_at_posting} size={22} /><Text numberOfLines={1} style={[styles.author, {color: colors.text}]}>{note.name_at_posting}</Text>
             <Text style={[styles.timestamp, {color: colors.muted}]}>{timeLabel(note.anchor.at_us)}</Text>
           </Pressable>
@@ -187,7 +148,7 @@ function NoteColumn(props: Props & {numbers: ReadonlyMap<string, number>}) {
             </View>)}
           </ScrollView>
           <View style={styles.noteActions}>
-            {!!replies.length && <Button quiet compact label={`${expanded ? 'Hide' : 'Show'} replies to comment ${props.numbers.get(note.comment_id)}`} disabled={props.disabled} onPress={() => props.onExpand(note)}>{replies.length} {replies.length === 1 ? 'reply' : 'replies'}</Button>}
+            {!!replies.length && <Button quiet compact label={`${expanded ? 'Hide' : 'Show'} replies to ${note.name_at_posting}`} disabled={props.disabled} onPress={() => props.onExpand(note)}>{replies.length} {replies.length === 1 ? 'reply' : 'replies'}</Button>}
             <View style={{flex: 1}} /><Button quiet compact label={`Reply to ${note.name_at_posting}`} disabled={props.disabled} onPress={() => props.onReply(note)}>Reply</Button>
           </View>
         </Glass>;
@@ -206,9 +167,6 @@ const styles = StyleSheet.create({
   toolRail: {position: 'absolute', left: 16, top: 86, bottom: 150, justifyContent: 'center', alignItems: 'flex-start', zIndex: 10},
   tools: {alignItems: 'center', padding: 6, gap: 4, borderRadius: 24},
   conversations: {position: 'absolute'},
-  dragHandle: {height: 18, width: 64, alignSelf: 'center', alignItems: 'center', justifyContent: 'center'},
-  dragGrip: {width: 28, height: 3, borderRadius: 2},
-  pin: {position: 'absolute', width: 24, height: 24, backgroundColor: ANNOTATION_COLOR, borderWidth: 1.5, borderColor: '#ffffff', borderRadius: 12, alignItems: 'center', justifyContent: 'center'},
   pinNumber: {color: '#15344e', fontSize: 11, fontWeight: '700'},
   noteColumn: {flexShrink: 1},
   noteContent: {gap: 10, paddingVertical: 1},

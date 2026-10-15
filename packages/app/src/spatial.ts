@@ -23,17 +23,11 @@ export function reviewViewport(view: Size, media: Size, reviewing: boolean, full
   return {...fitted, x: fitted.x + left, y: fitted.y + top};
 }
 
-/** Start conversations on the right, above the footage, near their drawing. */
-export function conversationPlacement(view: Size, rect: Rect, point: Point | undefined, fullscreen: boolean, zoom = 1) {
-  const top = fullscreen ? 16 : 76, bottom = Math.max(top, view.height - 204);
-  const height = Math.min(300, bottom - top);
-  const y = rect.y + ((point?.y ?? 500000) / 1000000 * zoom - (zoom - 1) / 2) * rect.height;
-  return {left: view.width - 320, top: clamp(y - 24, top, bottom - height), width: 304, maxHeight: height};
-}
-
-export function moveConversation(view: Size, placement: {left: number; top: number; width: number; maxHeight: number}, offset: Point, fullscreen: boolean) {
-  return {left: clamp(placement.left + offset.x, 76, view.width - placement.width - 16),
-    top: clamp(placement.top + offset.y, fullscreen ? 16 : 76, view.height - 204 - placement.maxHeight)};
+/** A stable right-side rail, independent of drawing geometry, selection and zoom. */
+export function conversationPlacement(view: Size, fullscreen: boolean) {
+  const top = fullscreen ? 16 : 76;
+  const width = Math.min(304, Math.max(1, view.width - 92));
+  return {left: Math.max(76, view.width - width - 16), top, width, maxHeight: Math.max(0, view.height - top - 204)};
 }
 
 export function drawingEndPosition(samples: readonly Point[]): Point | undefined {

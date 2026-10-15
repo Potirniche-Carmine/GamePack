@@ -14,20 +14,13 @@ export function notesAtTime(comments: readonly Comment[], time: number): Comment
     .sort(compareComments);
 }
 
-/** A conversation has one marker, even when its comment and replies contain
- * several drawings. Keep its anchor independent of zoom so it cannot jump to
- * another stroke as the video is magnified. Fall back to reply geometry. */
-export function conversationPins(comments: readonly Comment[], notes: readonly Comment[]) {
-  return notes.flatMap(note => {
-    const drawings = [note, ...comments.filter(comment => comment.comment_id !== note.comment_id
-      && conversationRoot(comments, comment.comment_id)?.comment_id === note.comment_id).sort(compareComments)]
-      .flatMap(comment => comment.drawings);
-    for (const drawing of drawings) {
-      const point = drawing.samples[0];
-      if (point) return [{note, point}];
-    }
-    return [];
-  });
+/** Numbers distinguish conversations on the current frame, never a lone note or reply. */
+export function conversationNumbers(notes: readonly Comment[]): ReadonlyMap<string, number> {
+  const roots = notes.filter(note => !note.parent_comment_id).sort(compareComments);
+  return new Map(roots.flatMap(note => {
+    const siblings = roots.filter(other => sameFrame(other.anchor.at_us, note.anchor.at_us));
+    return siblings.length > 1 ? [[note.comment_id, siblings.indexOf(note) + 1] as const] : [];
+  }));
 }
 
 export function adjacentNote(comments: readonly Comment[], selected: string | null, time: number, _duration: number, direction: -1 | 1): Comment | undefined {
