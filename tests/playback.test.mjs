@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {annotationScene, sameFrame} from '../packages/app/src/playback.ts';
+import {annotationScene, annotationSceneKey, sameFrame} from '../packages/app/src/playback.ts';
 const record = (id, at_us = 1000000) => ({comment_id: id, anchor: {kind: 'point', at_us}, drawings: [
   {id: 'stroke', tool: 'pen', width: 3500, samples: [{x: 100000, y: 200000}, {x: 700000, y: 800000}]},
 ]});
@@ -45,15 +45,28 @@ test('native clock settling is tolerated without a playback visibility window', 
   assert.equal(annotationScene([eof], 10000000, false), null);
 });
 
-test('review preloads only the upcoming stop with a short native preview window', () => {
+test('review preloads the complete upcoming scene without an early drawing preview', () => {
   const records = [record('first'), record('second', 2000000)];
   const scene = annotationScene(records, 500000, false, null, 1000000);
   assert.equal(scene.anchor.at_us, 1000000);
-  assert.equal(scene.preview_lead_us, 80000);
+  assert.equal(scene.preview_lead_us, undefined);
+  assert.deepEqual(scene, annotationScene(records, 1000000, true));
   assert.equal(scene.drawings.length, 1);
   assert.equal(scene.drawings[0].id, 'first:stroke');
   assert.equal(scene.id, annotationScene(records, 1000000, true).id);
   assert.equal(annotationScene(records, 2000000, true).preview_lead_us, undefined);
   assert.equal(annotationScene(records, 500000, false), null);
   assert.equal(annotationScene(records, 500000, false, null, 3000000), null);
+});
+
+test('presentation readiness survives selection and draft edits but never a seek or frame step', () => {
+  const records = [record('first'), record('second')];
+  const initial = annotationSceneKey(JSON.stringify(annotationScene(records, 1000000, true)), 2, 0);
+  const selected = annotationSceneKey(JSON.stringify(annotationScene(records, 1000000, true, 'second')), 2, 0);
+  assert.equal(initial, selected);
+  const draft = {id: 'draft', drawings: []};
+  assert.equal(annotationSceneKey(JSON.stringify(draft), 2, 0), annotationSceneKey(JSON.stringify({...draft, drawings: records[0].drawings}), 2, 0));
+  assert.notEqual(initial, annotationSceneKey(JSON.stringify(annotationScene(records, 1000000, true)), 3, 0));
+  assert.notEqual(initial, annotationSceneKey(JSON.stringify(annotationScene(records, 1000000, true)), 2, 1));
+  assert.equal(annotationSceneKey('', 2, 0), '');
 });

@@ -19,6 +19,7 @@
 @property(nonatomic) NSInteger stepFrames;
 @property(nonatomic) double reviewEndUs;
 @property(nonatomic,copy) NSString *sceneJson;
+@property(nonatomic,copy) NSString *presentedSceneKey;
 @property(nonatomic,copy) NSString *tool;
 @property(nonatomic,copy) RCTDirectEventBlock onTime;
 @property(nonatomic,copy) RCTDirectEventBlock onDrawing;
@@ -266,6 +267,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
     if (_paused || _pendingStrokeFlushToken) [_player pause];
     else if (!_seeking) _player.rate = _rate;
   }
+  if ([changedProps containsObject:@"presentedSceneKey"]) [_overlay displayIfNeeded];
   // Publish only after the whole prop batch, including its seek token, is applied.
   if ([changedProps containsObject:@"paused"]) [self emitTime:NO];
 }
@@ -288,6 +290,10 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   [_player seekToTime:CMTimeMake((int64_t)fmax(0, target), 1000000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL complete) {
     dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; self->_settlingReviewStop = NO; if (!self.paused && complete && !self->_pendingStrokeFlushToken) self->_player.rate = self.rate; [self applyFrameSteps]; [self emitStrokeFlushIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:reviewStop && complete]; });
   }];
+}
+- (void)setPresentedSceneKey:(NSString *)key {
+  if (!key.length && _presentedSceneKey.length) _readyKey = nil;
+  _presentedSceneKey = [key copy]; [_overlay setNeedsDisplay:YES];
 }
 - (void)setSceneJson:(NSString *)sceneJson { _sceneJson = [sceneJson copy]; }
 - (void)setTool:(NSString *)tool { _tool = [tool copy]; }
@@ -396,18 +402,19 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)drawOverlay {
   NSRect rect=[self contentRect]; [NSGraphicsContext saveGraphicsState]; NSRectClip(rect);
   int64_t anchor = [_scene[@"anchor"][@"at_us"] longLongValue], time = [self timeUs];
-  double distance = _rate < 0 ? time - anchor : anchor - time;
-  BOOL atReviewStop = _reviewEndUs >= 0 && llabs(anchor - (int64_t)_reviewEndUs) <= 2000;
-  BOOL preview = !_paused && atReviewStop && distance >= 0 && distance <= [_scene[@"preview_lead_us"] doubleValue] * fabs(_rate);
-  BOOL visible = (_settlingReviewStop && atReviewStop) || (!_seeking && (preview || (_paused && llabs(time-anchor) <= 2000)));
-  if (visible && _scene) {
-    for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect];
-    for (NSDictionary *drawing in _pendingDrawings.allValues) [self drawDrawing:drawing rect:rect];
-    NSString *key = [NSString stringWithFormat:@"%@:%lu:%ld", _scene[@"id"], (unsigned long)[_scene[@"drawings"] count], (long)_seekToken];
+  BOOL ready = !_seeking && _paused && llabs(time-anchor) <= 2000;
+  if (ready && _scene) {
+    NSString *key = [NSString stringWithFormat:@"%@:%ld:%ld", _scene[@"id"], (long)_seekToken, (long)_stepToken];
     if (![_readyKey isEqual:key]) {
       _readyKey = key;
       dispatch_async(dispatch_get_main_queue(), ^{ if (self.onSceneReady) self.onSceneReady(@{@"key":key}); });
     }
+    // React acknowledges readiness in the same commit that mounts the cards.
+    // No pre-roll or per-stroke reveal: the whole paused scene arrives together.
+    if ([_presentedSceneKey isEqual:key]) {
+      for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect];
+    }
+    for (NSDictionary *drawing in _pendingDrawings.allValues) [self drawDrawing:drawing rect:rect];
   } else _readyKey = nil;
   if (_samples) [self drawDrawing:[self currentDrawing] rect:rect];
   [NSGraphicsContext restoreGraphicsState];
@@ -481,6 +488,7 @@ RCT_EXPORT_VIEW_PROPERTY(stepToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(stepFrames, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(reviewEndUs, double)
 RCT_EXPORT_VIEW_PROPERTY(sceneJson, NSString)
+RCT_EXPORT_VIEW_PROPERTY(presentedSceneKey, NSString)
 RCT_EXPORT_VIEW_PROPERTY(tool, NSString)
 RCT_EXPORT_VIEW_PROPERTY(onTime, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawing, RCTDirectEventBlock)

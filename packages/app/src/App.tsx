@@ -4,7 +4,7 @@ import {ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, Vie
 import {anchorStart, Button, Dialog, Empty, ShortcutContext, TextField} from './components';
 import {chooseVideo, command, configureDrawingHistory, configureShortcuts, dataDirectory, GamePackPlayer, listenShortcuts, listenWindowState, setAppearance, setFullScreen} from './native';
 import {expandedAncestors, mergeDrawings} from './review';
-import {annotationScene, sameFrame} from './playback';
+import {annotationScene, annotationSceneKey, sameFrame} from './playback';
 import {Icon} from './Icon';
 import {ReviewWorkspace} from './ReviewWorkspace';
 import {TooltipProvider} from './Tooltips';
@@ -138,11 +138,8 @@ export default function App() {
     if (root && !notes.some(note => note.comment_id === root.comment_id)) notes.push(root);
     return notes;
   }, [videoComments, time, paused, draft?.parent_comment_id]);
-  const sceneKey = useMemo(() => {
-    if (!sceneJson) return '';
-    const scene = JSON.parse(sceneJson);
-    return `${scene.id}:${scene.drawings.length}:${seekState.token}`;
-  }, [sceneJson, seekState.token]);
+  const sceneKey = useMemo(() => annotationSceneKey(sceneJson, seekState.token, step.token), [sceneJson, seekState.token, step.token]);
+  const presentedSceneKey = paused && sceneKey === readyScene ? sceneKey : '';
   const previousNote = adjacentNote(videoComments, commentId, time, duration, -1);
   const nextNote = adjacentNote(videoComments, commentId, time, duration, 1);
   playbackContext.current = {comments: originalComments, duration, rate, editing: !!draft || reviewMode !== 'review'};
@@ -183,6 +180,7 @@ export default function App() {
   const seek = useCallback((us: number) => {
     const target = Math.max(0, Math.round(us));
     seekRequest.current = {us: target, token: seekRequest.current.token + 1};
+    setReadyScene('');
     setSeekState(seekRequest.current);
     setTime(target);
     lastReviewStop.current = null;
@@ -322,7 +320,9 @@ export default function App() {
   };
   const selectCommentNow = (item: Comment) => {
     const target = conversationTarget(data?.comments ?? [], item, duration);
-    clearEditing(); setCommentId(target.comment.comment_id); setPaused(true); seek(target.time); lastReviewStop.current = target.time;
+    clearEditing(); setCommentId(target.comment.comment_id); setPaused(true);
+    if (!paused || !sameFrame(time, target.time)) seek(target.time);
+    lastReviewStop.current = target.time;
     setExpanded(previous => new Set(expandedAncestors(data?.comments ?? [], item.comment_id, previous)).add(target.comment.comment_id));
   };
   const selectComment = (item: Comment) => leaveDraft(() => selectCommentNow(item));
@@ -336,7 +336,7 @@ export default function App() {
     if (at !== time) seek(at);
     // Play leaves the frame already available to read, including the opening
     // frame and frames reached by scrubbing rather than an automatic stop.
-    armReview(at, nextRate, true); setPaused(false);
+    setReadyScene(''); armReview(at, nextRate, true); setPaused(false);
   };
   const shuttle = (direction: -1 | 1) => {
     const nextRate = !paused && Math.sign(rate) === direction ? direction * Math.min(4, Math.abs(rate) * 2) : direction;
@@ -746,7 +746,7 @@ export default function App() {
       <View style={s.stage}>
         {!video ? <LibraryBrowser {...libraryProps} /> : <>
         <ReviewWorkspace header={header} video={video} time={time} duration={duration} paused={paused} reviewMode={reviewMode} onMode={changeReviewMode}
-          comments={videoComments} activityToken={activityToken} sceneReady={!!sceneKey && readyScene === sceneKey} drawingsVisible={annotationsVisible} notes={onVideoNotes} selectedId={commentId} draft={draft}
+          comments={videoComments} activityToken={activityToken} sceneReady={!!presentedSceneKey} drawingsVisible={annotationsVisible} notes={onVideoNotes} selectedId={commentId} draft={draft}
           composer={composerOpen ? composer : null} expanded={expanded} disabled={!!busy || dialogOpen}
           onSelect={selectComment} onReply={replyToNote} onExpand={item => setExpanded(previous => { const next = new Set(previous); if (next.has(item.comment_id)) next.delete(item.comment_id); else next.add(item.comment_id); return next; })}
           onPlay={play} rate={rate} zoom={zoom} presenting={presenting}
@@ -761,7 +761,7 @@ export default function App() {
           popover={speedOpen || zoomOpen ? <View style={{gap: 2}}>{(speedOpen ? [.5, 1, 1.5, 2] : [1, 1.5, 2, 3, 4]).map(value => <Button quiet compact key={value} shortcut={!speedOpen && value === 1 ? 'zoomReset' : undefined} active={(speedOpen ? rate : zoom) === value} label={speedOpen ? `Playback speed ${value}×` : `Zoom ${value * 100}%`} onPress={() => { if (speedOpen) { setRate(value); armReview(time, value); } else setZoom(value); setSpeedOpen(false); setZoomOpen(false); }}>{speedOpen ? `${value}×` : value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}</View> : null}
           >
           <GamePackPlayer key={video.id} style={StyleSheet.absoluteFill} source={video.path} zoom={zoom} zoomToken={zoomState.token} onZoom={({nativeEvent}) => setZoomState(previous => receiveZoom(previous, nativeEvent))} paused={paused} rate={rate}
-            seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson}
+            seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson} presentedSceneKey={presentedSceneKey}
             flushToken={flushToken} stepToken={step.token} stepFrames={step.frames} onStrokeFlushFinished={event => void onStrokeFlushFinished(event.nativeEvent)}
             tool={reviewMode === 'watch' ? busy ? 'none' : 'pointer' : (!busy || !!flushRequest.current) && (draft || tool === 'pointer' || tool === 'laser') ? tool : 'none'}
             onDrawingStart={event => { setTime(event.nativeEvent.time_us); setPaused(true); }}

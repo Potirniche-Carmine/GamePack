@@ -50,7 +50,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   JsonObject scene{nullptr}, stroke{nullptr};
   JsonArray samples{nullptr};
   std::map<hstring, JsonObject> pendingDrawings;
-  std::string readyKey;
+  std::string readyKey, presentedSceneKey;
   std::chrono::steady_clock::time_point lastActivity{};
   UIElement activityRoot{nullptr};
   event_token activityToken{};
@@ -59,7 +59,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   std::string flushDrawing;
   bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{}, settlingReviewStop{};
   uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
-  int64_t pendingSeekTarget{}, stepFrames{1};
+  int64_t pendingSeekTarget{}, stepFrames{1}, stepToken{};
   double frameRate{}, rate{1}, zoom{1}, requestedZoom{1}, zoomTarget{1};
   int64_t zoomToken{-1};
   std::chrono::steady_clock::time_point zoomTick{};
@@ -380,20 +380,18 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   void Render() {
     if (disposed) return;
     overlay.Children().Clear();
-    if (seeking && !settlingReviewStop) { readyKey.clear(); return; }
+    if (seeking) { readyKey.clear(); return; }
     if (!scene) readyKey.clear();
     if (scene) {
       auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
       int64_t t=Time(), start=static_cast<int64_t>(Number(anchor,L"at_us"));
-      double distance=rate<0 ? t-start : start-t;
-      bool atReviewStop=reviewEnd>=0 && std::abs(start-reviewEnd)<=2000;
-      bool preview=!paused && atReviewStop && distance>=0 && distance<=Number(scene,L"preview_lead_us")*std::abs(rate);
-      if ((settlingReviewStop && atReviewStop) || preview || (paused && std::abs(t-start)<=2000)) {
+      if (paused && std::abs(t-start)<=2000) {
         auto drawings=scene.GetNamedArray(L"drawings",JsonArray{});
-        for (auto const& item:drawings) Draw(item.GetObject());
-        for (auto const& entry:pendingDrawings) Draw(entry.second);
-        auto key=to_string(scene.GetNamedString(L"id",L""))+":"+std::to_string(drawings.Size())+":"+std::to_string(seekToken);
+        auto key=to_string(scene.GetNamedString(L"id",L""))+":"+std::to_string(seekToken)+":"+std::to_string(stepToken);
         if (key!=readyKey) { readyKey=key; context.DispatchEvent(root,L"topSceneReady",JSValueObject{{"key",key}}); }
+        // Commit the complete scene with the React conversation rail.
+        if (presentedSceneKey==key) for (auto const& item:drawings) Draw(item.GetObject());
+        for (auto const& entry:pendingDrawings) Draw(entry.second);
       } else readyKey.clear();
     }
     if (stroke) Draw(stroke);
@@ -405,7 +403,7 @@ FrameworkElement PlayerManager::CreateView() noexcept {
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
-  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"zoomToken",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"flushToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
+  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"zoomToken",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"presentedSceneKey",T::String},{L"tool",T::String},{L"flushToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
   auto it=players.find(ViewKey(view)); if (it==players.end()) return;
@@ -436,6 +434,11 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
       if (parsed) for (auto const& item:parsed.GetNamedArray(L"drawings",JsonArray{})) p->pendingDrawings.erase(item.GetObject().GetNamedString(L"id",L""));
       p->scene=parsed;
     }
+    if (auto v=props.find("presentedSceneKey");v!=props.end()) {
+      auto key=v->second.AsString();
+      if (key.empty() && !p->presentedSceneKey.empty()) p->readyKey.clear();
+      p->presentedSceneKey=key;
+    }
     if (auto v=props.find("tool");v!=props.end()) { auto tool=to_hstring(v->second.AsString()); if (tool!=p->tool) p->Finish(); p->tool=tool; p->overlay.IsHitTestVisible(true); }
     if (auto v=props.find("zoom");v!=props.end()) p->requestedZoom=v->second.AsDouble();
     if (auto v=props.find("zoomToken");v!=props.end() && v->second.AsInt64()!=p->zoomToken) {
@@ -443,7 +446,8 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
     }
     if (auto v=props.find("reviewEndUs");v!=props.end()) p->reviewEnd=v->second.AsInt64();
     if (auto v=props.find("stepFrames");v!=props.end()) p->stepFrames=v->second.AsInt64();
-    if (auto v=props.find("stepToken");v!=props.end() && v->second.AsInt64()>0) {
+    if (auto v=props.find("stepToken");v!=props.end() && v->second.AsInt64()>0 && v->second.AsInt64()!=p->stepToken) {
+      p->stepToken=v->second.AsInt64();
       p->Finish(); p->player.Pause();
       p->paused=true;
       if (p->stepFrames<0) {
