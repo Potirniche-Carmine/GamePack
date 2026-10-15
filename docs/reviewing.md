@@ -37,13 +37,13 @@ Use **Command/Control + Z** and **Command/Control + Shift + Z** to undo and redo
 
 ## Conversations
 
-One number connects a conversation's drawings, comment card, and filmstrip marker. Select a marker or card to visit the frame; selecting a card emphasizes its drawings.
+Drawings and conversations appear together once the video has paused on their frame. Comments stay on the right; selecting a card emphasizes its drawings. Frames with multiple conversations number those cards from 1. A lone conversation has no number. Filmstrip markers show a dot for one comment and a count for grouped comments.
 
-Choose **Reply** to open a composer at the same frame. Replies remain nested in the conversation. Expand or collapse them with the reply control, or use **Command/Control + Shift + R** for all replies. Scroll the floating column for more comments, and drag its top handle to reposition it.
+Choose **Reply** to open a composer at the same frame. Replies remain nested in the conversation. Expand or collapse them with the reply control, or use **Command/Control + Shift + R** for all replies. Scroll the right-hand column for more comments.
 
 ## Zoom and fullscreen
 
-At **Fit**, the entire video frame fits the workspace without cropping. Use the Fit/percentage control, mouse wheel, or trackpad pinch to zoom. Footage and drawings scale together while comment cards retain their size. Playback speed has its own control.
+At **Fit**, the entire video frame fits the workspace without cropping. Use the Fit/percentage control, mouse wheel, or trackpad pinch to zoom. Wheel and pinch gestures zoom around the point under the cursor. Footage and drawings scale together while comment cards keep their position and size. Fit resets the view. Playback speed has its own control.
 
 Press **F** for fullscreen. In fullscreen Review, **↑ / ↓** or **Page Up / Page Down** moves between original comments. Press **Space** to resume playback. **Escape** dismisses a menu, leaves text focus, or exits fullscreen, depending on the current interaction.
 

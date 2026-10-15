@@ -4,6 +4,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#include "../shared/PlayerViewport.h"
 
 @interface GPPlayer : NSView
 @property(nonatomic,copy) NSString *source;
@@ -18,6 +19,7 @@
 @property(nonatomic) NSInteger stepFrames;
 @property(nonatomic) double reviewEndUs;
 @property(nonatomic,copy) NSString *sceneJson;
+@property(nonatomic,copy) NSString *presentedSceneKey;
 @property(nonatomic,copy) NSString *tool;
 @property(nonatomic,copy) RCTDirectEventBlock onTime;
 @property(nonatomic,copy) RCTDirectEventBlock onDrawing;
@@ -28,7 +30,7 @@
 @property(nonatomic,copy) RCTDirectEventBlock onActivity;
 - (void)pointerActivity;
 @property(nonatomic,copy) RCTDirectEventBlock onStrokeFlushFinished;
-- (void)zoomByFactor:(double)factor smooth:(BOOL)smooth;
+- (void)zoomByFactor:(double)factor atPoint:(NSPoint)point smooth:(BOOL)smooth;
 - (void)animateZoom:(CADisplayLink *)link;
 @end
 
@@ -132,6 +134,8 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   id _activityMonitor;
   double _requestedZoom;
   double _zoomTarget;
+  gamepack::ViewportOffset _zoomOffset;
+  gamepack::ViewportAnchor _zoomAnchor;
   CADisplayLink *_zoomDisplayLink;
 }
 - (BOOL)isFlipped { return YES; }
@@ -165,7 +169,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   CGSize size = _videoSize;
   CGFloat fit = size.width > 0 && size.height > 0 ? fmin(self.bounds.size.width / size.width, self.bounds.size.height / size.height) : 1;
   _videoLayer.bounds = CGRectMake(0, 0, size.width > 0 ? size.width * fit : self.bounds.size.width, size.height > 0 ? size.height * fit : self.bounds.size.height);
-  _videoLayer.position = CGPointMake(NSMidX(self.bounds), NSMidY(self.bounds));
+  _videoLayer.position = CGPointMake(NSMidX(self.bounds) + _zoomOffset.x * self.bounds.size.width, NSMidY(self.bounds) + _zoomOffset.y * self.bounds.size.height);
   _videoLayer.affineTransform = CGAffineTransformMakeScale(_zoom, _zoom);
   _overlay.frame = self.bounds;
   [CATransaction commit]; [_overlay setNeedsDisplay:YES];
@@ -196,10 +200,13 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)setZoom:(double)zoom { _requestedZoom = isfinite(zoom) ? fmin(4, fmax(1, zoom)) : 1; }
 - (void)applyZoom:(double)value notify:(BOOL)notify {
   if (fabs(value - _zoom) < 0.00001) return;
-  [self finishStroke]; _zoom = value;
-  [CATransaction begin]; [CATransaction setDisableActions:YES];
-  _videoLayer.affineTransform = CGAffineTransformMakeScale(_zoom, _zoom);
-  [CATransaction commit]; [_overlay setNeedsDisplay:YES];
+  [self finishStroke];
+  NSRect rect = [self contentRect];
+  _zoomOffset = gamepack::zoomAt(_zoomOffset, _zoom, value, _zoomAnchor,
+    rect.size.width / _zoom / fmax(1, self.bounds.size.width), rect.size.height / _zoom / fmax(1, self.bounds.size.height));
+  _zoom = value;
+  // Apply video and ink geometry in the same display transaction.
+  [self layout]; [_overlay displayIfNeeded];
   if (notify && self.onZoom) self.onZoom(@{@"zoom":@(_zoom), @"zoomToken":@(_zoomToken)});
 }
 - (void)animateZoom:(CADisplayLink *)link {
@@ -208,9 +215,10 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   if (fabs(next - _zoomTarget) < 0.0005) { next = _zoomTarget; [_zoomDisplayLink invalidate]; _zoomDisplayLink = nil; }
   [self applyZoom:next notify:YES];
 }
-- (void)zoomByFactor:(double)factor smooth:(BOOL)smooth {
+- (void)zoomByFactor:(double)factor atPoint:(NSPoint)point smooth:(BOOL)smooth {
   if (!isfinite(factor) || factor <= 0 || !_player.currentItem) return;
   [self pointerActivity];
+  _zoomAnchor = {point.x / fmax(1, self.bounds.size.width), point.y / fmax(1, self.bounds.size.height)};
   // Continuous input follows the fingers directly. Only discrete wheel steps
   // accumulate into a short, interruptible native display-link transition.
   _zoomTarget = fmin(4, fmax(1, (smooth ? _zoomTarget : _zoom) * factor));
@@ -235,6 +243,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)didSetProps:(NSArray<NSString *> *)changedProps {
   if ([changedProps containsObject:@"zoomToken"]) {
     [_zoomDisplayLink invalidate]; _zoomDisplayLink = nil;
+    _zoomAnchor = {};
     _zoomTarget = _requestedZoom; [self applyZoom:_zoomTarget notify:NO];
   }
   if ([changedProps containsObject:@"reviewEndUs"] || [changedProps containsObject:@"rate"] || [changedProps containsObject:@"source"]) [self updateReviewBoundary];
@@ -258,6 +267,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
     if (_paused || _pendingStrokeFlushToken) [_player pause];
     else if (!_seeking) _player.rate = _rate;
   }
+  if ([changedProps containsObject:@"presentedSceneKey"]) [_overlay displayIfNeeded];
   // Publish only after the whole prop batch, including its seek token, is applied.
   if ([changedProps containsObject:@"paused"]) [self emitTime:NO];
 }
@@ -280,6 +290,10 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   [_player seekToTime:CMTimeMake((int64_t)fmax(0, target), 1000000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL complete) {
     dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; self->_settlingReviewStop = NO; if (!self.paused && complete && !self->_pendingStrokeFlushToken) self->_player.rate = self.rate; [self applyFrameSteps]; [self emitStrokeFlushIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:reviewStop && complete]; });
   }];
+}
+- (void)setPresentedSceneKey:(NSString *)key {
+  if (!key.length && _presentedSceneKey.length) _readyKey = nil;
+  _presentedSceneKey = [key copy]; [_overlay setNeedsDisplay:YES];
 }
 - (void)setSceneJson:(NSString *)sceneJson { _sceneJson = [sceneJson copy]; }
 - (void)setTool:(NSString *)tool { _tool = [tool copy]; }
@@ -308,7 +322,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   CGSize size = _videoSize; if (size.width <= 0 || size.height <= 0) return self.bounds;
   CGFloat scale = fmin(self.bounds.size.width/size.width, self.bounds.size.height/size.height) * _zoom;
   CGSize fitted = CGSizeMake(size.width*scale,size.height*scale);
-  return NSMakeRect((self.bounds.size.width-fitted.width)/2,(self.bounds.size.height-fitted.height)/2,fitted.width,fitted.height);
+  return NSMakeRect((self.bounds.size.width-fitted.width)/2 + _zoomOffset.x * self.bounds.size.width, (self.bounds.size.height-fitted.height)/2 + _zoomOffset.y * self.bounds.size.height, fitted.width, fitted.height);
 }
 - (NSDictionary *)sample:(NSEvent *)event {
   NSRect rect = [self contentRect]; NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
@@ -388,18 +402,19 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)drawOverlay {
   NSRect rect=[self contentRect]; [NSGraphicsContext saveGraphicsState]; NSRectClip(rect);
   int64_t anchor = [_scene[@"anchor"][@"at_us"] longLongValue], time = [self timeUs];
-  double distance = _rate < 0 ? time - anchor : anchor - time;
-  BOOL atReviewStop = _reviewEndUs >= 0 && llabs(anchor - (int64_t)_reviewEndUs) <= 2000;
-  BOOL preview = !_paused && atReviewStop && distance >= 0 && distance <= [_scene[@"preview_lead_us"] doubleValue] * fabs(_rate);
-  BOOL visible = (_settlingReviewStop && atReviewStop) || (!_seeking && (preview || (_paused && llabs(time-anchor) <= 2000)));
-  if (visible && _scene) {
-    for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect];
-    for (NSDictionary *drawing in _pendingDrawings.allValues) [self drawDrawing:drawing rect:rect];
-    NSString *key = [NSString stringWithFormat:@"%@:%lu:%ld", _scene[@"id"], (unsigned long)[_scene[@"drawings"] count], (long)_seekToken];
+  BOOL ready = !_seeking && _paused && llabs(time-anchor) <= 2000;
+  if (ready && _scene) {
+    NSString *key = [NSString stringWithFormat:@"%@:%ld:%ld", _scene[@"id"], (long)_seekToken, (long)_stepToken];
     if (![_readyKey isEqual:key]) {
       _readyKey = key;
       dispatch_async(dispatch_get_main_queue(), ^{ if (self.onSceneReady) self.onSceneReady(@{@"key":key}); });
     }
+    // React acknowledges readiness in the same commit that mounts the cards.
+    // No pre-roll or per-stroke reveal: the whole paused scene arrives together.
+    if ([_presentedSceneKey isEqual:key]) {
+      for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect];
+    }
+    for (NSDictionary *drawing in _pendingDrawings.allValues) [self drawDrawing:drawing rect:rect];
   } else _readyKey = nil;
   if (_samples) [self drawDrawing:[self currentDrawing] rect:rect];
   [NSGraphicsContext restoreGraphicsState];
@@ -446,15 +461,15 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   [self.owner continueStroke:event]; [self.owner finishStroke];
 }
 - (void)magnifyWithEvent:(NSEvent *)event {
-  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:fmax(0.05, 1 + event.magnification) smooth:NO];
+  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:fmax(0.05, 1 + event.magnification) atPoint:[self convertPoint:event.locationInWindow fromView:nil] smooth:NO];
 }
 - (void)smartMagnifyWithEvent:(NSEvent *)event {
-  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:(self.owner.zoom > 1 ? 1 / self.owner.zoom : 2) smooth:NO];
+  if ([self eventTargetsOverlay:event]) [self.owner zoomByFactor:(self.owner.zoom > 1 ? 1 / self.owner.zoom : 2) atPoint:[self convertPoint:event.locationInWindow fromView:nil] smooth:NO];
 }
 - (void)scrollWheel:(NSEvent *)event {
   if (![self eventTargetsOverlay:event] || fabs(event.scrollingDeltaY) < 0.001) return;
   double delta = event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 0.0025 : 0.08);
-  [self.owner zoomByFactor:exp(fmin(0.18, fmax(-0.18, delta))) smooth:!event.hasPreciseScrollingDeltas];
+  [self.owner zoomByFactor:exp(fmin(0.18, fmax(-0.18, delta))) atPoint:[self convertPoint:event.locationInWindow fromView:nil] smooth:!event.hasPreciseScrollingDeltas];
 }
 @end
 @interface GamePackPlayerManager : RCTViewManager @end
@@ -473,6 +488,7 @@ RCT_EXPORT_VIEW_PROPERTY(stepToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(stepFrames, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(reviewEndUs, double)
 RCT_EXPORT_VIEW_PROPERTY(sceneJson, NSString)
+RCT_EXPORT_VIEW_PROPERTY(presentedSceneKey, NSString)
 RCT_EXPORT_VIEW_PROPERTY(tool, NSString)
 RCT_EXPORT_VIEW_PROPERTY(onTime, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawing, RCTDirectEventBlock)

@@ -37,7 +37,7 @@ export async function command<T>(_root: string, name: string, fields: Record<str
 
 export type PlayerProps = ViewProps & {
   source: string; paused: boolean; rate: number; zoom: number; zoomToken: number; seekUs: number; seekToken: number;
-  reviewEndUs: number; sceneJson: string; tool: DrawingTool;
+  reviewEndUs: number; sceneJson: string; presentedSceneKey: string; tool: DrawingTool;
   flushToken: number; stepToken: number; stepFrames: number;
   onStrokeFlushFinished: (event: NativeSyntheticEvent<StrokeFlushFinished>) => void;
   onTime: (event: NativeSyntheticEvent<PlayerTime>) => void;

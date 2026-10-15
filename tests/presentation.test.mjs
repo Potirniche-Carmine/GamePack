@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {conversationPins, conversationTarget, notesAtTime, adjacentNote, nextReviewStop} from '../packages/app/src/presentation.ts';
+import {conversationNumbers, conversationTarget, notesAtTime, adjacentNote, nextReviewStop} from '../packages/app/src/presentation.ts';
 const second = 1_000_000;
 const comment = (id, at = 0, parent = null) => ({comment_id: id, parent_comment_id: parent, anchor: {kind: 'point', at_us: at * second}, drawings: []});
 
@@ -62,30 +62,17 @@ test('Play leaves every comment on the visible frame and still stops at the next
 });
 
 
-test('one conversation marker covers all root and reply drawings without changing their records', () => {
-  const stroke = (id, x = 500000, y = 500000) => ({id, samples: [{x, y}]});
-  const root = {...comment('root'), drawings: [stroke('ellipse'), stroke('line')]};
-  const reply = {...comment('reply', 0, 'root'), drawings: [stroke('arrow')]};
-  const nested = {...comment('nested', 0, 'reply'), drawings: [stroke('pen')]};
-  const other = {...comment('other'), drawings: [stroke('other-ellipse')]};
-  const records = [nested, reply, root, other];
+test('only same-frame root conversations receive stable local numbers', () => {
+  const records = [comment('later', 5), comment('b', 3), comment('reply', 3, 'a'), comment('a', 3), comment('alone', 1)];
   const before = structuredClone(records);
-  const pins = conversationPins(records, [root, other]);
-  assert.deepEqual(pins.map(pin => pin.note.comment_id), ['root', 'other']);
-  assert.equal(pins[0].point, root.drawings[0].samples[0]);
+  assert.deepEqual([...conversationNumbers(notesAtTime(records, 3 * second))], [['a', 1], ['b', 2]]);
+  assert.deepEqual([...conversationNumbers(notesAtTime([...records].reverse(), 3 * second))], [['a', 1], ['b', 2]]);
+  assert.deepEqual([...conversationNumbers([comment('alone'), comment('reply', 0, 'alone')])], []);
+  assert.deepEqual([...conversationNumbers([])], []);
   assert.deepEqual(records, before);
-  assert.deepEqual(conversationPins(records, []), []);
 });
 
-test('a marker keeps the root anchor at the frame edge and only falls back when it has no geometry', () => {
-  const root = {...comment('root'), drawings: [{samples: []}, {samples: [{x: 0, y: 0}, {x: 500000, y: 500000}]}]};
-  const reply = {...comment('reply', 0, 'root'), drawings: [{samples: [{x: 500000, y: 500000}]}]};
-  assert.equal(conversationPins([reply, root], [root])[0].point, root.drawings[1].samples[0]);
-  assert.equal(conversationPins([root], [root])[0].point, root.drawings[1].samples[0]);
-  const textRoot = comment('text-root');
-  const child = {...reply, parent_comment_id: 'text-root'};
-  const [pin] = conversationPins([textRoot, child], [textRoot]);
-  assert.equal(pin.note, textRoot);
-  assert.equal(pin.point, child.drawings[0].samples[0]);
-  assert.deepEqual(conversationPins([textRoot], [textRoot]), []);
+test('notes within native clock tolerance still receive distinct numbers', () => {
+  const records = [comment('a', 1), comment('b', 1.0015), comment('c', 1.003)];
+  assert.deepEqual([...conversationNumbers(notesAtTime(records, 1001500))], [['a', 1], ['b', 2], ['c', 3]]);
 });

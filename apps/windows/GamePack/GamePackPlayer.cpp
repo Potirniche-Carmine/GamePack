@@ -1,6 +1,7 @@
 #include "pch.h"
 #include <winrt/Windows.UI.ViewManagement.h>
 #include "GamePackPlayer.h"
+#include "../../../native/shared/PlayerViewport.h"
 using namespace winrt;
 using namespace Windows::Foundation;
 using namespace Windows::Data::Json;
@@ -39,7 +40,9 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   Grid root;
   MediaPlayerElement element;
   Canvas overlay;
-  ScaleTransform zoomTransform;
+  CompositeTransform zoomTransform;
+  gamepack::ViewportOffset zoomOffset;
+  gamepack::ViewportAnchor zoomAnchor;
   RectangleGeometry viewportClip;
   Windows::Media::Playback::MediaPlayer player;
   DispatcherTimer timer;
@@ -47,7 +50,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   JsonObject scene{nullptr}, stroke{nullptr};
   JsonArray samples{nullptr};
   std::map<hstring, JsonObject> pendingDrawings;
-  std::string readyKey;
+  std::string readyKey, presentedSceneKey;
   std::chrono::steady_clock::time_point lastActivity{};
   UIElement activityRoot{nullptr};
   event_token activityToken{};
@@ -56,7 +59,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   std::string flushDrawing;
   bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{}, settlingReviewStop{};
   uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
-  int64_t pendingSeekTarget{}, stepFrames{1};
+  int64_t pendingSeekTarget{}, stepFrames{1}, stepToken{};
   double frameRate{}, rate{1}, zoom{1}, requestedZoom{1}, zoomTarget{1};
   int64_t zoomToken{-1};
   std::chrono::steady_clock::time_point zoomTick{};
@@ -87,18 +90,23 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     double vw = session.NaturalVideoWidth(), vh = session.NaturalVideoHeight();
     if (vw <= 0 || vh <= 0 || w <= 0 || h <= 0) return Rect{0, 0, 0, 0};
     double fit = std::min(w / vw, h / vh) * zoom;
-    return Rect{static_cast<float>((w-vw*fit)/2), static_cast<float>((h-vh*fit)/2), static_cast<float>(vw*fit), static_cast<float>(vh*fit)};
+    return Rect{static_cast<float>((w-vw*fit)/2 + zoomOffset.x*w), static_cast<float>((h-vh*fit)/2 + zoomOffset.y*h), static_cast<float>(vw*fit), static_cast<float>(vh*fit)};
   }
   void UpdateViewport() {
     double width=root.ActualWidth(), height=root.ActualHeight();
     zoomTransform.CenterX(width/2); zoomTransform.CenterY(height/2);
     zoomTransform.ScaleX(zoom); zoomTransform.ScaleY(zoom);
+    zoomTransform.TranslateX(zoomOffset.x*width); zoomTransform.TranslateY(zoomOffset.y*height);
     viewportClip.Rect(Rect{0,0,static_cast<float>(width),static_cast<float>(height)});
   }
   void SetZoom(double value, bool notify=false) {
     value=std::isfinite(value) ? std::clamp(value,1.0,4.0) : 1;
     if (std::abs(value-zoom)<0.00001) return;
-    Finish(); zoom=value; UpdateViewport(); Render();
+    Finish();
+    auto rect=ContentRect();
+    zoomOffset=gamepack::zoomAt(zoomOffset,zoom,value,zoomAnchor,
+      rect.Width/zoom/std::max(1.0,root.ActualWidth()),rect.Height/zoom/std::max(1.0,root.ActualHeight()));
+    zoom=value; UpdateViewport(); Render();
     if (notify) context.DispatchEvent(root,L"topZoom",JSValueObject{{"zoom",zoom},{"zoomToken",zoomToken}});
   }
   void AnimateZoom() {
@@ -246,8 +254,11 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     overlay.PointerCaptureLost([weak](auto const&, auto const&) { if (auto self=weak.lock()) self->Finish(); });
     overlay.PointerWheelChanged([weak](auto const&, Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
       if (auto self=weak.lock(); self && !self->source.empty()) {
-        auto properties=args.GetCurrentPoint(self->overlay).Properties();
+        auto point=args.GetCurrentPoint(self->overlay);
+        auto properties=point.Properties();
         if (properties.IsHorizontalMouseWheel()) return;
+        auto position=point.Position();
+        self->zoomAnchor={position.X/std::max(1.0,self->root.ActualWidth()),position.Y/std::max(1.0,self->root.ActualHeight())};
         self->zoomTarget=std::clamp(self->zoomTarget*std::pow(1.1,properties.MouseWheelDelta()/120.0),1.0,4.0);
         if (!Windows::UI::ViewManagement::UISettings{}.AnimationsEnabled()) self->SetZoom(self->zoomTarget,true);
         args.Handled(true);
@@ -369,20 +380,18 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   void Render() {
     if (disposed) return;
     overlay.Children().Clear();
-    if (seeking && !settlingReviewStop) { readyKey.clear(); return; }
+    if (seeking) { readyKey.clear(); return; }
     if (!scene) readyKey.clear();
     if (scene) {
       auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
       int64_t t=Time(), start=static_cast<int64_t>(Number(anchor,L"at_us"));
-      double distance=rate<0 ? t-start : start-t;
-      bool atReviewStop=reviewEnd>=0 && std::abs(start-reviewEnd)<=2000;
-      bool preview=!paused && atReviewStop && distance>=0 && distance<=Number(scene,L"preview_lead_us")*std::abs(rate);
-      if ((settlingReviewStop && atReviewStop) || preview || (paused && std::abs(t-start)<=2000)) {
+      if (paused && std::abs(t-start)<=2000) {
         auto drawings=scene.GetNamedArray(L"drawings",JsonArray{});
-        for (auto const& item:drawings) Draw(item.GetObject());
-        for (auto const& entry:pendingDrawings) Draw(entry.second);
-        auto key=to_string(scene.GetNamedString(L"id",L""))+":"+std::to_string(drawings.Size())+":"+std::to_string(seekToken);
+        auto key=to_string(scene.GetNamedString(L"id",L""))+":"+std::to_string(seekToken)+":"+std::to_string(stepToken);
         if (key!=readyKey) { readyKey=key; context.DispatchEvent(root,L"topSceneReady",JSValueObject{{"key",key}}); }
+        // Commit the complete scene with the React conversation rail.
+        if (presentedSceneKey==key) for (auto const& item:drawings) Draw(item.GetObject());
+        for (auto const& entry:pendingDrawings) Draw(entry.second);
       } else readyKey.clear();
     }
     if (stroke) Draw(stroke);
@@ -394,7 +403,7 @@ FrameworkElement PlayerManager::CreateView() noexcept {
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
-  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"zoomToken",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"tool",T::String},{L"flushToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
+  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"zoomToken",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"presentedSceneKey",T::String},{L"tool",T::String},{L"flushToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
   auto it=players.find(ViewKey(view)); if (it==players.end()) return;
@@ -425,14 +434,20 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
       if (parsed) for (auto const& item:parsed.GetNamedArray(L"drawings",JsonArray{})) p->pendingDrawings.erase(item.GetObject().GetNamedString(L"id",L""));
       p->scene=parsed;
     }
+    if (auto v=props.find("presentedSceneKey");v!=props.end()) {
+      auto key=v->second.AsString();
+      if (key.empty() && !p->presentedSceneKey.empty()) p->readyKey.clear();
+      p->presentedSceneKey=key;
+    }
     if (auto v=props.find("tool");v!=props.end()) { auto tool=to_hstring(v->second.AsString()); if (tool!=p->tool) p->Finish(); p->tool=tool; p->overlay.IsHitTestVisible(true); }
     if (auto v=props.find("zoom");v!=props.end()) p->requestedZoom=v->second.AsDouble();
     if (auto v=props.find("zoomToken");v!=props.end() && v->second.AsInt64()!=p->zoomToken) {
-      p->zoomToken=v->second.AsInt64(); p->SetZoom(p->requestedZoom); p->zoomTarget=p->zoom;
+      p->zoomToken=v->second.AsInt64(); p->zoomAnchor={}; p->SetZoom(p->requestedZoom); p->zoomTarget=p->zoom;
     }
     if (auto v=props.find("reviewEndUs");v!=props.end()) p->reviewEnd=v->second.AsInt64();
     if (auto v=props.find("stepFrames");v!=props.end()) p->stepFrames=v->second.AsInt64();
-    if (auto v=props.find("stepToken");v!=props.end() && v->second.AsInt64()>0) {
+    if (auto v=props.find("stepToken");v!=props.end() && v->second.AsInt64()>0 && v->second.AsInt64()!=p->stepToken) {
+      p->stepToken=v->second.AsInt64();
       p->Finish(); p->player.Pause();
       p->paused=true;
       if (p->stepFrames<0) {

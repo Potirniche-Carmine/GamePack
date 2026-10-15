@@ -103,7 +103,7 @@ test('equal-time comments remain individually represented in a deterministic clu
   const snapshot = JSON.stringify(comments);
   const clusters = clusterTimelineComments(comments, 100, 500);
   assert.deepEqual(ids(clusters), [['a', 'b'], ['later']]);
-  assert.deepEqual(clusters.map(cluster => cluster.firstNumber), [1, 3]);
+  assert.deepEqual(clusters.map(cluster => cluster.comments.length), [2, 1]);
   assert.equal(clusters[0].anchor, timelinePosition(50, 100, 500));
   assert.equal(JSON.stringify(comments), snapshot);
   assert.deepEqual(clusterTimelineComments([...comments].reverse(), 100, 500), clusters);

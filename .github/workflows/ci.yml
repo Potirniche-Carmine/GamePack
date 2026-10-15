@@ -38,6 +38,10 @@ jobs:
       - run: npm run check:version
       - run: npm run typecheck
       - run: npm run test:ui
+      - name: Verify native zoom geometry
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror tests/player-viewport.test.cpp -o "$RUNNER_TEMP/player-viewport-test"
+          "$RUNNER_TEMP/player-viewport-test"
       - name: Select native builds
         id: changes
         run: node scripts/ci/native-changes.mjs

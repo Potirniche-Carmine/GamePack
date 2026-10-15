@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {contentRect, normalizedPoint, reviewViewport, conversationPlacement, moveConversation, drawingEndPosition} from '../packages/app/src/spatial.ts';
+import {contentRect, normalizedPoint, reviewViewport, conversationPlacement, drawingEndPosition} from '../packages/app/src/spatial.ts';
 
 test('card mapping follows letterboxed footage and native centered zoom', () => {
   const view = {width: 1000, height: 700}, media = {width: 1920, height: 1080};
@@ -27,7 +27,7 @@ test('the picture stays horizontally centered with floating comments across aspe
         assert.ok(rect.y + rect.height <= view.height - (review ? 190 : 118) + .001);
         assert.ok(Math.abs(rect.width / rect.height - media.width / media.height) < .001);
         if (review) for (const y of [0, 500000, 1000000]) {
-          const card = conversationPlacement(view, rect, {x: 500000, y}, fullscreen);
+          const card = conversationPlacement(view, fullscreen);
           assert.ok(card.left + card.width <= view.width - 16);
           assert.ok(card.top >= (fullscreen ? 16 : 76));
           assert.ok(card.top + card.maxHeight <= view.height - 204);
@@ -37,16 +37,16 @@ test('the picture stays horizontally centered with floating comments across aspe
   }
 });
 
-test('moving conversations clamps to the workspace without changing the media or stored anchor', () => {
-  const view = {width: 1080, height: 700};
-  const rect = reviewViewport(view, {width: 1920, height: 1080}, true, false);
-  const placement = conversationPlacement(view, rect, {x: 500000, y: 500000}, false);
-  const before = JSON.stringify({rect, placement});
-  assert.deepEqual(moveConversation(view, placement, {x: -10000, y: -10000}, false), {left: 76, top: 76});
-  assert.deepEqual(moveConversation(view, placement, {x: 10000, y: 10000}, false), {left: 760, top: 196});
-  assert.equal(JSON.stringify({rect, placement}), before);
+test('comments remain at the right edge in windowed and fullscreen layouts', () => {
+  for (const view of [{width: 1080, height: 700}, {width: 1920, height: 1080}]) {
+    for (const fullscreen of [false, true]) {
+      const placement = conversationPlacement(view, fullscreen);
+      assert.equal(placement.left + placement.width, view.width - 16);
+      assert.equal(placement.top, fullscreen ? 16 : 76);
+      assert.equal(placement.top + placement.maxHeight, view.height - 204);
+    }
+  }
 });
-
 
 test('persisted comment positions use normalized coordinates at the stroke endpoint', () => {
   assert.deepEqual(drawingEndPosition([{x: 1000, y: 2000}, {x: 900000, y: 750000}]), {x: .9, y: .75});

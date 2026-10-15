@@ -3,7 +3,6 @@ import type {Comment} from './types';
 
 export type TimelineCluster = {
   comments: Comment[];
-  firstNumber: number;
   left: number;
   width: number;
   anchor: number;
@@ -66,7 +65,7 @@ export function timelinePosition(time: number, duration: number, width: number):
 }
 
 /** Merge overlapping marker bounds, including the extra width of a cluster
- * label and clamping at either edge. Groups keep chronological numbering and
+ * label and clamping at either edge. Groups keep chronological order and
  * an exact first-comment anchor; no comment is displaced or dropped. */
 export function clusterTimelineComments(comments: readonly Comment[], duration: number, width: number): TimelineCluster[] {
   const ordered = [...comments].sort(compareComments);
@@ -74,8 +73,7 @@ export function clusterTimelineComments(comments: readonly Comment[], duration: 
   type Range = {first: number; last: number};
   const bounds = ({first, last}: Range) => {
     const count = last - first + 1;
-    const numberWidth = String(first + 1).length * 7;
-    const labelWidth = count === 1 ? Math.max(28, numberWidth + 14) : Math.max(50, numberWidth + String(count - 1).length * 7 + 30);
+    const labelWidth = count === 1 ? 28 : Math.max(32, String(count).length * 7 + 18);
     const markerWidth = Math.min(available, labelWidth);
     const anchor = timelinePosition(start(ordered[first]), duration, available);
     return {width: markerWidth, anchor, left: Math.max(0, Math.min(available - markerWidth, anchor - markerWidth / 2))};
@@ -92,6 +90,6 @@ export function clusterTimelineComments(comments: readonly Comment[], duration: 
     }
     groups.push(next);
   }
-  return groups.map(group => ({comments: ordered.slice(group.first, group.last + 1), firstNumber: group.first + 1,
+  return groups.map(group => ({comments: ordered.slice(group.first, group.last + 1),
     ...bounds(group), endAnchor: timelinePosition(start(ordered[group.last]), duration, available)}));
 }
