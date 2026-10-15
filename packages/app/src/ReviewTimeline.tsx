@@ -62,7 +62,7 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
       {clusters.map(cluster => {
         const comment = cluster.comments[0], multiple = cluster.comments.length > 1;
         const selected = cluster.comments.some(item => item.comment_id === selectedId);
-        const description = cluster.comments.map((item, index) => `Comment ${cluster.firstNumber + index} by ${item.name_at_posting} at ${timeLabel(anchorStart(item.anchor))}: ${item.text || 'Drawing'}`).join('; ');
+        const description = cluster.comments.map(item => `Comment by ${item.name_at_posting} at ${timeLabel(anchorStart(item.anchor))}: ${item.text || 'Drawing'}`).join('; ');
         return <React.Fragment key={comment.comment_id}>
           {multiple && <View pointerEvents="none" style={[styles.clusterRange, {left: cluster.anchor, width: Math.max(1, cluster.endAnchor - cluster.anchor), backgroundColor: colors.line}]} />}
           <View pointerEvents="none" style={[styles.stem, {left: cluster.anchor, backgroundColor: multiple ? colors.line : ANNOTATION_COLOR}]} />
@@ -81,8 +81,7 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
                 fill={multiple ? (selected ? colors.selected : colors.panel) : ANNOTATION_COLOR}
                 stroke={focused === comment.comment_id || selected ? colors.text : multiple ? colors.line : 'transparent'} strokeWidth={1.5} />
             </Svg>
-            <Text style={[styles.number, {color: multiple ? colors.text : '#163048'}]}>{cluster.firstNumber}</Text>
-            {multiple && <Text style={[styles.extra, {color: colors.muted}]}>+{cluster.comments.length - 1}</Text>}
+            {multiple ? <Text style={[styles.number, {color: colors.text}]}>{cluster.comments.length}</Text> : <View style={styles.commentDot} />}
           </Pressable>
         </React.Fragment>;
       })}
@@ -103,8 +102,8 @@ const styles = StyleSheet.create({
   marker: {position: 'absolute', top: 0, height: 24, flexDirection: 'row', gap: 4, alignItems: 'center', justifyContent: 'center', zIndex: 2},
   clusterRange: {position: 'absolute', bottom: 1, height: 1, opacity: 0.7},
   stem: {position: 'absolute', top: 24, bottom: 0, width: 1, opacity: 0.9},
+  commentDot: {width: 5, height: 5, borderRadius: 3, backgroundColor: '#163048'},
   number: {fontSize: 11, lineHeight: 16, textAlign: 'center', includeFontPadding: false, fontVariant: ['tabular-nums'], fontWeight: '700'},
-  extra: {fontSize: 10, lineHeight: 16, textAlign: 'center', includeFontPadding: false, fontVariant: ['tabular-nums'], fontWeight: '500'},
   playhead: {position: 'absolute', top: 28, bottom: 0, width: 2, borderRadius: 1},
   labels: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
   label: {fontSize: 11, lineHeight: 16, fontWeight: '500', fontVariant: ['tabular-nums']},
