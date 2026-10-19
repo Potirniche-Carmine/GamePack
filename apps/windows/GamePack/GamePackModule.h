@@ -31,6 +31,12 @@ struct GamePackModule {
   void AppBuild(winrt::Microsoft::ReactNative::ReactPromise<winrt::Microsoft::ReactNative::JSValue> promise) noexcept;
   REACT_METHOD(OpenUpdateRelease, L"openUpdateRelease")
   void OpenUpdateRelease(std::string tag, bool download, winrt::Microsoft::ReactNative::ReactPromise<void> promise) noexcept;
+  REACT_METHOD(PrepareUpdate, L"prepareUpdate")
+  void PrepareUpdate(std::string tag, winrt::Microsoft::ReactNative::ReactPromise<void> promise) noexcept;
+  REACT_METHOD(UpdateState, L"updateState")
+  void UpdateState(winrt::Microsoft::ReactNative::ReactPromise<winrt::Microsoft::ReactNative::JSValue> promise) noexcept;
+  REACT_METHOD(InstallUpdate, L"installUpdate")
+  void InstallUpdate(winrt::Microsoft::ReactNative::ReactPromise<void> promise) noexcept;
   REACT_METHOD(SetAppearance, L"setAppearance")
   void SetAppearance(std::string theme) noexcept;
   REACT_METHOD(SetFullScreen, L"setFullScreen")

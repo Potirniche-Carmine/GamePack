@@ -29,6 +29,11 @@ if ($layout.Package.Identity.Version -ne $expectedVersion) { throw 'App version 
 $nativeExecutable = Join-Path $manifest.DirectoryName $layout.Package.Applications.Application.Executable
 $embeddedBundle = Join-Path (Split-Path $nativeExecutable -Parent) 'Bundle\index.windows.bundle'
 if (-not (Test-Path $embeddedBundle)) { throw 'The package is missing the embedded JavaScript bundle beside the executable.' }
+foreach ($helper in @('update-helper.ps1', 'update-core.psm1')) {
+    $bundledHelper = Join-Path (Split-Path $nativeExecutable -Parent) "Updater\$helper"
+    $sourceHelper = Join-Path $root "apps\windows\GamePack\Updater\$helper"
+    if (-not (Test-Path -LiteralPath $bundledHelper) -or (Get-FileHash -LiteralPath $bundledHelper).Hash -ne (Get-FileHash -LiteralPath $sourceHelper).Hash) { throw 'The package is missing the current trusted update helper; rebuild the app.' }
+}
 $nativeRuntime = @(Get-ChildItem $manifest.DirectoryName -Recurse -Filter Microsoft.ReactNative.dll)
 if (-not $nativeRuntime.Count) { throw 'The package is missing Microsoft.ReactNative.dll.' }
 Assert-PeArchitecture $nativeExecutable $Architecture
