@@ -23,8 +23,12 @@ function Write-UpdateJson([string]$Path, $Value) {
     } finally { if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) } }
 }
 function Read-UpdateJson([string]$Path) {
-    if ((Get-Item -LiteralPath $Path).Length -gt 1048576) { throw 'The update state is invalid.' }
-    return ([IO.File]::ReadAllText($Path) | ConvertFrom-Json)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try {
+        if ($stream.Length -gt 1048576) { throw 'The update state is invalid.' }
+        $reader = [IO.StreamReader]::new($stream)
+        try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
 }
 function Assert-PlainPath([string]$Path) {
     $item = [IO.Path]::GetFullPath($Path)

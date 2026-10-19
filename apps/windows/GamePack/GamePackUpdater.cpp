@@ -40,9 +40,12 @@ std::string ProcessStart(HANDLE process) {
 }
 JsonObject Read(Path const& file) {
   if (!std::filesystem::exists(file)) return JsonObject{};
-  if (std::filesystem::file_size(file) > 1048576) throw std::runtime_error("The update state is invalid. Download the update again.");
-  std::ifstream input(file, std::ios::binary);
-  std::string data((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  auto raw=CreateFileW(file.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
+  if(raw==INVALID_HANDLE_VALUE)throw std::runtime_error("The update state could not be read. Try again.");
+  handle input(raw);LARGE_INTEGER length{};
+  if(!GetFileSizeEx(input.get(),&length) || length.QuadPart<0 || length.QuadPart>1048576)throw std::runtime_error("The update state is invalid. Download the update again.");
+  std::string data(static_cast<size_t>(length.QuadPart),'\0');DWORD count{};
+  if(!ReadFile(input.get(),data.data(),static_cast<DWORD>(data.size()),&count,nullptr) || count!=data.size())throw std::runtime_error("The update state could not be read. Try again.");
   return JsonObject::Parse(to_hstring(data));
 }
 void Write(Path const& file, JsonObject const& value) {
@@ -53,7 +56,14 @@ void Write(Path const& file, JsonObject const& value) {
     output << to_string(value.Stringify()); output.flush();
     if (!output) throw std::runtime_error("The update state could not be saved. Check your library folder.");
   }
-  if (!MoveFileExW(temporary.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("The update state could not be saved. Try again.");
+  for(int attempt=0;attempt<20;++attempt) {
+    if(MoveFileExW(temporary.c_str(),file.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return;
+    auto error=GetLastError();
+    if(error!=ERROR_SHARING_VIOLATION && error!=ERROR_LOCK_VIOLATION)break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  std::filesystem::remove(temporary);
+  throw std::runtime_error("The update state could not be saved. Try again.");
 }
 void Fail(std::string const& message, std::string const& transaction) noexcept {
   try { auto state = Read(Cache() / L"state.json"); if(Text(state,L"transaction")!=transaction)return; Put(state, L"status", "error"); Put(state,L"error",message); Write(Cache()/L"state.json",state); } catch (...) {}

@@ -71,6 +71,8 @@ try {
     Assert-UpdateHash $file $realHash; Put $file 'corrupt'; Reject { Assert-UpdateHash $file $realHash } 'Corrupt download accepted.'
     $state = Join-Path $temporary 'state.json'; Write-UpdateJson $state @{status='downloading';version='1.0.1'}; Write-UpdateJson $state @{status='ready';version='1.0.1'}
     Assert ((Read-UpdateJson $state).status -ceq 'ready') 'State was not persisted atomically.'
+    $snapshot=[IO.File]::Open($state,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try { Write-UpdateJson $state @{status='installing'}; Assert ((Read-UpdateJson $state).status -ceq 'installing') 'A state reader blocked atomic replacement.' } finally { $snapshot.Dispose() }
     $paths = @('../escape','Package/../../escape','/absolute','C:\escape','Package\..\escape','Package/file:stream','Package/CON.txt','Package/file.','Package/folder /x','Package//file','Package/./file',"Package/a`nb")
     $index = 0
     foreach ($path in $paths) {
