@@ -80,7 +80,12 @@ function fixture(t) {
       }
       if (endpoint === 'releases/99') {
         assert.equal(state.releases.length, 1);
-        if (method === 'PATCH') { assert.equal(request.draft, undefined); Object.assign(state.releases[0], request); }
+        if (method === 'PATCH') {
+          assert.notEqual(request.draft, false);
+          Object.assign(state.releases[0], request);
+          if (state.resetOmittedTag && !Object.hasOwn(request, 'tag_name')) state.releases[0].tag_name = 'untagged-fixture';
+          await state.afterPatch?.(state.releases[0], request);
+        }
         else assert.equal(method, 'GET');
         return JSON.stringify(state.releases[0]);
       }
@@ -269,4 +274,40 @@ test('deletion cannot remove an asset from a replacement release with the same t
   await assert.rejects(state.prepare(), /Pinned asset no longer exists/);
   assert.deepEqual(state.uploads, []); assert.deepEqual(state.deletes, []);
   assert.deepEqual(state.releases[0].assets, [{id: 888, name: archiveName(targets[0])}]);
+});
+
+
+for (const existing of [false, true]) test(`${existing ? 'existing draft refresh' : 'new draft completion'} explicitly preserves unpublished identity on every PATCH`, async t => {
+  const state = fixture(t); state.resetOmittedTag = true;
+  if (existing) state.releases = [state.draft()];
+  await state.prepare();
+  const patches = state.writes.filter(write => write.method === 'PATCH');
+  assert.equal(patches.length, existing ? 2 : 1);
+  for (const {endpoint, request} of patches) {
+    assert.equal(endpoint, 'releases/99');
+    assert.equal(request.tag_name, state.tag); assert.equal(request.target_commitish, commit);
+    assert.equal(request.draft, true); assert.equal(request.prerelease, false);
+  }
+  assert.equal(state.releases[0].id, 99); assert.equal(state.releases[0].tag_name, state.tag);
+  assert.equal(state.releases[0].target_commitish, commit); assert.equal(state.releases[0].draft, true);
+  assert.equal(state.releases[0].assets.length, 8); assert.deepEqual(state.refs, []);
+});
+
+for (const [name, change, error] of [
+  ['release ID', draft => { draft.id = 100; }, /release ID changed/],
+  ['tag', draft => { draft.tag_name = 'untagged-fixture'; }, /release identity changed/],
+  ['commit', draft => { draft.target_commitish = 'c'.repeat(40); }, /different commit/],
+  ['draft state', draft => { draft.draft = false; }, /published release/],
+  ['prerelease state', draft => { draft.prerelease = true; }, /prerelease/],
+]) test(`a changed ${name} in a metadata PATCH response is still rejected`, async t => {
+  const state = fixture(t); state.afterPatch = change;
+  await assert.rejects(state.prepare(), error);
+});
+
+test('an existing draft published before the metadata PATCH is rejected without mutation', async t => {
+  const state = fixture(t); state.releases = [state.draft()];
+  state.before = call => {
+    if (call.args[3] === `repos/${repository}/releases/99` && !call.args.includes('--method')) state.releases[0].draft = false;
+  };
+  await assert.rejects(state.prepare(), /published release/); noRemoteChanges(state);
 });

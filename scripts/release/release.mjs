@@ -226,13 +226,24 @@ export async function prepareRelease(options, dependencies = {}) {
   draft = await readDraft();
   assert.equal(draft?.id ?? null, initialDraftId, 'The draft changed during preparation. Review it before retrying.');
   const jsonRequest = (name, value) => { const file = join(staging, name); writeFileSync(file, JSON.stringify(value), {flag: 'wx'}); return file; };
+  const patchDraft = async (id, requestName, fields) => {
+    const current = verifyDraft(await api(`releases/${id}`), context);
+    assert.equal(current.id, id, 'The draft release ID changed.');
+    // GitHub can replace an unpublished tag with an untagged-* placeholder when
+    // tag_name is omitted, so every metadata edit must retain the full identity.
+    const updated = verifyDraft(await api(`releases/${id}`, ['--method', 'PATCH', '--input', jsonRequest(requestName, {
+      ...fields, tag_name: tag, target_commitish: commit, draft: true, prerelease: false,
+    })]), context);
+    assert.equal(updated.id, id, 'The draft release ID changed.');
+    return updated;
+  };
   const pendingBody = `${notes.trimEnd()}\n\n<!-- gamepack-draft-source: signed-local -->\n\nSigned release preparation is incomplete. Do not publish this draft until the command finishes successfully.\n`;
   if (!draft) {
     draft = verifyDraft(await api('releases', ['--method', 'POST', '--input', jsonRequest('create-draft.json', {
       tag_name: tag, target_commitish: commit, name: `GamePack ${tag}`, body: pendingBody, draft: true, prerelease: false,
     })]), context);
   } else {
-    draft = verifyDraft(await api(`releases/${draft.id}`, ['--method', 'PATCH', '--input', jsonRequest('mark-incomplete.json', {body: pendingBody})]), context);
+    draft = await patchDraft(draft.id, 'mark-incomplete.json', {body: pendingBody});
   }
   const draftId = draft.id;
   const currentDraft = async () => {
@@ -264,7 +275,7 @@ export async function prepareRelease(options, dependencies = {}) {
   assert.equal(draft.assets.length, 8, 'The draft does not contain exactly eight assets.');
   for (const asset of draft.assets) verifyAsset(asset, asset.name);
   const body = releaseNotes(notes, provenance);
-  draft = verifyDraft(await api(`releases/${draftId}`, ['--method', 'PATCH', '--input', jsonRequest('complete-draft.json', {name: `GamePack ${tag}`, body})]), context);
+  draft = await patchDraft(draftId, 'complete-draft.json', {name: `GamePack ${tag}`, body});
   assert.equal(draft.body, body, 'The final draft notes could not be verified.');
   assert.equal(await tagIdentity(), initialTag, 'The version tag changed unexpectedly. Review the draft before publishing.');
   log(`Draft ${tag} is ready for review: ${draft.html_url}. Nothing was published. Local provenance: ${join(staging, 'provenance.json')}`);
