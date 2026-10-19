@@ -5,6 +5,7 @@ import {anchorStart, Button, Dialog, Empty, PendingInteractionContext, ShortcutC
 import {chooseVideo, command, configureDrawingHistory, configureShortcuts, dataDirectory, GamePackPlayer, installUpdate, listenShortcuts, listenWindowState, setAppearance, setFullScreen} from './native';
 import {expandedAncestors, mergeDrawings} from './review';
 import {annotationScene, annotationSceneKey, PLAYBACK_SPEEDS, sameFrame} from './playback';
+import {createCaptureRequests} from './capture';
 import {Icon} from './Icon';
 import {ReviewWorkspace} from './ReviewWorkspace';
 import {TooltipProvider} from './Tooltips';
@@ -74,6 +75,9 @@ export default function App() {
   const [duration, setDuration] = useState(0);
   const [rate, setRate] = useState(1);
   const [annotationMode, setAnnotationMode] = useState<'point' | 'play'>('point');
+  const captureRequests = useRef(createCaptureRequests()).current;
+  const [captureToken, setCaptureToken] = useState(0);
+  const capturedToken = useRef(0);
   const captureRate = useRef<number | null>(null);
   const [reviewMode, setReviewMode] = useState<'watch' | 'review'>('review');
   const [reviewStop, setReviewStop] = useState<ReviewStop | null>(null);
@@ -85,6 +89,10 @@ export default function App() {
   const [acknowledgedFlushToken, setAcknowledgedFlushToken] = useState(0);
   const [drawingActive, setDrawingActive] = useState(false);
   const [tool, setTool] = useState<DrawingTool>('pointer');
+  const cancelCapture = useCallback(() => {
+    if (captureRequests.pending) setTool('pointer');
+    captureRequests.cancel(); setCaptureToken(0);
+  }, [captureRequests]);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [presenting, setPresenting] = useState(false);
@@ -194,6 +202,7 @@ export default function App() {
   }, [data?.settings.keybindings, !!data, busy, dialogOpen, settingsOpen, recording, presenting, libraryMenuOpen, libraryOpen, reviewMode]);
   useEffect(() => { if (data) { try { setAppearance(themeChoice); } catch (cause) { setError(message(cause)); } } }, [themeChoice, !!data]);
   const seek = useCallback((us: number) => {
+    cancelCapture();
     const target = Math.max(0, Math.round(us));
     seekRequest.current = {us: target, token: seekRequest.current.token + 1};
     setReadyScene('');
@@ -202,7 +211,7 @@ export default function App() {
     lastReviewStop.current = null;
     const context = playbackContext.current;
     setReviewStop(context.editing ? null : nextReviewStop(context.comments, target, context.duration, context.rate < 0 ? -1 : 1));
-  }, []);
+  }, [cancelCapture]);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -276,12 +285,14 @@ export default function App() {
   };
 
   const clearEditing = () => {
+    cancelCapture();
     if (captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
     setAnnotationMode('point'); setDrawingActive(false);
     setDraftId(null); activeDraftRef.current = null; setTool('pointer'); setRedo([]);
   };
   const leaveDraft = (after: () => void | Promise<void>) => {
     if (busy || flushRequest.current) return;
+    cancelCapture();
     if (draftsRef.current.some(item => item.id === activeDraftRef.current)) requestStrokeFlush('leave', after);
     else void after();
   };
@@ -297,6 +308,7 @@ export default function App() {
     seek(pending.anchor.kind === 'play' ? pending.anchor.end_us : parent ? conversationTarget(data?.comments ?? [], parent, pendingDuration).time : anchorStart(pending.anchor));
   };
   const openVideoNow = async (item: Video) => {
+    capturedToken.current = 0;
     const generation = ++sourceGeneration.current;
     setPaused(true); clearEditing(); setRate(1); setZoomOpen(false); setSpeedOpen(false); setZoom(1); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false);
     setCommentId(null); setExpanded(new Set()); setDuration(item.duration_us); seek(0);
@@ -322,24 +334,34 @@ export default function App() {
     finally { setBusy(''); }
   };
   const importVideo = () => leaveDraft(importVideoNow);
-  const newDraftNow = (parent?: Comment, timing = annotationMode) => {
+  const newDraftNow = (parent?: Comment, timing = annotationMode, capturedTime?: number) => {
     if (!video || busy || reviewMode !== 'review') return;
     setComposerOpen(!!parent); setLibraryVisible(false);
     const active = draftsRef.current.find(item => item.id === activeDraftRef.current);
     if (active && !parent) return active;
     const pending = parent ? resumableDraft(draftsRef.current, video.id, parent.comment_id) : undefined;
     if (pending) { restoreDraftNow(pending); return pending; }
+    if (!parent && capturedTime === undefined) {
+      setPaused(true); setReviewStop(null);
+      setCaptureToken(captureRequests.begin({videoId: video.id, seekToken: seekRequest.current.token, mode: timing}));
+      return;
+    }
+    const at = capturedTime ?? time;
 
     try {
       const value: Draft = {id: uuid(), project_id: video.project_id, video_id: video.id, text: '',
-        anchor: parent?.anchor ?? (timing === 'play' ? {kind: 'play', at_us: Math.min(time, duration || time), end_us: Math.min(time, duration || time)} : {kind: 'point', at_us: Math.min(time, duration || time)}),
+        anchor: parent?.anchor ?? (timing === 'play' ? {kind: 'play', at_us: at, end_us: at} : {kind: 'point', at_us: at}),
         parent_comment_id: parent?.comment_id ?? null, drawings: [], position: parent?.position};
       if (value.anchor.kind === 'play' && captureRate.current === null) { captureRate.current = rate; setRate((data?.settings.annotation_speed_percent ?? 50) / 100); }
       if (value.anchor.kind === 'point' && captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
       setAnnotationMode(value.anchor.kind);
       replaceDraft(value); activeDraftRef.current = value.id; setDraftId(value.id); setCommentId(null);
-      setTool('pointer'); setRedo([]);
-      setPaused(true); seek(parent && value.anchor.kind === 'play' ? value.anchor.end_us : anchorStart(value.anchor));
+      if (parent) setTool('pointer');
+      setRedo([]); setPaused(true);
+      // Capturing already stopped the native player. Seeking to an old JS
+      // sample here would visibly rewind the video and delay the first stroke.
+      if (parent) seek(value.anchor.kind === 'play' ? value.anchor.end_us : anchorStart(value.anchor));
+      else { setTime(at); setReviewStop(null); }
       return value;
     } catch (cause) { setError(message(cause)); }
   };
@@ -400,6 +422,10 @@ export default function App() {
   };
   const onTime = (event: PlayerTime) => {
     if (event.seekToken !== undefined && event.seekToken !== seekRequest.current.token) return;
+    if (!event.error && event.captureToken < capturedToken.current) return;
+    if (event.error) cancelCapture();
+    // Queued playback ticks must not replace the frame being captured.
+    if (captureRequests.pending) return;
     if (Number.isFinite(event.time_us)) {
       const now = Math.max(0, Math.round(event.time_us));
       const current = draftsRef.current.find(item => item.id === activeDraftRef.current);
@@ -458,14 +484,15 @@ export default function App() {
     if (!video || busy || reviewMode !== 'review') return;
     commentInput.current?.blur(); focusParent.current = null;
     setZoomOpen(false); setSpeedOpen(false);
-    if (value === 'pointer' || value === 'laser' || tool === value) { setTool(tool === value ? 'pointer' : value); return; }
+    if (value === 'pointer' || value === 'laser' || tool === value) { cancelCapture(); setTool(tool === value ? 'pointer' : value); return; }
     if (!draft) { newDraftNow(); setTool(value); setComposerOpen(false); return; }
     setComposerOpen(false);
     setTool(value);
-    if (draft.anchor.kind === 'point') { setPaused(true); seek(draft.anchor.at_us); }
+    if (draft.anchor.kind === 'point') { setPaused(true); if (!sameFrame(time, draft.anchor.at_us)) seek(draft.anchor.at_us); }
   };
   const changeAnnotationMode = () => {
     if (busy || draft?.parent_comment_id) return;
+    cancelCapture();
     commentInput.current?.blur(); focusParent.current = null;
     const mode = annotationMode === 'point' ? 'play' : 'point';
     if (annotationMode === 'play' || draft?.drawings.length) {
@@ -764,7 +791,7 @@ export default function App() {
       else if (commentInput.current?.isFocused()) { commentInput.current.blur(); }
       else if (libraryOpen || zoomOpen || speedOpen) { setLibraryOpen(false); setZoomOpen(false); setSpeedOpen(false); }
       else if (presenting) setFullScreen(false);
-      else { setTool('pointer'); commentInput.current?.blur(); if (draft?.anchor.kind === 'play') { setPaused(true); setComposerOpen(true); } }
+      else { cancelCapture(); setTool('pointer'); commentInput.current?.blur(); if (draft?.anchor.kind === 'play') { setPaused(true); setComposerOpen(true); } }
       return;
     }
     if (dialogOpen) return;
@@ -790,7 +817,7 @@ export default function App() {
       case 'forward': shuttle(1); break;
       case 'reverse': shuttle(-1); break;
       case 'previousFrame': case 'nextFrame': {
-        const stepFrame = () => { setReadyScene(''); setPaused(true); lastReviewStop.current = null; setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); };
+        const stepFrame = () => { cancelCapture(); setReadyScene(''); setPaused(true); lastReviewStop.current = null; setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); };
         if (draft?.anchor.kind === 'play') stepFrame();
         else leaveDraft(() => { clearEditing(); setCommentId(null); stepFrame(); });
         break;
@@ -833,6 +860,7 @@ export default function App() {
   const startProject = () => leaveDraft(() => { setPaused(true); setProjectTitle(''); setError(''); setProjectOpen(true); });
   const toggleVideoMenu = () => {
     if (libraryOpen) { setLibraryOpen(false); return; }
+    cancelCapture();
     setPaused(true);
     videoMenuTrigger.current?.measureInWindow((x, y, _triggerWidth, triggerHeight) => {
       appView.current?.measureInWindow((rootX, rootY) => {
@@ -883,11 +911,11 @@ export default function App() {
           onPlay={play} rate={rate} zoom={zoom} presenting={presenting}
           onSpeed={() => { setSpeedOpen(value => !value); setZoomOpen(false); }} onZoom={() => { setZoomOpen(value => !value); setSpeedOpen(false); }} onPresent={togglePresentation}
           toolbar={<>
-            <View style={{width: 64, height: 56}}>
-              <Button quiet compact icon="cycle" style={{width: 64, height: 56, flexDirection: 'column', gap: 2, paddingHorizontal: 0, paddingVertical: 6}} label={`Annotation timing: ${annotationMode === 'play' ? 'Play' : 'Moment'}`} active={annotationMode === 'play'} disabled={controlsBusy || dialogOpen || !!draft?.parent_comment_id} onPress={changeAnnotationMode}>{annotationMode === 'play' ? 'Play' : 'Moment'}</Button>
-            </View>
             <Button toolbar quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={controlsBusy || dialogOpen} onPress={() => chooseTool('pointer')} />
-            {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} toolbar quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={controlsBusy || dialogOpen} onPress={() => chooseTool(value)} />)}
+            <Button toolbar quiet compact icon={annotationMode === 'play' ? 'playMoment' : 'moment'} label={annotationMode === 'play' ? 'Play · Switch to Moment' : 'Moment · Switch to Play'} active={annotationMode === 'play'} disabled={controlsBusy || dialogOpen || !!draft?.parent_comment_id} onPress={changeAnnotationMode} />
+            <View style={{width: 18, height: 1, backgroundColor: colors.separator, marginVertical: 2}} />
+            {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} toolbar quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={controlsBusy || dialogOpen}
+              onPressIn={() => { if (!draft || draft.anchor.kind === 'point') setPaused(true); }} onPress={() => chooseTool(value)} />)}
             <Button toolbar quiet compact shortcut="laser" icon="target" label="Laser pointer" active={tool === 'laser'} disabled={controlsBusy || dialogOpen} onPress={() => chooseTool('laser')} />
           </>}
           toolbarAccessory={<>
@@ -900,6 +928,10 @@ export default function App() {
           <GamePackPlayer key={video.id} style={StyleSheet.absoluteFill} source={video.path} zoom={zoom} zoomToken={zoomState.token} onZoom={({nativeEvent}) => setZoomState(previous => receiveZoom(previous, nativeEvent))} paused={paused} rate={rate}
             seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson} presentedSceneKey={presentedSceneKey}
             flushToken={flushToken} stepToken={step.token} stepFrames={step.frames} onStrokeFlushFinished={event => void onStrokeFlushFinished(event.nativeEvent)}
+            captureToken={captureToken} onCaptureReady={({nativeEvent}) => {
+              const capture = captureRequests.take(nativeEvent, videoId, seekRequest.current.token);
+              if (capture) { setCaptureToken(0); capturedToken.current = capture.token; newDraftNow(undefined, capture.mode, capture.time); }
+            }}
             tool={reviewMode === 'watch' ? busy ? 'none' : 'pointer' : (!busy || !!flushRequest.current) && (draft || tool === 'pointer' || tool === 'laser') ? tool : 'none'}
             onDrawingStart={event => { setDrawingActive(true); setTime(event.nativeEvent.time_us); if (event.nativeEvent.paused) setPaused(true); }}
             onPointer={event => {

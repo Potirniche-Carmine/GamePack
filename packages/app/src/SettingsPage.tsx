@@ -2,6 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Animated, Platform, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {GlassSurface} from './Glass';
 import {Avatar} from './Avatar';
+import {Icon} from './Icon';
 import {Button, TextField} from './components';
 import {easeOut, MotionPressable, useReducedMotion} from './motion';
 import type {Colors} from './colors';
@@ -12,9 +13,9 @@ import {PLAYBACK_SPEEDS} from './playback';
 import type {UpdateController} from './updateFlow';
 import type {Profile, Settings, ThemeChoice} from './types';
 
-type SettingsTab = 'profile' | 'appearance' | 'playback' | 'shortcuts';
+type SettingsTab = 'profile' | 'appearance' | 'moments' | 'shortcuts';
 const tabs: {id: SettingsTab; label: string}[] = [
-  {id: 'profile', label: 'Profile'}, {id: 'appearance', label: 'Appearance'}, {id: 'playback', label: 'Playback'}, {id: 'shortcuts', label: 'Shortcuts'},
+  {id: 'profile', label: 'Profile'}, {id: 'appearance', label: 'Appearance'}, {id: 'moments', label: 'Moments'}, {id: 'shortcuts', label: 'Shortcuts'},
 ];
 
 export function SettingsPage({settings, profile, recording, error, busy: externalBusy, onRestart, onProfileSave, onRecord, onChange, onTheme, onClose, updateController, initialTab = 'appearance', animateEntrance = true}: {
@@ -105,11 +106,21 @@ export function SettingsPage({settings, profile, recording, error, busy: externa
         </View>
 
       </View>}
-      {tab === 'playback' && <View style={{gap: 14}}>
-        <Text style={s.fieldLabel}>Default annotation speed</Text>
-        <View style={{flexDirection: 'row', gap: 8, flexWrap: 'wrap'}}>
-          {PLAYBACK_SPEEDS.map(speed => <Button key={speed} compact style={{minWidth: 64}}
-            label={`Default annotation speed ${speed}×`} active={settings.annotation_speed_percent === speed * 100}
+      {tab === 'moments' && <View style={s.momentsPanel}>
+        <View style={s.momentModes}>
+          <View style={s.momentMode}>
+            <View style={s.modeIcon}><Icon name="moment" color={colors.text} /></View>
+            <View style={s.modeLabels}><Text style={s.modeTitle}>Moment</Text><Text style={s.modeDetail}>Draw on a paused frame</Text></View>
+          </View>
+          <View style={s.momentMode}>
+            <View style={s.modeIcon}><Icon name="playMoment" color={colors.text} /></View>
+            <View style={s.modeLabels}><Text style={s.modeTitle}>Play</Text><Text style={s.modeDetail}>Draw during playback</Text></View>
+          </View>
+        </View>
+        <Text style={s.fieldLabel}>Default Play speed</Text>
+        <View style={s.speedOptions}>
+          {PLAYBACK_SPEEDS.map(speed => <Button key={speed} compact style={s.speedOption}
+            label={`Default Play speed ${speed}×`} active={settings.annotation_speed_percent === speed * 100}
             disabled={busy} onPress={() => onChange({...settings, annotation_speed_percent: speed * 100})}>{speed}×</Button>)}
         </View>
       </View>}
@@ -215,6 +226,15 @@ const createSettingsStyles = (c: Colors) => StyleSheet.create({
   inputFocused: {borderColor: c.selectedLine},
   profileActions: {flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 20},
   themeOptions: {flexDirection: 'row', gap: 12},
+  momentsPanel: {paddingTop: 4},
+  momentModes: {gap: 18, marginBottom: 28},
+  momentMode: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  modeIcon: {width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassInset},
+  modeLabels: {gap: 2},
+  modeTitle: {color: c.text, fontSize: 14, lineHeight: 20, fontWeight: '600'},
+  modeDetail: {color: c.muted, fontSize: 13, lineHeight: 18},
+  speedOptions: {flexDirection: 'row', gap: 8, flexWrap: 'wrap'},
+  speedOption: {minWidth: 64},
   appearance: {flex: 1, borderRadius: 11, padding: 7, borderWidth: 2, borderColor: 'transparent'},
   appearanceSelected: {borderColor: c.selectedLine, backgroundColor: c.selected},
   appearanceHover: {backgroundColor: c.inset},

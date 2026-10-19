@@ -32,7 +32,7 @@ export function usePlaybackTimeline({time, duration, paused, rate, seekToken, re
       // Bound interpolation by both the next native sample and the review stop.
       const target = motion.kind === 'animate' ? motion : timelinePrediction(sample);
       Animated.timing(position, {toValue: progress(target.time), duration: target.duration,
-        easing: paused ? Easing.out(Easing.quad) : Easing.linear, useNativeDriver: true, isInteraction: false}).start();
+        easing: Easing.linear, useNativeDriver: true, isInteraction: false}).start();
     }
     return () => position.stopAnimation();
   }, [time, duration, paused, rate, seekToken, reviewEnd, position, scrubbing]);

@@ -7,10 +7,20 @@ test('pausing holds the presented position until the stopped native frame arrive
   const requested = {...playing, paused: true};
   assert.equal(timelineMotion(playing, requested).kind, 'hold');
   const stopped = {...requested, time: 2073000};
-  assert.deepEqual(timelineMotion(requested, stopped), {kind: 'animate', time: stopped.time, duration: 100});
+  assert.deepEqual(timelineMotion(requested, stopped), {kind: 'snap', time: stopped.time});
   assert.deepEqual(timelineMotion(stopped, {...stopped, paused: false}), {kind: 'animate', time: 2213000, duration: 140});
   assert.equal(timelineMotion(stopped, {...stopped, seekToken: 2, time: 5000000}).kind, 'snap');
   assert.equal(timelineMotion(stopped, {...stopped, paused: false, rate: -1}).time, 1933000);
+});
+
+test('confirmed pauses settle immediately at every shuttle speed without a trailing animation', () => {
+  for (const rate of [.25, .5, .75, 1, 2, 4, -1, -2, -4]) {
+    const playing = {time: 5000000, duration: 30000000, paused: false, rate, seekToken: 1};
+    const requested = {...playing, paused: true};
+    const stopped = {...requested, time: playing.time + rate * 45000};
+    assert.equal(timelineMotion(playing, requested).kind, 'hold');
+    assert.deepEqual(timelineMotion(requested, stopped), {kind: 'snap', time: stopped.time});
+  }
 });
 
 test('playhead prediction lands on drawing stops without crossing or easing back, in either direction', () => {

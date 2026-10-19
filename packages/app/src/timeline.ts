@@ -58,7 +58,10 @@ export function timelineMotion(previous: TimelineSample | null, current: Timelin
   // The pause request still carries the previous periodic sample. Freeze the
   // presentation until native reports the stopped frame, instead of rewinding.
   if (paused && time === previous.time) return {kind: previous.paused ? 'snap' as const : 'hold' as const, time};
-  return {kind: 'animate' as const, ...(paused ? {time, duration: 100} : timelinePrediction(current))};
+  // The acknowledged pause is final. Easing toward it makes the playhead keep
+  // moving (or reel backward) after the video has already stopped.
+  if (paused) return {kind: 'snap' as const, time};
+  return {kind: 'animate' as const, ...timelinePrediction(current)};
 }
 
 /** Pointer positions use the same inset as markers and the playback thumb. */
