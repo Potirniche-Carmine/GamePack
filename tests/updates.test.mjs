@@ -84,6 +84,8 @@ test('requests the public latest release endpoint without credentials', async ()
     assert.equal(url, 'https://api.github.com/repos/Potirniche-Carmine/GamePack/releases/latest');
     assert.equal(url, latestReleaseEndpoint);
     assert.equal(options.headers.Accept, 'application/vnd.github+json');
+    assert.equal(options.headers['User-Agent'], 'GamePack');
+    assert.equal(options.headers['Cache-Control'], 'no-cache');
     assert.equal(options.headers.Authorization, undefined);
     assert.ok(options.signal instanceof AbortSignal);
     return response(release());

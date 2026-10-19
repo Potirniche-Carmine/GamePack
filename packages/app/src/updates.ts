@@ -80,7 +80,7 @@ export async function checkForUpdates(build: AppBuild, options: {fetch?: typeof 
     let response: Response;
     try {
       response = await (options.fetch ?? fetch)(latestReleaseEndpoint, {
-        headers: {Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'},
+        headers: {Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'GamePack', 'Cache-Control': 'no-cache'},
         signal: controller.signal,
       });
     } catch {
