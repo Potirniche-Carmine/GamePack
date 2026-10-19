@@ -73,6 +73,8 @@ export default function App() {
   const [seekState, setSeekState] = useState({us: 0, token: 0});
   const seekRequest = useRef(seekState);
   const [flushToken, setFlushToken] = useState(0);
+  const [acknowledgedFlushToken, setAcknowledgedFlushToken] = useState(0);
+  const [drawingActive, setDrawingActive] = useState(false);
   const [tool, setTool] = useState<DrawingTool>('pointer');
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -124,16 +126,17 @@ export default function App() {
   const originalComments = useMemo(() => videoComments.filter(item => !item.parent_comment_id), [videoComments]);
   const allRepliesExpanded = originalComments.length > 0 && originalComments.every(item => expanded.has(item.comment_id));
   const projectVideos = data ? libraryContents(data.projects, data.folders, data.videos, projectId, folderId).videos : [];
+  const sceneTime = paused ? time : -1;
   const sceneJson = useMemo(() => {
     if (reviewMode !== 'review' || !annotationsVisible) return '';
     if (draft) {
       const root = draft.parent_comment_id ? conversationRoot(videoComments, draft.parent_comment_id) : undefined;
       const context = root ? annotationScene(videoComments.filter(item => conversationRoot(videoComments, item.comment_id)?.comment_id === root.comment_id), draft.anchor.at_us, true) : null;
-      return JSON.stringify({id: draft.id, anchor: draft.anchor, capture: true, captureEndUs: draft.anchor.kind === 'play' ? draft.parent_comment_id ? draft.anchor.end_us : duration : undefined, drawings: [...(context?.drawings ?? []), ...draft.drawings]});
+      return JSON.stringify({id: draft.id, anchor: draft.anchor, capture: true, flushed: acknowledgedFlushToken, captureEndUs: draft.anchor.kind === 'play' ? draft.parent_comment_id ? draft.anchor.end_us : duration : undefined, drawings: [...(context?.drawings ?? []), ...draft.drawings]});
     }
-    const scene = annotationScene(videoComments, time, paused, commentId, reviewStop?.time);
+    const scene = annotationScene(videoComments, sceneTime, paused, commentId, reviewStop?.time);
     return scene ? JSON.stringify(scene) : '';
-  }, [draft, videoComments, time, paused, commentId, annotationsVisible, reviewMode, reviewStop?.time, duration]);
+  }, [draft, videoComments, sceneTime, paused, commentId, annotationsVisible, reviewMode, reviewStop?.time, duration, acknowledgedFlushToken]);
   const onVideoNotes = useMemo(() => {
     const notes = notesAtTime(videoComments, time).filter(note => paused || note.anchor.kind === 'play');
     const root = draft?.parent_comment_id ? conversationRoot(videoComments, draft.parent_comment_id) : undefined;
@@ -149,8 +152,8 @@ export default function App() {
   const dialogOpen = profileOpen || projectOpen || discardOpen || !!deleteTarget || !!folderDialog || !!moveTarget;
   const historyEnabled = !!video && reviewMode === 'review' && !busy && !dialogOpen && !settingsOpen && !libraryOpen;
   useEffect(() => {
-    configureDrawingHistory(historyEnabled && !!draft?.drawings.length, historyEnabled && !!redo.length);
-  }, [historyEnabled, draft?.drawings.length, redo.length]);
+    configureDrawingHistory(historyEnabled && (!!draft?.drawings.length || drawingActive), historyEnabled && !!redo.length);
+  }, [historyEnabled, draft?.drawings.length, redo.length, drawingActive]);
 
   useEffect(() => {
     if (!draft || !composerOpen || focusParent.current === null || (draft.parent_comment_id ?? '') !== focusParent.current) return;
@@ -263,7 +266,7 @@ export default function App() {
 
   const clearEditing = () => {
     if (captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
-    setAnnotationMode('point');
+    setAnnotationMode('point'); setDrawingActive(false);
     setDraftId(null); activeDraftRef.current = null; setTool('pointer'); setRedo([]);
   };
   const leaveDraft = (after: () => void | Promise<void>) => {
@@ -383,8 +386,13 @@ export default function App() {
   const onTime = (event: PlayerTime) => {
     if (event.seekToken !== undefined && event.seekToken !== seekRequest.current.token) return;
     if (Number.isFinite(event.time_us)) {
-      const now = Math.max(0, Math.round(event.time_us)); setTime(now);
+      const now = Math.max(0, Math.round(event.time_us));
       const current = draftsRef.current.find(item => item.id === activeDraftRef.current);
+      if (current?.anchor.kind === 'play') {
+        const bounded = playDraftSeek(current, now, duration);
+        if (!sameFrame(now, bounded)) { setPaused(true); seek(bounded); return; }
+      }
+      setTime(now);
       if (current?.anchor.kind === 'play' && !current.parent_comment_id && !flushRequest.current && !savingDraftId.current
         && (now > current.anchor.end_us + 1000000 || (!event.playing && now > current.anchor.end_us)))
         replaceDraft(extendPlayDraft(current, now));
@@ -415,6 +423,7 @@ export default function App() {
     return drawing;
   };
   const onDrawing = (json: string) => {
+    setDrawingActive(false);
     const id = flushRequest.current?.draftId ?? savingDraftId.current ?? activeDraftRef.current;
     const current = draftsRef.current.find(item => item.id === id);
     if (!current || current.id === discarding.current) return;
@@ -507,6 +516,7 @@ export default function App() {
       if (!Number.isSafeInteger(event.time_us) || event.time_us < 0) throw new Error('The player returned an invalid frame time. Retry Post.');
       const next = extendPlayDraft(current, event.time_us, event.drawingJson ? mergeDrawings(current.drawings, [parseDrawing(event.drawingJson)]) : current.drawings);
       replaceDraft(next); setTime(event.time_us); setPaused(true);
+      setDrawingActive(false); setAcknowledgedFlushToken(event.flushToken);
       if (request.purpose === 'save' || request.purpose === 'leave') setTool('pointer');
       flushRequest.current = null;
       if (request.purpose === 'undo' || request.purpose === 'redo') {
@@ -710,7 +720,12 @@ export default function App() {
       case 'pause': setPaused(true); if (draft?.anchor.kind === 'play' && draft.drawings.length) setComposerOpen(true); break;
       case 'forward': shuttle(1); break;
       case 'reverse': shuttle(-1); break;
-      case 'previousFrame': case 'nextFrame': leaveDraft(() => { clearEditing(); setCommentId(null); setPaused(true); lastReviewStop.current = null; setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); }); break;
+      case 'previousFrame': case 'nextFrame': {
+        const stepFrame = () => { setReadyScene(''); setPaused(true); lastReviewStop.current = null; setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); };
+        if (draft?.anchor.kind === 'play') stepFrame();
+        else leaveDraft(() => { clearEditing(); setCommentId(null); stepFrame(); });
+        break;
+      }
       case 'back': scrubTo(Math.max(0, time - 5000000)); break;
       case 'ahead': scrubTo(Math.min(duration, time + 5000000)); break;
       case 'start': scrubTo(0); break;
@@ -814,7 +829,7 @@ export default function App() {
             seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson} presentedSceneKey={presentedSceneKey}
             flushToken={flushToken} stepToken={step.token} stepFrames={step.frames} onStrokeFlushFinished={event => void onStrokeFlushFinished(event.nativeEvent)}
             tool={reviewMode === 'watch' ? busy ? 'none' : 'pointer' : (!busy || !!flushRequest.current) && (draft || tool === 'pointer' || tool === 'laser') ? tool : 'none'}
-            onDrawingStart={event => { setTime(event.nativeEvent.time_us); if (event.nativeEvent.paused) setPaused(true); }}
+            onDrawingStart={event => { setDrawingActive(true); setTime(event.nativeEvent.time_us); if (event.nativeEvent.paused) setPaused(true); }}
             onPointer={event => {
               setZoomOpen(false); setSpeedOpen(false);
               if (reviewMode === 'review' && tool === 'laser') setPointerPulse({...event.nativeEvent, token: Date.now()});

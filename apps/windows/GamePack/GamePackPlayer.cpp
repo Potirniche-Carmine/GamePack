@@ -453,7 +453,12 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
         auto kind=next.GetNamedString(L"kind",L"point");
         sameAnchor=kind==previous.GetNamedString(L"kind",L"point") && Number(next,L"at_us")==Number(previous,L"at_us");
       }
-      if (!sameAnchor) { p->Finish(); p->pendingDrawings.clear(); }
+      if (!sameAnchor) p->Finish();
+      // A flush ACK must clear held ink removed by Undo, including when the
+      // authoritative geometry is otherwise identical to the previous scene.
+      bool acknowledged=parsed && p->flushToken>0 && Number(parsed,L"flushed")==p->flushToken
+        && (!p->scene || Number(parsed,L"flushed")!=Number(p->scene,L"flushed"));
+      if (!sameAnchor || acknowledged) p->pendingDrawings.clear();
       if (parsed) for (auto const& item:parsed.GetNamedArray(L"drawings",JsonArray{})) p->pendingDrawings.erase(item.GetObject().GetNamedString(L"id",L""));
       p->scene=parsed;
     }

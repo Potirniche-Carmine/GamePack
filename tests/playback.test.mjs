@@ -86,3 +86,10 @@ test('native play scenes stay stable across playback ticks and include timed rep
   assert.deepEqual(selected.drawings.map(mark => mark.opacity), [1, 1]);
   assert.equal(JSON.stringify(records), before);
 });
+
+test('a flush acknowledgment forces a draft snapshot without changing presentation readiness', () => {
+  const empty = {id: 'draft', anchor: {kind: 'point', at_us: 1000}, drawings: [], flushed: 0};
+  const undone = {...empty, flushed: 1};
+  assert.notEqual(JSON.stringify(empty), JSON.stringify(undone));
+  assert.equal(annotationSceneKey(JSON.stringify(empty), 1, 0), annotationSceneKey(JSON.stringify(undone), 1, 0));
+});

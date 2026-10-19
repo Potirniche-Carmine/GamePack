@@ -255,7 +255,10 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
     NSDictionary *anchor = _scene[@"anchor"], *nextAnchor = next[@"anchor"];
     BOOL sameScene = _scene && next && [(_scene[@"id"] ?: @"") isEqual:(next[@"id"] ?: @"")] && [anchor[@"kind"] isEqual:nextAnchor[@"kind"]] && [anchor[@"at_us"] isEqual:nextAnchor[@"at_us"]];
     if (!sameScene) [self finishStroke];
-    if (!sameScene) [_pendingDrawings removeAllObjects];
+    // The flush ACK is an authoritative snapshot even when Undo removed the
+    // held stroke before it ever appeared in React's drawing list.
+    BOOL acknowledged = [next[@"flushed"] longLongValue] == _flushToken && _flushToken > 0 && ![next[@"flushed"] isEqual:_scene[@"flushed"]];
+    if (!sameScene || acknowledged) [_pendingDrawings removeAllObjects];
     for (NSDictionary *drawing in next[@"drawings"]) [_pendingDrawings removeObjectForKey:drawing[@"id"]];
     _scene = next; [_overlay setNeedsDisplay:YES];
   }
