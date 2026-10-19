@@ -235,19 +235,34 @@ export async function prepareRelease(options, dependencies = {}) {
     draft = verifyDraft(await api(`releases/${draft.id}`, ['--method', 'PATCH', '--input', jsonRequest('mark-incomplete.json', {body: pendingBody})]), context);
   }
   const draftId = draft.id;
-  const currentDraft = async () => verifyDraft(await api(`releases/${draftId}`), context);
+  const currentDraft = async () => {
+    const current = verifyDraft(await api(`releases/${draftId}`), context);
+    assert.equal(current.id, draftId, 'The draft release ID changed.');
+    return current;
+  };
+  const verifyAsset = (asset, name) => {
+    const expected = expectedAssets.get(name);
+    assert.ok(expected && asset.name === name && asset.state === 'uploaded' && asset.size === expected.size && asset.digest === `sha256:${expected.sha256}`, `The uploaded asset ${name} could not be verified.`);
+  };
   log(`Uploading verified assets to draft ${tag}…`);
   for (const name of expectedAssets.keys()) {
-    await currentDraft();
-    await command('gh', ['release', 'upload', tag, join(upload, name), '--clobber', '--repo', `github.com/${repository}`]);
+    const current = await currentDraft(), existing = current.assets.find(asset => asset.name === name);
+    if (existing) {
+      assert.ok(Number.isSafeInteger(existing.id) && existing.id > 0, 'The existing asset ID is invalid.');
+      await command('gh', ['api', '--hostname', 'github.com', endpoint(`releases/assets/${existing.id}`), '--method', 'DELETE', '--silent']);
+      await currentDraft();
+    }
+    // Pin the numeric release ID. Tag-based upload commands can resolve a newly
+    // replaced release after the draft check and overwrite unrelated assets.
+    const uploaded = JSON.parse(await command('gh', ['api', '--hostname', 'github.com',
+      `https://uploads.github.com/${endpoint(`releases/${draftId}/assets`)}?name=${encodeURIComponent(name)}`,
+      '--method', 'POST', '--header', 'Content-Type: application/octet-stream', '--input', join(upload, name)]));
+    verifyAsset(uploaded, name);
   }
   await recheckSource();
   draft = await currentDraft();
   assert.equal(draft.assets.length, 8, 'The draft does not contain exactly eight assets.');
-  for (const asset of draft.assets) {
-    const expected = expectedAssets.get(asset.name);
-    assert.ok(expected && asset.state === 'uploaded' && asset.size === expected.size && asset.digest === `sha256:${expected.sha256}`, `The uploaded asset ${asset.name} could not be verified.`);
-  }
+  for (const asset of draft.assets) verifyAsset(asset, asset.name);
   const body = releaseNotes(notes, provenance);
   draft = verifyDraft(await api(`releases/${draftId}`, ['--method', 'PATCH', '--input', jsonRequest('complete-draft.json', {name: `GamePack ${tag}`, body})]), context);
   assert.equal(draft.body, body, 'The final draft notes could not be verified.');

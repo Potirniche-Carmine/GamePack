@@ -27,7 +27,7 @@ function fixture(t) {
   }
   const version = checkVersion(root), tag = `v${version}`;
   const state = {root, version, tag, main: commit, local: commit, dirty: '', ci: runData(), artifacts: artifactData(), releases: [], refs: [],
-    calls: [], writes: [], uploads: [], packages: [], validations: [], notes: `# GamePack ${version}\n\nReview improvements.\n`, before: () => {}};
+    calls: [], writes: [], uploads: [], deletes: [], packages: [], validations: [], notes: `# GamePack ${version}\n\nReview improvements.\n`, before: () => {}};
   state.draft = () => ({id: 99, tag_name: tag, target_commitish: commit, draft: true, prerelease: false, assets: [], body: '<!-- gamepack-draft-source: ci -->', html_url: 'https://github.com/example/draft'});
   const pair = (directory, target, content) => {
     mkdirSync(directory, {recursive: true});
@@ -44,10 +44,29 @@ function fixture(t) {
     }
     if (program === 'gh' && args[0] === 'api') {
       assert.deepEqual(args.slice(0, 3), ['api', '--hostname', 'github.com']);
+      if (args[3].startsWith('https://uploads.github.com/')) {
+        const url = new URL(args[3]);
+        assert.equal(url.pathname, `/repos/${repository}/releases/99/assets`);
+        assert.equal(args[args.indexOf('--method') + 1], 'POST');
+        assert.equal(args[args.indexOf('--header') + 1], 'Content-Type: application/octet-stream');
+        const release = state.releases.find(item => item.id === 99);
+        if (!release) throw new Error('Pinned release no longer exists');
+        const file = args[args.indexOf('--input') + 1], contents = readFileSync(file), name = basename(file);
+        assert.equal(url.searchParams.get('name'), name);
+        assert.ok(!release.assets.some(asset => asset.name === name), 'An upload must not implicitly replace another asset.');
+        state.uploads.push({name, contents});
+        const asset = {id: 1000 + state.uploads.length, name, size: contents.length, state: 'uploaded', digest: `sha256:${sha256(contents)}`};
+        await state.asset?.(asset); release.assets.push(asset); return JSON.stringify(asset);
+      }
       assert.ok(args[3].startsWith(`repos/${repository}/`));
       const endpoint = args[3].slice(`repos/${repository}/`.length);
       const method = args.includes('--method') ? args[args.indexOf('--method') + 1] : 'GET';
       const request = args.includes('--input') ? JSON.parse(readFileSync(args[args.indexOf('--input') + 1], 'utf8')) : null;
+      if (endpoint.startsWith('releases/assets/') && method === 'DELETE') {
+        const id = Number(endpoint.split('/').at(-1)), owner = state.releases.find(release => release.assets.some(asset => asset.id === id));
+        if (!owner) throw new Error('Pinned asset no longer exists');
+        assert.equal(owner.id, 99); state.deletes.push(id); owner.assets = owner.assets.filter(asset => asset.id !== id); return '';
+      }
       if (method !== 'GET') state.writes.push({endpoint, method, request});
       if (endpoint === 'git/ref/heads/main') return JSON.stringify({ref: 'refs/heads/main', object: {type: 'commit', sha: state.main}});
       if (endpoint === `actions/runs/${ciRun}`) return JSON.stringify(state.ci);
@@ -100,15 +119,6 @@ function fixture(t) {
         signing: {identity, name: 'Developer ID Application: Fixture (TEAM123456)', team: 'TEAM123456', developerID: true, hardenedRuntime: true, secureTimestamp: true},
         notarization: {id: architecture === 'arm64' ? '11111111-1111-4111-8111-111111111111' : '22222222-2222-4222-8222-222222222222', status: 'Accepted', stapled: true, assessment: 'accepted', receipt: '/local/receipt.json'}};
       await state.report?.(report); writeFileSync(env.GAMEPACK_MACOS_PACKAGE_REPORT, JSON.stringify(report)); return '';
-    }
-    if (program === 'gh' && args[0] === 'release') {
-      assert.deepEqual(args.slice(0, 3), ['release', 'upload', tag]);
-      assert.equal(args[args.indexOf('--repo') + 1], `github.com/${repository}`);
-      const file = args[3], contents = readFileSync(file), name = basename(file);
-      state.uploads.push({name, contents});
-      const asset = {name, size: contents.length, state: 'uploaded', digest: `sha256:${sha256(contents)}`};
-      await state.asset?.(asset);
-      const release = state.releases[0]; release.assets = [...release.assets.filter(existing => existing.name !== name), asset]; return '';
     }
     throw new Error(`Unexpected command: ${program} ${JSON.stringify(args)}`);
   };
@@ -228,4 +238,35 @@ test('non-Mac hosts fail before external commands', async t => {
   const state = fixture(t);
   await assert.rejects(prepareRelease(options, {root: state.root, platform: 'linux', run: state.command}), /macOS/);
   assert.deepEqual(state.calls, []);
+});
+
+
+test('refresh deletes only assets belonging to the verified draft ID', async t => {
+  const state = fixture(t); state.releases = [state.draft()];
+  state.releases[0].assets = [{id: 777, name: archiveName(targets[0]), state: 'uploaded', size: 1, digest: `sha256:${'0'.repeat(64)}`}];
+  await state.prepare();
+  assert.deepEqual(state.deletes, [777]); assert.equal(state.uploads.length, 8); assert.equal(state.releases[0].draft, true);
+});
+
+test('a replacement published release under the same tag never receives uploads', async t => {
+  const state = fixture(t);
+  state.before = call => {
+    if (call.args[3]?.startsWith('https://uploads.github.com/')) {
+      state.releases = [{...state.draft(), id: 100, draft: false, target_commitish: 'c'.repeat(40), assets: [{id: 888, name: archiveName(targets[0])}]}];
+    }
+  };
+  await assert.rejects(state.prepare(), /Pinned release no longer exists/);
+  assert.deepEqual(state.uploads, []); assert.deepEqual(state.deletes, []);
+  assert.equal(state.releases[0].id, 100); assert.deepEqual(state.releases[0].assets, [{id: 888, name: archiveName(targets[0])}]);
+});
+
+test('deletion cannot remove an asset from a replacement release with the same tag', async t => {
+  const state = fixture(t); state.releases = [state.draft()];
+  state.releases[0].assets = [{id: 777, name: archiveName(targets[0])}];
+  state.before = call => {
+    if (call.args.includes('DELETE')) state.releases = [{...state.draft(), id: 100, draft: false, assets: [{id: 888, name: archiveName(targets[0])}]}];
+  };
+  await assert.rejects(state.prepare(), /Pinned asset no longer exists/);
+  assert.deepEqual(state.uploads, []); assert.deepEqual(state.deletes, []);
+  assert.deepEqual(state.releases[0].assets, [{id: 888, name: archiveName(targets[0])}]);
 });
