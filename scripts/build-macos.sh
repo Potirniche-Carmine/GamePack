@@ -11,6 +11,8 @@ node scripts/ci/check-version.mjs
 # CI has already installed and verified both graphs before invoking this script.
 if [[ "${GAMEPACK_SKIP_DEPENDENCIES:-0}" != 1 ]]; then
   npm ci --prefer-offline --no-audit --no-fund
+  bundle config set --local path vendor/bundle
+  BUNDLE_FROZEN=true bundle check || BUNDLE_FROZEN=true bundle install
   bundle exec pod install --project-directory=macos
 else
   [[ -d node_modules && -d macos/Pods ]] || { echo 'Install locked JavaScript and CocoaPods dependencies before skipping setup.' >&2; exit 1; }
