@@ -40,5 +40,11 @@ xcodebuild -workspace macos/gamepack.xcworkspace -scheme gamepack-macOS -configu
 mkdir -p dist
 rm -rf dist/GamePack.app
 /usr/bin/ditto build/macos/Build/Products/Release/GamePack.app dist/GamePack.app
-codesign --force --deep --sign - dist/GamePack.app
+mkdir -p dist/GamePack.app/Contents/Helpers
+xcrun clang++ -std=c++17 -fobjc-arc -mmacosx-version-min=14.0 -Wno-deprecated-declarations \
+  native/macos/GPUpdateSupport.mm native/macos/GPUpdateHelper.mm \
+  -framework Foundation -framework AppKit -framework Security -framework CoreServices -lz \
+  -o dist/GamePack.app/Contents/Helpers/GamePackUpdateHelper
+node scripts/collect-notices.mjs dist/GamePack.app/Contents/Resources/Notices
+node scripts/macos/sign-app.mjs dist/GamePack.app
 printf '\nBuilt %s/dist/GamePack.app (JavaScript and Rust embedded; no runtime server).\n' "$PWD"

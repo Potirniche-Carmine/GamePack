@@ -5,22 +5,10 @@
 #import <React/RCTBaseTextInputView.h>
 #import <AppKit/AppKit.h>
 #import <AVFoundation/AVFoundation.h>
-#include <sys/sysctl.h>
+#import "GPUpdater.h"
+#import "GPUpdateSupport.h"
 #include "../shared/UpdateRelease.h"
 #include "gamepack-core/src/lib.rs.h"
-
-static std::string GPUpdateArchitecture() {
-  int arm64 = 0;
-  size_t size = sizeof(arm64);
-  if (sysctlbyname("hw.optional.arm64", &arm64, &size, nullptr, 0) == 0 && arm64 == 1) return "arm64";
-#if defined(__x86_64__)
-  return "x64";
-#elif defined(__arm64__)
-  return "arm64";
-#else
-  return {};
-#endif
-}
 
 // Text editors keep their own Undo/Redo earlier in the responder chain.
 // The window falls back to drawing history when no editor handles the action.
@@ -171,19 +159,34 @@ RCT_REMAP_METHOD(dataDirectory, dataDirectoryWithResolver:(RCTPromiseResolveBloc
 RCT_REMAP_METHOD(appBuild, appBuildWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   NSString *version = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
   auto architecture = GPUpdateArchitecture();
-  if (![version isKindOfClass:NSString.class] || !version.length || architecture.empty()) {
+  if (![version isKindOfClass:NSString.class] || !version.length || !architecture.length) {
     reject(@"version", @"The installed version could not be read. Reinstall GamePack to check for updates.", nil); return;
   }
-  resolve(@{@"version": version, @"platform": @"macos", @"architecture": [NSString stringWithUTF8String:architecture.c_str()]});
+  resolve(@{@"version": version, @"platform": @"macos", @"architecture": architecture});
 }
 RCT_REMAP_METHOD(openUpdateRelease, openUpdateRelease:(NSString *)tag download:(BOOL)download resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
-  auto url = gamepack::updates::releaseUrl(tag.UTF8String ?: "", "macos", GPUpdateArchitecture(), download);
+  auto url = gamepack::updates::releaseUrl(tag.UTF8String ?: "", "macos", GPUpdateArchitecture().UTF8String, download);
   if (url.empty()) { reject(@"update", @"The update link is invalid. Check for updates again.", nil); return; }
   NSURL *target = [NSURL URLWithString:[NSString stringWithUTF8String:url.c_str()]];
   dispatch_async(dispatch_get_main_queue(), ^{
     if ([NSWorkspace.sharedWorkspace openURL:target]) resolve(nil);
     else reject(@"browser", @"Could not open your browser. Check your default browser and try again.", nil);
   });
+}
+RCT_REMAP_METHOD(prepareUpdate, prepareUpdate:(NSString *)tag resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  try { [[GPUpdater shared] prepare:tag]; resolve(nil); }
+  catch (const std::exception &error) { reject(@"update", [NSString stringWithUTF8String:error.what()], nil); }
+}
+RCT_REMAP_METHOD(updateState, updateStateWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  try { resolve([[GPUpdater shared] state]); }
+  catch (const std::exception &error) { reject(@"update", [NSString stringWithUTF8String:error.what()], nil); }
+}
+RCT_REMAP_METHOD(installUpdate, installUpdateWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  try {
+    [[GPUpdater shared] install]; resolve(nil);
+    // The UI awaited its draft/settings save barrier before invoking this method.
+    dispatch_async(dispatch_get_main_queue(), ^{ [NSApp terminate:nil]; });
+  } catch (const std::exception &error) { reject(@"update", [NSString stringWithUTF8String:error.what()], nil); }
 }
 RCT_EXPORT_METHOD(setAppearance:(NSString *)theme) {
   if (![@[@"system", @"light", @"dark"] containsObject:theme]) return;

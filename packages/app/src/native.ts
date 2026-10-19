@@ -1,12 +1,16 @@
 import {NativeModules, NativeEventEmitter, requireNativeComponent, type NativeSyntheticEvent, type ViewProps} from 'react-native';
 import type {StrokeFlushFinished, DrawingTool, PlayerTime, ThemeChoice} from './types';
 import type {AppBuild} from './updates';
+import type {NativeUpdateState} from './updateFlow';
 
 type NativeBridge = {
   command(request: string): Promise<string>;
   chooseVideo(): Promise<string | null>;
   dataDirectory(): Promise<string>;
   appBuild(): Promise<AppBuild>;
+  prepareUpdate(tag: string): Promise<void>;
+  updateState(): Promise<NativeUpdateState>;
+  installUpdate(): Promise<void>;
   openUpdateRelease(tag: string, download: boolean): Promise<void>;
   thumbnails(path: string, mediaId: string): Promise<string[]>;
   configureShortcuts(chords: string[], recording: boolean, typingShortcut: string): void;
@@ -24,6 +28,9 @@ function bridge(): NativeBridge {
 
 export async function dataDirectory(): Promise<string> { return bridge().dataDirectory(); }
 export async function appBuild(): Promise<AppBuild> { return bridge().appBuild(); }
+export async function prepareUpdate(tag: string): Promise<void> { return bridge().prepareUpdate(tag); }
+export async function updateState(): Promise<NativeUpdateState> { return bridge().updateState(); }
+export async function installUpdate(): Promise<void> { return bridge().installUpdate(); }
 export async function openUpdateRelease(tag: string, download: boolean): Promise<void> { return bridge().openUpdateRelease(tag, download); }
 export async function chooseVideo(): Promise<string | null> { return bridge().chooseVideo(); }
 export async function videoThumbnails(path: string, mediaId: string): Promise<string[]> {

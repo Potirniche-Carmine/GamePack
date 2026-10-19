@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {checkForUpdates, compareVersions, evaluateRelease, latestReleaseEndpoint, parseVersion, updateAssetName} from '../packages/app/src/updates.ts';
 
 const build = {version: '1.0.0', platform: 'macos', architecture: 'arm64'};
-const asset = (name = 'GamePack-macos-arm64.tar.gz') => ({name, state: 'uploaded', size: 1024});
+const asset = (name = 'GamePack-macos-arm64.tar.gz') => ({name, state: 'uploaded', size: 1024, digest: `sha256:${'a'.repeat(64)}`});
 const release = (tag = 'v1.1.0', changes = {}) => ({tag_name: tag, draft: false, prerelease: false, published_at: '2026-10-19T10:00:00Z', assets: [asset()], ...changes});
 const response = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), {status, headers});
 
@@ -69,6 +69,21 @@ test('missing, duplicate, empty, or unfinished matching assets offer the release
   // API-provided links are never used to navigate; native code constructs them.
   const result = evaluateRelease(release('v1.1.0', {html_url: 'https://evil.example', assets: [{...asset(), browser_download_url: 'file:///etc/passwd'}]}), build);
   assert.deepEqual(result, {kind: 'available', version: '1.1.0', tag: 'v1.1.0', asset: asset().name});
+});
+
+test('automatic preparation requires a valid digest or exact uploaded checksum companion', () => {
+  const unsigned = {...asset(), digest: undefined};
+  const checksum = {...asset(`${unsigned.name}.sha256`), size: 96, digest: undefined};
+  for (const digest of [undefined, null, '', 'sha256:abc', `md5:${'a'.repeat(64)}`, `sha256:${'g'.repeat(64)}`, `sha256:${'a'.repeat(64)}\n`]) {
+    assert.equal(evaluateRelease(release('v1.1.0', {assets: [{...unsigned, digest}]}), build).asset, null);
+  }
+  for (const assets of [[unsigned, checksum], [{...unsigned, digest: `sha256:${'A'.repeat(64)}`}], [asset(), checksum, checksum]]) {
+    assert.equal(evaluateRelease(release('v1.1.0', {assets}), build).asset, unsigned.name);
+  }
+  for (const assets of [[unsigned], [unsigned, {...checksum, name: 'checksums.txt'}], [unsigned, {...checksum, state: 'new'}],
+    [unsigned, {...checksum, size: 0}], [unsigned, checksum, checksum], [{...asset(), size: Infinity}], [{...asset(), size: 1.5}]]) {
+    assert.equal(evaluateRelease(release('v1.1.0', {assets}), build).asset, null);
+  }
 });
 
 test('does not call incomplete or malformed payloads up to date', () => {

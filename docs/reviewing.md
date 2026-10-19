@@ -57,6 +57,8 @@ Open the settings cog to choose **System**, **Light**, or **Dark** appearance an
 
 The profile avatar opens your name and initials settings. Appearance and shortcuts are stored with the library. Existing custom shortcuts take precedence over defaults; see the [default shortcut definitions](../packages/app/src/shortcut-defaults.json) for the complete list. Shortcuts leave text editing alone except for the configured Post shortcut.
 
+Choose **Check for updates** in Settings to look for a newer published release. **Update** prepares the matching package while you continue reviewing; **Restart to update** saves pending work and installs it. Reopen Settings to return to the update. Builds from before the in-app installer need one manual upgrade using the release's included installer.
+
 ## Older libraries
 
 Libraries from before the Moment-only format retain their existing one-time conversion: legacy timed comments become completed drawings on the final included instant of their clip, with original records archived for recovery. Existing Moment comments remain unchanged. New Play comments use source-clock sample times. After upgrading, older GamePack versions refuse the newer library format.
