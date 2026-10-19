@@ -45,6 +45,6 @@ xcrun clang++ -std=c++17 -fobjc-arc -mmacosx-version-min=14.0 -Wno-deprecated-de
   native/macos/GPUpdateSupport.mm native/macos/GPUpdateHelper.mm \
   -framework Foundation -framework AppKit -framework Security -framework CoreServices -lz \
   -o dist/GamePack.app/Contents/Helpers/GamePackUpdateHelper
-codesign --force --sign - dist/GamePack.app/Contents/Helpers/GamePackUpdateHelper
-codesign --force --deep --sign - dist/GamePack.app
+node scripts/collect-notices.mjs dist/GamePack.app/Contents/Resources/Notices
+node scripts/macos/sign-app.mjs dist/GamePack.app
 printf '\nBuilt %s/dist/GamePack.app (JavaScript and Rust embedded; no runtime server).\n' "$PWD"
