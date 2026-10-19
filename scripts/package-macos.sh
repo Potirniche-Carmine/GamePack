@@ -9,6 +9,9 @@ case "$arch" in arm64|x64) ;; *) printf 'Unsupported Mac architecture: %s\n' "$a
 native_arch="$arch"
 [[ "$native_arch" != x64 ]] || native_arch=x86_64
 [[ "$(lipo -archs dist/GamePack.app/Contents/MacOS/GamePack)" == "$native_arch" ]] || { printf 'App CPU architecture does not match the package name.\n' >&2; exit 1; }
+[[ -x dist/GamePack.app/Contents/Helpers/GamePackUpdateHelper ]] || { printf 'The trusted update helper is missing; rebuild the app.\n' >&2; exit 1; }
+[[ "$(lipo -archs dist/GamePack.app/Contents/Helpers/GamePackUpdateHelper)" == "$native_arch" ]] || { printf 'Update helper CPU architecture does not match the package name.\n' >&2; exit 1; }
+codesign --verify --strict dist/GamePack.app/Contents/Helpers/GamePackUpdateHelper
 codesign --verify --deep --strict dist/GamePack.app
 version="$(node -p "require('./package.json').version")"
 app_version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' dist/GamePack.app/Contents/Info.plist)"

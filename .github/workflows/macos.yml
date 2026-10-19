@@ -119,6 +119,8 @@ jobs:
           codesign --verify --deep --strict dist/GamePack.app
       - name: Package the app and installer
         run: bash scripts/package-macos.sh
+      - name: Verify update validation and the packaged archive
+        run: bash scripts/ci/test-macos-updater.sh "dist/packages/GamePack-macos-$GAMEPACK_PACKAGE_ARCH.tar.gz" dist/GamePack.app
       - name: Verify packaged installation and replacement
         run: bash scripts/ci/verify-macos-install.sh "dist/packages/GamePack-macos-$GAMEPACK_PACKAGE_ARCH.tar.gz" "$RUNNER_TEMP/gamepack-install-verification"
       - name: Upload macOS desktop package
