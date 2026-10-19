@@ -7,8 +7,16 @@ macos_sdk="$(xcrun --sdk macosx --show-sdk-version)"
 gamepack_has_supported_node || { echo 'Run bash scripts/bootstrap-macos.sh to install a supported Node version.' >&2; exit 1; }
 command -v cargo >/dev/null 2>&1 || source "$HOME/.cargo/env"
 node scripts/ci/check-version.mjs
-[[ -d node_modules ]] || npm ci
-[[ -d macos/Pods ]] || bundle exec pod install --project-directory=macos
+# A checkout can change dependency locks while these directories still exist.
+# CI has already installed and verified both graphs before invoking this script.
+if [[ "${GAMEPACK_SKIP_DEPENDENCIES:-0}" != 1 ]]; then
+  npm ci --prefer-offline --no-audit --no-fund
+  bundle config set --local path vendor/bundle
+  BUNDLE_FROZEN=true bundle check || BUNDLE_FROZEN=true bundle install
+  bundle exec pod install --project-directory=macos
+else
+  [[ -d node_modules && -d macos/Pods ]] || { echo 'Install locked JavaScript and CocoaPods dependencies before skipping setup.' >&2; exit 1; }
+fi
 # The offline notice collector resolves the complete target dependency graph,
 # including metadata for test dependencies when CI has skipped local tests.
 cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"

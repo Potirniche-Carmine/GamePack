@@ -24,6 +24,8 @@ $manifest = $manifests | Where-Object {
 } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $manifest) { throw 'No complete compiled Windows package layout found.' }
 [xml]$layout = Get-Content -Raw $manifest.FullName
+$expectedVersion = (Get-Content -Raw (Join-Path $root 'package.json') | ConvertFrom-Json).version + '.0'
+if ($layout.Package.Identity.Version -ne $expectedVersion) { throw 'App version does not match package.json; rebuild the app.' }
 $nativeExecutable = Join-Path $manifest.DirectoryName $layout.Package.Applications.Application.Executable
 $embeddedBundle = Join-Path (Split-Path $nativeExecutable -Parent) 'Bundle\index.windows.bundle'
 if (-not (Test-Path $embeddedBundle)) { throw 'The package is missing the embedded JavaScript bundle beside the executable.' }

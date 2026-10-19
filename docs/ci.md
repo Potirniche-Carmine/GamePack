@@ -4,9 +4,9 @@ Pull requests target `main`. Keep feature and fix branches focused; agent branch
 
 ## Checks and native builds
 
-The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It checks TypeScript, UI behavior, matching package versions, Rust formatting/tests/Clippy on Linux and Windows, Windows PowerShell transport fixtures, and workflow syntax with actionlint.
+The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It checks TypeScript, UI behavior, matching package versions, Rust formatting/tests/Clippy on Linux and Windows, Windows PowerShell transport fixtures, release/version and installer regression tests, native geometry/update contracts, and workflow syntax with actionlint.
 
-After shared checks pass, `main` builds macOS ARM64/Intel and Windows ARM64/x64 in parallel. macOS also runs its Rust tests. Documentation/test-only pushes skip native packages. Manually dispatch `CI` on `main` to build all four packages regardless of changed paths. A newer commit cancels obsolete CI runs. PRs never run packaging or release jobs.
+After shared checks pass, `main` builds macOS ARM64/Intel and Windows ARM64/x64 in parallel. macOS also runs its Rust tests and installs/reinstalls each packaged app into an isolated library without launching it. Documentation/test-only pushes skip native packages. Manually dispatch `CI` on `main` to build all four packages regardless of changed paths. A newer commit cancels obsolete CI runs. PRs never run packaging or release jobs.
 
 ## Caches
 
@@ -25,12 +25,25 @@ Packages are retained for 14 days. Compressed archives upload without redundant 
 
 ## Prepare a release
 
-1. Update `package.json`, the npm lockfile, the Rust crate and Cargo lockfile, the macOS plist, and the Windows manifest to the same version (Windows adds `.0`). Run `npm run check:version`.
+1. Run `npm run version:prepare -- 1.2.3` with the intended stable version. It updates npm, Rust, macOS, and Windows versions together, including the compiled Windows version used by update checks. It does not commit, tag, or publish. Run `npm run check:version` and `npm run test:release`.
 2. Add `docs/releases/<version>.md` with the release notes and installation requirements.
 3. Merge into `main` and wait for a successful `CI` run containing all four native packages. Exercise the native app on the platforms being released; CI package checks do not verify interactive playback or visual behavior.
 4. Dispatch **Prepare draft release** on `main`, with `version_tag` (for example `v1.0.0`) and `ci_run_id` from that exact commit's CI run.
-5. Review the draft's notes and eight assets (four archives and four checksums). Publishing remains a separate, explicit maintainer action.
+5. Review the draft's notes and eight assets (four archives and four checksums). Publishing remains a separate, explicit maintainer action. A draft is not offered by the app's update checker.
 
 The draft workflow verifies the CI workflow identity, event, branch, commit, success, versions and checksums. It reuses the existing packages instead of rebuilding them. It can refresh a draft for the same commit, but refuses to replace a published release or a draft targeting another commit. If artifacts have expired or the checkout moved, dispatch CI again for the intended `main` commit. It does not trigger on tags and never automatically publishes a release.
 
 Downloads currently use ad hoc macOS signing (no notarization) and unsigned Windows layouts requiring Developer Mode. Signing and store distribution are separate work.
+
+## Validate an update
+
+The release names are part of the updater contract: `GamePack-macos-{arm64,x64}.tar.gz` and `GamePack-windows-{arm64,x64}.zip`, each accompanied by `.sha256`. Keep them stable. The packaged app version must match `package.json`; packaging rejects a different app version.
+
+Before preparing a draft:
+
+1. Confirm the exact `main` commit has a successful complete `CI` run with all four native jobs and `release-*` artifacts. A successful documentation-only run is insufficient. If needed, dispatch `CI` on `main` manually.
+2. Download the matching artifact and verify its SHA-256 checksum. Use a temporary absolute `GAMEPACK_HOME` for native checks. Install an older supported version there, import a small clip, create a project/comment/drawing/draft, and change a setting. Quit the app and copy the library before testing the upgrade.
+3. Extract the new package and run its installer with the same `GAMEPACK_HOME`. Confirm the new version, existing project/media/comments/drawings/drafts/settings, and playback. Inspect both themes. Reinstall the same version and check the library again. Do not run an older app against the upgraded library; restore the backup for another older-version test.
+4. Exercise the Settings update check with the current published release. The checker must select the operating system and hardware architecture, ignore drafts/prereleases and older versions, and open the matching download only on request. Automated fixtures cover newer, equal, and older release versions plus malformed or unavailable releases; no published test release is needed.
+
+`npm run test:release` covers version synchronization and macOS installer replacement/rollback/data preservation using isolated filesystem fixtures. Shared UI and native contract tests cover release selection and URL construction. These checks supplement installation and playback on real macOS/Windows hosts; report the tested OS and architecture.

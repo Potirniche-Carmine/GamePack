@@ -70,3 +70,26 @@ test('presentation readiness survives selection and draft edits but never a seek
   assert.notEqual(initial, annotationSceneKey(JSON.stringify(annotationScene(records, 1000000, true)), 2, 1));
   assert.equal(annotationSceneKey('', 2, 0), '');
 });
+
+test('native play scenes stay stable across playback ticks and include timed replies', () => {
+  const play = {...record('play'), anchor: {kind: 'play', at_us: 1000000, end_us: 5000000}};
+  play.drawings[0].samples = [{x: 1, y: 2, t_us: 1000000}, {x: 3, y: 4, t_us: 3000000}];
+  const reply = {...record('reply'), parent_comment_id: 'play', anchor: play.anchor};
+  const records = [play, reply, record('point', 2000000)];
+  const before = JSON.stringify(records);
+  const scene = annotationScene(records, 0, false, null, 2000000);
+  assert.deepEqual(scene, annotationScene(records, 1500000, false, null, 2000000));
+  assert.deepEqual(scene, annotationScene(records, 2000000, true));
+  assert.equal(scene.drawings.filter(mark => mark.anchor.kind === 'play').length, 2);
+  assert.equal(scene.drawings.find(mark => mark.id === 'play:stroke').samples[1].t_us, 3000000);
+  const selected = annotationScene(records, 3000000, false, 'play');
+  assert.deepEqual(selected.drawings.map(mark => mark.opacity), [1, 1]);
+  assert.equal(JSON.stringify(records), before);
+});
+
+test('a flush acknowledgment forces a draft snapshot without changing presentation readiness', () => {
+  const empty = {id: 'draft', anchor: {kind: 'point', at_us: 1000}, drawings: [], flushed: 0};
+  const undone = {...empty, flushed: 1};
+  assert.notEqual(JSON.stringify(empty), JSON.stringify(undone));
+  assert.equal(annotationSceneKey(JSON.stringify(empty), 1, 0), annotationSceneKey(JSON.stringify(undone), 1, 0));
+});

@@ -1,9 +1,20 @@
 #include "../native/shared/PlayerViewport.h"
 #include <cassert>
+#include "../native/shared/AnnotationTiming.h"
 
 static bool near(double a, double b) { return std::abs(a - b) < 0.000001; }
 
 int main() {
+  const std::vector<gamepack::InkSample> ink{{0,0,100},{10,20,200},{30,40,200},{50,60,400}};
+  assert(gamepack::visibleInk(ink,99,true).empty());
+  auto half=gamepack::visibleInk(ink,150,true);
+  assert(half.size()==2 && near(half.back().x,5) && near(half.back().y,10));
+  auto paused=gamepack::visibleInk(ink,200,true);
+  assert(paused.size()==3 && near(paused.back().x,30));
+  assert(gamepack::visibleInk(ink,400,true).size()==4);
+  assert(gamepack::visibleInk(ink,100,true).size()==1); // Seek back hides future ink.
+  assert(gamepack::visibleInk(ink,0,false).size()==4); // Moment retains completed geometry.
+
   for (const auto anchor : {gamepack::ViewportAnchor{0, 0}, {0.2, 0.75}, {1, 1}}) {
     const auto offset = gamepack::zoomAt({}, 1, 2, anchor);
     // The source point under the cursor stays at that same screen coordinate.

@@ -14,3 +14,17 @@ export function resumableDraft(drafts: readonly Draft[], videoId: string, parent
   }
   return undefined;
 }
+
+/** A root play grows only forward; replies keep their immutable parent window.
+ * Include native stroke times even if the latest periodic clock event is late. */
+export function extendPlayDraft(draft: Draft, time: number, drawings = draft.drawings): Draft {
+  if (draft.anchor.kind !== 'play' || draft.parent_comment_id) return {...draft, drawings};
+  const end = drawings.reduce((latest, drawing) => drawing.samples.reduce((end, sample) => Math.max(end, sample.t_us ?? 0), latest),
+    Math.max(draft.anchor.end_us, Number.isSafeInteger(time) ? time : 0));
+  return {...draft, drawings, anchor: {...draft.anchor, end_us: end}};
+}
+
+export function playDraftSeek(draft: Draft, time: number, duration: number): number {
+  if (draft.anchor.kind !== 'play') return draft.anchor.at_us;
+  return Math.round(Math.max(draft.anchor.at_us, Math.min(draft.parent_comment_id ? draft.anchor.end_us : duration, time)));
+}

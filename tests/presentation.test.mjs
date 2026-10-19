@@ -76,3 +76,17 @@ test('notes within native clock tolerance still receive distinct numbers', () =>
   const records = [comment('a', 1), comment('b', 1.0015), comment('c', 1.003)];
   assert.deepEqual([...conversationNumbers(notesAtTime(records, 1001500))], [['a', 1], ['b', 2], ['c', 3]]);
 });
+
+test('play conversations span a window, hold at their end, and preserve intervening point stops', () => {
+  const play = {...comment('play'), anchor: {kind: 'play', at_us: second, end_us: 5 * second}};
+  const point = comment('point', 3);
+  const records = [play, point, {...comment('reply', 1, 'play'), anchor: play.anchor}];
+  assert.deepEqual(notesAtTime(records, 2 * second).map(note => note.comment_id), ['play']);
+  assert.deepEqual(notesAtTime(records, 3 * second).map(note => note.comment_id), ['play', 'point']);
+  assert.equal(notesAtTime(records, 6 * second).length, 0);
+  assert.equal(conversationTarget(records, play, 10 * second).time, 5 * second);
+  assert.deepEqual(nextReviewStop(records, second, 10 * second, 1, true), {time: 3 * second, commentIds: ['point']});
+  assert.deepEqual(nextReviewStop(records, 3 * second, 10 * second, 1, true), {time: 5 * second, commentIds: ['play']});
+  assert.deepEqual(nextReviewStop(records, 5 * second, 10 * second, -1, true), {time: 3 * second, commentIds: ['point']});
+  assert.deepEqual(nextReviewStop(records, 3 * second, 10 * second, -1, true), {time: second, commentIds: ['play']});
+});

@@ -39,10 +39,13 @@ jobs:
       - run: npm run test:release
       - run: npm run typecheck
       - run: npm run test:ui
-      - name: Verify native zoom geometry
+      - name: Verify native contracts
         run: |
-          c++ -std=c++17 -Wall -Wextra -Werror tests/player-viewport.test.cpp -o "$RUNNER_TEMP/player-viewport-test"
-          "$RUNNER_TEMP/player-viewport-test"
+          for source in tests/*.test.cpp; do
+            executable="$RUNNER_TEMP/$(basename "${source%.cpp}")"
+            c++ -std=c++17 -Wall -Wextra -Werror "$source" -o "$executable"
+            "$executable"
+          done
       - name: Select native builds
         id: changes
         run: node scripts/ci/native-changes.mjs
