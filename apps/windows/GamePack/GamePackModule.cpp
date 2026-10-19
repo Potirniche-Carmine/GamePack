@@ -1,12 +1,15 @@
 #include "pch.h"
 #include "GamePackModule.h"
 #include "GamePackPlayer.h"
+#include "GamePackVersion.h"
+#include "../../../native/shared/UpdateRelease.h"
 #include <fstream>
 #include <regex>
 #include <shlwapi.h>
 #include <winrt/Windows.Media.Editing.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.ApplicationModel.h>
 #include "gamepack-core/src/lib.rs.h"
 
 using namespace winrt;
@@ -110,6 +113,40 @@ static fire_and_forget Dispatch(std::string request, ReactPromise<std::string> p
 void GamePackModule::Command(std::string request, ReactPromise<std::string> promise) noexcept { Dispatch(std::move(request), promise); }
 void GamePackModule::Directory(ReactPromise<std::string> promise) noexcept {
   try { promise.Resolve(DataDirectory()); } catch (std::exception const& error) { promise.Reject(error.what()); }
+}
+static std::string UpdateArchitecture() {
+  USHORT process{}, machine{};
+  if (!IsWow64Process2(GetCurrentProcess(), &process, &machine)) return {};
+  if (machine == IMAGE_FILE_MACHINE_ARM64) return "arm64";
+  if (machine == IMAGE_FILE_MACHINE_AMD64) return "x64";
+  return {};
+}
+void GamePackModule::AppBuild(ReactPromise<JSValue> promise) noexcept {
+  try {
+    std::string version = GAMEPACK_VERSION;
+    try {
+      auto installed = Windows::ApplicationModel::Package::Current().Id().Version();
+      version = std::to_string(installed.Major) + "." + std::to_string(installed.Minor) + "." + std::to_string(installed.Build);
+    } catch (hresult_error const& error) {
+      // Unpackaged developer builds have no package identity. Their version is
+      // compiled into this executable and checked alongside the release manifest.
+      if (error.code() != HRESULT_FROM_WIN32(APPMODEL_ERROR_NO_PACKAGE)) throw;
+    }
+    auto architecture = UpdateArchitecture();
+    if (architecture.empty()) { promise.Reject("Updates are not available for this device."); return; }
+    promise.Resolve(JSValueObject{{"version", version}, {"platform", "windows"}, {"architecture", architecture}});
+  } catch (...) { promise.Reject("The installed version could not be read. Reinstall GamePack to check for updates."); }
+}
+static fire_and_forget LaunchUpdateRelease(std::string tag, bool download, ReactPromise<void> promise) {
+  try {
+    auto url = ::gamepack::updates::releaseUrl(tag, "windows", UpdateArchitecture(), download);
+    if (url.empty()) { promise.Reject("The update link is invalid. Check for updates again."); co_return; }
+    if (co_await Windows::System::Launcher::LaunchUriAsync(Windows::Foundation::Uri(to_hstring(url)))) promise.Resolve();
+    else promise.Reject("Could not open your browser. Check your default browser and try again.");
+  } catch (...) { promise.Reject("Could not open your browser. Check your default browser and try again."); }
+}
+void GamePackModule::OpenUpdateRelease(std::string tag, bool download, ReactPromise<void> promise) noexcept {
+  context.UIDispatcher().Post([tag=std::move(tag), download, promise]() { LaunchUpdateRelease(tag, download, promise); });
 }
 void GamePackModule::SetAppearance(std::string theme) noexcept {
   if (theme != "system" && theme != "light" && theme != "dark") return;

@@ -27,6 +27,10 @@ struct GamePackModule {
   void Thumbnails(std::string path, std::string mediaId, winrt::Microsoft::ReactNative::ReactPromise<std::vector<std::string>> promise) noexcept;
   REACT_METHOD(Directory, L"dataDirectory")
   void Directory(winrt::Microsoft::ReactNative::ReactPromise<std::string> promise) noexcept;
+  REACT_METHOD(AppBuild, L"appBuild")
+  void AppBuild(winrt::Microsoft::ReactNative::ReactPromise<winrt::Microsoft::ReactNative::JSValue> promise) noexcept;
+  REACT_METHOD(OpenUpdateRelease, L"openUpdateRelease")
+  void OpenUpdateRelease(std::string tag, bool download, winrt::Microsoft::ReactNative::ReactPromise<void> promise) noexcept;
   REACT_METHOD(SetAppearance, L"setAppearance")
   void SetAppearance(std::string theme) noexcept;
   REACT_METHOD(SetFullScreen, L"setFullScreen")

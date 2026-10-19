@@ -7,6 +7,8 @@ import {easeOut, MotionPressable, useReducedMotion} from './motion';
 import type {Colors} from './colors';
 import {binding, shortcutLabel, shortcuts} from './shortcuts';
 import {useTheme} from './theme';
+import {appBuild, openUpdateRelease} from './native';
+import {checkForUpdates, type AppBuild, type UpdateResult} from './updates';
 import type {Profile, Settings, ThemeChoice} from './types';
 
 type SettingsTab = 'profile' | 'appearance' | 'shortcuts';
@@ -107,7 +109,62 @@ export function SettingsPage({settings, profile, recording, error, busy, onProfi
         })}
       </View>}
     </ScrollView>
+    <UpdateSettings disabled={busy} />
   </Animated.View>;
+}
+
+function UpdateSettings({disabled}: {disabled: boolean}) {
+  const {colors} = useTheme();
+  const s = useMemo(() => createSettingsStyles(colors), [colors]);
+  const [build, setBuild] = useState<AppBuild | null>(null);
+  const [result, setResult] = useState<UpdateResult | null>(null);
+  const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const mounted = useRef(false);
+  const request = useRef<AbortController | null>(null);
+  const openingRef = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    // Reading the installed binary is local. Network access starts only on press.
+    void appBuild().then(value => { if (mounted.current) setBuild(value); }).catch(() => {});
+    return () => { mounted.current = false; request.current?.abort(); };
+  }, []);
+  const check = async () => {
+    if (request.current || openingRef.current || disabled) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setChecking(true); setError(''); setResult(null);
+    try {
+      const installed = build ?? await appBuild();
+      if (!mounted.current) return;
+      setBuild(installed);
+      const next = await checkForUpdates(installed, {signal: controller.signal});
+      if (mounted.current) setResult(next);
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : 'Could not check for updates. Try again.');
+    } finally {
+      request.current = null;
+      if (mounted.current) setChecking(false);
+    }
+  };
+  const open = async () => {
+    if (result?.kind !== 'available' || openingRef.current || disabled) return;
+    openingRef.current = true; setOpening(true); setError('');
+    try { await openUpdateRelease(result.tag, result.asset !== null); }
+    catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : 'Could not open your browser. Try again.'); }
+    finally { openingRef.current = false; if (mounted.current) setOpening(false); }
+  };
+  const status = error || (result?.kind === 'current' ? 'No updates available.' : result?.kind === 'unpublished' ? 'No published release is available yet.'
+    : result?.kind === 'available' && !result.asset ? 'A download for this device is not available yet.' : '');
+  return <View style={s.updates}>
+    <View style={s.updateRow}>
+      <Text style={s.updateLabel} accessibilityLiveRegion="polite">{result?.kind === 'available' ? `Version ${result.version} available` : build ? `GamePack ${build.version}` : 'GamePack'}</Text>
+      <Button compact quiet disabled={disabled || checking || opening} onPress={() => void check()}>{checking ? 'Checking…' : 'Check for updates'}</Button>
+      {result?.kind === 'available' && <Button compact primary disabled={disabled || opening} onPress={() => void open()}>{opening ? 'Opening…' : result.asset ? 'Download' : 'View release'}</Button>}
+    </View>
+    {!!status && <Text accessibilityRole={error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={[s.updateStatus, !!error && {color: colors.errorText}]}>{status}</Text>}
+  </View>;
 }
 
 function SettingsTabButton({label, selected, onPress}: {label: string; selected: boolean; onPress: () => void}) {
@@ -177,6 +234,10 @@ const createSettingsStyles = (c: Colors) => StyleSheet.create({
   tabLabelSelected: {color: c.text, fontWeight: '600'},
   scroll: {flex: 1},
   content: {paddingBottom: 16, paddingRight: 10, width: '100%'},
+  updates: {paddingTop: 14, borderTopWidth: 1, borderTopColor: c.separator},
+  updateRow: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8},
+  updateLabel: {flex: 1, minWidth: 140, color: c.muted, fontSize: 13, lineHeight: 19},
+  updateStatus: {color: c.muted, fontSize: 12, lineHeight: 18, marginTop: 7},
   error: {color: c.errorText, backgroundColor: c.errorBg, padding: 12, borderRadius: 8, fontSize: 13, lineHeight: 19, marginBottom: 20},
   profilePanel: {width: '100%', maxWidth: 360, alignSelf: 'center'},
   identity: {alignItems: 'center', marginTop: 8, marginBottom: 26},

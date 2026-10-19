@@ -1,10 +1,13 @@
 import {NativeModules, NativeEventEmitter, requireNativeComponent, type NativeSyntheticEvent, type ViewProps} from 'react-native';
 import type {StrokeFlushFinished, DrawingTool, PlayerTime, ThemeChoice} from './types';
+import type {AppBuild} from './updates';
 
 type NativeBridge = {
   command(request: string): Promise<string>;
   chooseVideo(): Promise<string | null>;
   dataDirectory(): Promise<string>;
+  appBuild(): Promise<AppBuild>;
+  openUpdateRelease(tag: string, download: boolean): Promise<void>;
   thumbnails(path: string, mediaId: string): Promise<string[]>;
   configureShortcuts(chords: string[], recording: boolean, typingShortcut: string): void;
   configureDrawingHistory?(canUndo: boolean, canRedo: boolean): void;
@@ -20,6 +23,8 @@ function bridge(): NativeBridge {
 }
 
 export async function dataDirectory(): Promise<string> { return bridge().dataDirectory(); }
+export async function appBuild(): Promise<AppBuild> { return bridge().appBuild(); }
+export async function openUpdateRelease(tag: string, download: boolean): Promise<void> { return bridge().openUpdateRelease(tag, download); }
 export async function chooseVideo(): Promise<string | null> { return bridge().chooseVideo(); }
 export async function videoThumbnails(path: string, mediaId: string): Promise<string[]> {
   try { return await bridge().thumbnails(path, mediaId); } catch { return []; }
