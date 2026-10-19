@@ -54,3 +54,11 @@ CREATE TABLE IF NOT EXISTS preferences (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
     keybindings TEXT NOT NULL DEFAULT '{}'
 );
+
+-- Additive local preference; older clients can continue to open this library.
+CREATE TABLE IF NOT EXISTS playback_preferences (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    annotation_speed_percent INTEGER NOT NULL DEFAULT 50
+        CHECK(annotation_speed_percent IN (25,50,75,100,200,400))
+);
+INSERT OR IGNORE INTO playback_preferences(singleton) VALUES(1);

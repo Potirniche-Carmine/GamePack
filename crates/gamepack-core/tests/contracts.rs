@@ -69,7 +69,7 @@ fn themes_are_strict_persisted_and_migrate_existing_libraries() {
     let initial = fixture.boot();
     assert_eq!(
         initial["settings"],
-        json!({"theme":"system","keybindings":{}})
+        json!({"theme":"system","keybindings":{},"annotation_speed_percent":50})
     );
     // Recreate an actual pre-settings library, retaining its existing records.
     let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
@@ -79,13 +79,16 @@ fn themes_are_strict_persisted_and_migrate_existing_libraries() {
     let migrated = fixture.boot();
     assert_eq!(
         migrated["settings"],
-        json!({"theme":"system","keybindings":{}})
+        json!({"theme":"system","keybindings":{},"annotation_speed_percent":50})
     );
     assert_eq!(migrated["profile"], initial["profile"]);
     assert_eq!(migrated["videos"], initial["videos"]);
     for theme in ["dark", "light", "system"] {
         let saved = success(fixture.root(), json!({"command":"set_theme","theme":theme}));
-        assert_eq!(saved, json!({"theme":theme,"keybindings":{}}));
+        assert_eq!(
+            saved,
+            json!({"theme":theme,"keybindings":{},"annotation_speed_percent":50})
+        );
         assert_eq!(fixture.boot()["settings"], saved);
     }
     for invalid in [
@@ -106,12 +109,12 @@ fn themes_are_strict_persisted_and_migrate_existing_libraries() {
     );
     assert_eq!(
         fixture.boot()["settings"],
-        json!({"theme":"system","keybindings":{}})
+        json!({"theme":"system","keybindings":{},"annotation_speed_percent":50})
     );
     let other = TempDir::new().unwrap();
     assert_eq!(
         success(other.path(), json!({"command":"bootstrap"}))["settings"],
-        json!({"theme":"system","keybindings":{}})
+        json!({"theme":"system","keybindings":{},"annotation_speed_percent":50})
     );
 }
 
@@ -868,4 +871,54 @@ fn v7_upgrade_keeps_v2_bytes_and_digests_and_rejects_future_databases() {
     db.execute_batch("PRAGMA user_version=8;").unwrap();
     drop(db);
     assert!(failure(fixture.root(), json!({"command":"bootstrap"})).contains("newer GamePack"));
+}
+
+#[test]
+fn annotation_speed_is_validated_persisted_and_migrates_without_changing_reviews() {
+    let fixture = Fixture::new();
+    let before = fixture.boot();
+    let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
+    db.execute_batch("DROP TABLE playback_preferences;")
+        .unwrap();
+    drop(db);
+    let migrated = fixture.boot();
+    assert_eq!(migrated["settings"]["annotation_speed_percent"], 50);
+    assert_eq!(migrated["videos"], before["videos"]);
+    assert_eq!(migrated["profile"], before["profile"]);
+    for speed in [25, 50, 75, 100, 200, 400] {
+        let saved = success(
+            fixture.root(),
+            json!({"command":"set_preferences","keybindings":{},"annotation_speed_percent":speed}),
+        );
+        assert_eq!(saved["annotation_speed_percent"], speed);
+        assert_eq!(fixture.boot()["settings"], saved);
+    }
+    for invalid in [
+        json!(0),
+        json!(-50),
+        json!(150),
+        json!(65536),
+        json!(0.5),
+        json!("50"),
+        json!(true),
+    ] {
+        failure(
+            fixture.root(),
+            json!({"command":"set_preferences","keybindings":{"play":"Shift+P"},"annotation_speed_percent":invalid}),
+        );
+        assert_eq!(fixture.boot()["settings"]["annotation_speed_percent"], 400);
+        assert_eq!(fixture.boot()["settings"]["keybindings"], json!({}));
+    }
+    // An older client updating shortcuts must retain the new speed preference.
+    success(
+        fixture.root(),
+        json!({"command":"set_preferences","keybindings":{"play":"Shift+P"}}),
+    );
+    assert_eq!(fixture.boot()["settings"]["annotation_speed_percent"], 400);
+    failure(
+        fixture.root(),
+        json!({"command":"set_preferences","keybindings":{"unknown":"Q"},"annotation_speed_percent":50}),
+    );
+    assert_eq!(fixture.boot()["settings"]["annotation_speed_percent"], 400);
+    assert_eq!(fixture.boot()["settings"]["keybindings"]["play"], "Shift+P");
 }
