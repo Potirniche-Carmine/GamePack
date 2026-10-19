@@ -28,7 +28,7 @@ npm run app:install
 
 For a build without installation or launch, use `npm run build`. To install an already built app, use `bash scripts/install-macos.sh --no-build`. Add `--no-launch` when verifying an installation without opening the app.
 
-The build embeds production JavaScript and the Rust engine. The installed app does not need Node, Cargo, CocoaPods, Metro, or an open terminal. Source builds are ad-hoc signed and are not notarized.
+Local builds reconcile the locked JavaScript and CocoaPods dependencies, then embed production JavaScript and the Rust engine. The installed app does not need Node, Cargo, CocoaPods, Metro, or an open terminal. Source builds are ad-hoc signed and are not notarized.
 
 `npm start` and `npm run macos` are available for React Native development. They are not required to launch an installed build.
 
