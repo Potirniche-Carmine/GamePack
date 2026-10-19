@@ -3,6 +3,7 @@
 #import <Security/Security.h>
 #import <CoreServices/CoreServices.h>
 #include "../shared/UpdateVersion.h"
+#include "../shared/UpdateArchiveLimits.h"
 #include <CommonCrypto/CommonDigest.h>
 #include <libproc.h>
 #include <sys/sysctl.h>
@@ -171,9 +172,13 @@ void GPExtractUpdateArchive(NSString *archive, NSString *directory) {
     pax.clear(); Require(name && target,"The update archive contains an invalid filename.");
     auto parts=Components(name); name=[parts componentsJoinedByString:@"/"];
     Require(names.insert(name.precomposedStringWithCanonicalMapping.lowercaseString.UTF8String).second,"The update archive contains duplicate paths.");
-    Require(size<=512ULL*1024*1024 && total+size<=2ULL*1024*1024*1024,"The unpacked update is too large."); total+=size;
+    Require(gamepack::updates::acceptArchiveBytes(total,size),"The unpacked update is too large.");
     bool app=[parts[0] isEqual:@"GamePack.app"];
-    Require(app || (([name isEqual:@"README.txt"] || [name isEqual:@"Install.command"]) && (type=='0'||type==0)),"The update archive contains unexpected files.");
+    // Older published packages put license notices beside the app. They may be
+    // read and discarded, but never provide links or executable update logic.
+    bool legacyNotices=[parts[0] isEqual:@"Notices"] && (type=='0'||type==0||type=='5');
+    Require(app || legacyNotices || (([name isEqual:@"README.txt"] || [name isEqual:@"Install.command"]) && (type=='0'||type==0)),"The update archive contains unexpected files.");
+    Require(type!='5' || size==0,"The update archive contains an invalid folder.");
     if(type=='2') {
       Require(app && size==0 && target.length && !target.isAbsolutePath && ![target containsString:@"\\"] && [target rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound,"The update archive contains an unsafe link.");
       NSString *resolved=[Join(name.stringByDeletingLastPathComponent,target) stringByStandardizingPath];

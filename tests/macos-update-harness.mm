@@ -1,9 +1,18 @@
 #import "../native/macos/GPUpdateSupport.h"
+#import <AppKit/AppKit.h>
+#import <objc/runtime.h>
 #include "../native/shared/UpdateRelease.h"
 #include "../native/shared/UpdateVersion.h"
 #include <fcntl.h>
 #include <sys/file.h>
 #include <stdexcept>
+
+@interface GPExitedFixtureApplication : NSObject
+- (BOOL)isTerminated;
+@end
+@implementation GPExitedFixtureApplication
+- (BOOL)isTerminated { return YES; }
+@end
 
 // Standalone test executable. It is never linked into or shipped with GamePack.
 // The stage command supplies a local fixture to the same production validators;
@@ -18,7 +27,18 @@ int main(int argc, char **argv) { @autoreleasepool {
     else if([command isEqual:@"identity"]) {
       NSData *json=[NSJSONSerialization dataWithJSONObject:GPUpdateProcessIdentity(arg(2).intValue) options:0 error:nil];
       fwrite(json.bytes,1,json.length,stdout);
-    } else if([command isEqual:@"install-job"]) return GPRunUpdateInstallJob(arg(2));
+    } else if([command hasPrefix:@"install-job"]) {
+      // Failure injection lives only in this unshipped test executable. Real
+      // installations always use unmodified LaunchServices and OS policy.
+      if([command isEqual:@"install-job-fail-launch"] || [command isEqual:@"install-job-early-exit"]) {
+        BOOL early=[command isEqual:@"install-job-early-exit"];
+        IMP replacement=imp_implementationWithBlock(^(id workspace,NSURL *url,NSWorkspaceOpenConfiguration *configuration,void (^completion)(NSRunningApplication *,NSError *)) {
+          completion(early?(NSRunningApplication *)[GPExitedFixtureApplication new]:nil,early?nil:[NSError errorWithDomain:@"fixture" code:1 userInfo:nil]);
+        });
+        method_setImplementation(class_getInstanceMethod(NSWorkspace.class,@selector(openApplicationAtURL:configuration:completionHandler:)),replacement);
+      }
+      return GPRunUpdateInstallJob(arg(2));
+    }
     else if([command isEqual:@"quarantine"]) {
       GPQuarantineUpdate(arg(2),@"https://github.com/Potirniche-Carmine/GamePack/releases/download/v1.0.1/GamePack-macos-arm64.tar.gz");
       id properties=nil;

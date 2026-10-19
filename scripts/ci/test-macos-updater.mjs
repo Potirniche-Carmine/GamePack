@@ -51,6 +51,8 @@ function extraction(name, entries, passes, options) {
 }
 const valid = extraction('valid', [entry('GamePack.app/', '', '5'), info, entry('Install.command', 'never run this'), entry('README.txt', 'release')], true);
 assert.equal(fs.existsSync(path.join(directory, 'out-valid/Install.command')), false);
+extraction('legacy-notices', [info, entry('Notices/', '', '5'), entry('Notices/licenses/LICENSE.txt', 'license')], true);
+assert.equal(fs.existsSync(path.join(directory, 'out-legacy-notices/Notices')), false);
 extraction('framework', [info, entry('GamePack.app/Contents/Frameworks/Test.framework/Versions/A/Test', 'binary'), entry('GamePack.app/Contents/Frameworks/Test.framework/Versions/Current', '', '2', 'A'), entry('GamePack.app/Contents/Frameworks/Test.framework/Test', '', '2', 'Versions/Current/Test')], true);
 extraction('pax-valid', [pax({path: 'GamePack.app/Contents/Info.plist', size: '7'}), entry('short', 'fixture')], true);
 for (const [name, entries] of [
@@ -59,6 +61,9 @@ for (const [name, entries] of [
   ['app-traversal', [entry('GamePack.app/../escape', 'bad')]],
   ['backslash', [entry('GamePack.app/Contents\\escape', 'bad')]],
   ['unexpected', [info, entry('other.txt', 'bad')]],
+  ['notices-link', [info, entry('Notices/link', '', '2', '../GamePack.app')]],
+  ['notices-traversal', [info, entry('Notices/../../escape', 'bad')]],
+  ['notices-folder-data', [info, entry('Notices/', 'bad', '5')]],
   ['top-file', [entry('GamePack.app', 'bad'), info]],
   ['duplicate', [info, info]],
   ['case-alias', [info, entry('gamepack.app/contents/info.plist', 'bad')]],
@@ -175,6 +180,36 @@ try {
   assert.match(readPlist(path.join(root, 'updates/state.plist')).error, /cancelled/);
   assert.equal(readPlist(path.join(current, 'Contents/Info.plist')).CFBundleShortVersionString, '1.0.0');
 } finally { uncommitted.kill(); }
+
+for (const mode of ['fail-launch', 'early-exit']) {
+  const process = spawn(path.join(current, 'Contents/MacOS/GamePack'), [], {stdio: 'ignore'});
+  try {
+    await delay(100);
+    const identity = JSON.parse(check(['identity', String(process.pid)]));
+    for (const name of ['helper-ready.plist', 'install-permitted.plist']) fs.rmSync(path.join(jobDirectory, name), {force: true});
+    const jobPath = path.join(jobDirectory, 'job.plist');
+    fs.writeFileSync(jobPath, JSON.stringify({root, destination: current, staged: path.join(jobDirectory, 'payload/GamePack.app'), version: '1.0.1', process: identity}));
+    run('/usr/bin/plutil', ['-convert', 'binary1', jobPath]);
+    const helper = spawn(harness, [`install-job-${mode}`, jobPath], {stdio: 'ignore'});
+    const done = new Promise(resolve => helper.once('exit', resolve));
+    for (let n = 0; n < 100 && !fs.existsSync(path.join(jobDirectory, 'helper-ready.plist')); n++) await delay(50);
+    const helperIdentity = readPlist(path.join(jobDirectory, 'helper-ready.plist')).process;
+    const permit = path.join(jobDirectory, 'install-permitted.plist');
+    fs.writeFileSync(permit, JSON.stringify({helper: helperIdentity, parent: identity}));
+    run('/usr/bin/plutil', ['-convert', 'binary1', permit]);
+    process.kill(); assert.equal(await done, 1); checks++;
+    if (mode === 'fail-launch') {
+      assert.equal(readPlist(path.join(current, 'Contents/Info.plist')).CFBundleShortVersionString, '1.0.0');
+      assert.equal(fs.existsSync(path.join(jobDirectory, 'previous.app')), false);
+      assert.match(readPlist(path.join(root, 'updates/state.plist')).error, /Privacy & Security/);
+    } else {
+      assert.equal(readPlist(path.join(current, 'Contents/Info.plist')).CFBundleShortVersionString, '1.0.1');
+      assert.equal(readPlist(path.join(jobDirectory, 'previous.app/Contents/Info.plist')).CFBundleShortVersionString, '1.0.0');
+      assert.match(readPlist(path.join(root, 'updates/state.plist')).error, /closed unexpectedly/);
+    }
+    assert.equal(fs.readFileSync(library, 'utf8'), 'library sentinel');
+  } finally { process.kill(); }
+}
 
 if (packagedArchive) {
   const archive = path.resolve(packagedArchive), output = path.join(directory, 'real-package');
