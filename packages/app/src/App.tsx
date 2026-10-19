@@ -662,6 +662,7 @@ export default function App() {
   const restartForUpdate = async () => {
     if (restartPending.current || flushRequest.current) throw new Error('A save is still in progress. Try again.');
     restartPending.current = true; setBusy('Saving…'); setPaused(true); setSettingsError(''); setError('');
+    let accepted = false;
     try {
       await restartAfterSaving({
         finishStroke: () => new Promise<void>((resolve, reject) => {
@@ -674,9 +675,12 @@ export default function App() {
           await saveChain.current;
         },
         saveSettings: () => settingsWrites.current.flush(),
-        install: installUpdate,
+        install: async () => { await installUpdate(); accepted = true; },
       });
-    } finally { restartPending.current = false; setBusy(''); }
+    } finally {
+      // Native acceptance schedules termination; keep editing locked through that handoff.
+      if (!accepted) { restartPending.current = false; setBusy(''); }
+    }
   };
   const askDelete = (kind: 'video' | 'project' | 'folder', item: {id: string; title: string}) => {
     leaveDraft(() => { setPaused(true); setError(''); setDeleteTarget({kind, ...item}); });
