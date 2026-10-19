@@ -66,13 +66,20 @@ pub(crate) fn draft(draft: &Draft, video: &Video) -> Result<()> {
         draft.project_id == video.project_id,
         "Draft project must match its video"
     );
-    let Anchor::Point { at_us } = draft.anchor;
+    let (at_us, end_us) = match draft.anchor {
+        Anchor::Point { at_us } => (at_us, at_us),
+        Anchor::Play { at_us, end_us } => (at_us, end_us),
+    };
     ensure!(
         (0..=MAX_SAFE_INTEGER).contains(&at_us),
         "Frame time must be nonnegative integer microseconds"
     );
     ensure!(
-        video.duration_us == 0 || at_us <= video.duration_us,
+        (at_us..=MAX_SAFE_INTEGER).contains(&end_us),
+        "Play end must be at or after its start in safe integer microseconds"
+    );
+    ensure!(
+        video.duration_us == 0 || end_us <= video.duration_us,
         "Anchor extends beyond the video duration"
     );
     ensure!(
@@ -106,11 +113,23 @@ pub(crate) fn draft(draft: &Draft, video: &Video) -> Result<()> {
             sample_count <= 100_000,
             "A comment supports at most 100000 drawing samples"
         );
+        let mut previous_time = at_us;
         for sample in &drawing.samples {
             ensure!(
                 (0..=1_000_000).contains(&sample.x) && (0..=1_000_000).contains(&sample.y),
                 "Drawing coordinates must be between 0 and 1000000"
             );
+            match (&draft.anchor, sample.t_us) {
+                (Anchor::Point { .. }, None) => {}
+                (Anchor::Play { .. }, Some(time)) => {
+                    ensure!(
+                        (previous_time..=end_us).contains(&time),
+                        "Play samples must be ordered and within the conversation window"
+                    );
+                    previous_time = time;
+                }
+                _ => bail!("Only play drawings require a media time on every sample"),
+            }
         }
     }
     if let Some(parent) = &draft.parent_comment_id {
