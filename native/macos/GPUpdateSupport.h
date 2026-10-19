@@ -8,6 +8,7 @@ NSString *GPUpdateRoot(void);
 NSString *GPCanonicalUpdatePath(NSString *path);
 NSString *GPUpdateVersion(NSString *tag);
 void GPRequireManagedInstallation(NSString *root, NSString *app);
+NSString *GPManagedUpdateApp(NSString *root, NSString *runningApp);
 void GPCreatePrivateDirectory(NSString *path);
 void GPWriteUpdatePlist(NSDictionary *value, NSString *path);
 NSDictionary *GPReadUpdatePlist(NSString *path);

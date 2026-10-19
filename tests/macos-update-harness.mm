@@ -22,6 +22,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     auto arg=[&](int n)->NSString * { if(n>=argc) throw std::runtime_error("Missing argument"); return [NSString stringWithUTF8String:argv[n]]; };
     NSString *command=arg(1);
     if([command isEqual:@"extract"]) GPExtractUpdateArchive(arg(2),arg(3));
+    else if([command isEqual:@"managed"]) puts(GPManagedUpdateApp(arg(2),arg(3)).UTF8String);
     else if([command isEqual:@"verify"]) GPVerifyUpdateArchive(arg(2),arg(3));
     else if([command isEqual:@"validate"]) GPValidateUpdateApp(arg(2),arg(3),arg(4),argc>5?arg(5):nil);
     else if([command isEqual:@"identity"]) {

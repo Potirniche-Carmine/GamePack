@@ -112,7 +112,7 @@ static NSString *DownloadURL(NSString *tag) {
   NSMutableDictionary *publicState=[NSMutableDictionary new]; for(NSString *key in @[@"status",@"version",@"error",@"progress"]) if(saved[key]) publicState[key]=saved[key]; return publicState;
 }
 - (void)prepare:(NSString *)tag {
-  [self initializePaths]; GPRequireManagedInstallation(_root,NSBundle.mainBundle.bundlePath);
+  [self initializePaths]; GPManagedUpdateApp(_root,NSBundle.mainBundle.bundlePath);
   NSString *version=GPUpdateVersion(tag); Check(gamepack::updates::newerStableVersion(tag.UTF8String,InstalledVersion().UTF8String?:""),"This update is not newer than the installed app. Check for updates again.");
   [_lock lock]; if(_working) { [_lock unlock]; throw std::runtime_error("An update is already in progress."); } _working=YES; [_lock unlock];
   int lockFD=open(Path(_root,@"updates/operation.lock").fileSystemRepresentation,O_CREAT|O_RDWR|O_NOFOLLOW,0600);
@@ -155,14 +155,14 @@ static NSString *DownloadURL(NSString *tag) {
   }});
 }
 - (void)install {
-  [self initializePaths]; GPRequireManagedInstallation(_root,NSBundle.mainBundle.bundlePath);
+  [self initializePaths]; NSString *managed=GPManagedUpdateApp(_root,NSBundle.mainBundle.bundlePath);
   NSDictionary *state=GPReadUpdatePlist(_statePath); Check([state[@"status"] isEqual:@"ready"],"The update is not ready. Check for updates again.");
   NSString *directory=state[@"directory"]; Check([directory isKindOfClass:NSString.class] && [directory hasPrefix:[Path(_root,@"updates") stringByAppendingString:@"/"]] && [GPCanonicalUpdatePath(directory) isEqual:directory],"The update staging location is invalid.");
   NSDictionary *prepared=GPReadUpdatePlist(Path(directory,@"prepared.plist")); NSString *version=GPUpdateVersion(prepared[@"version"]);
   Check(gamepack::updates::newerStableVersion(version.UTF8String,InstalledVersion().UTF8String?:""),"This update is no longer newer than the installed app. Check for updates again.");
   NSString *app=Path(directory,@"payload/GamePack.app"); GPVerifyUpdateArchive(Path(directory,@"package.tar.gz"),prepared[@"sha256"]); GPValidateUpdateApp(app,version,GPUpdateArchitecture(),NSBundle.mainBundle.bundlePath);
   NSString *helper=Path(NSBundle.mainBundle.bundlePath,@"Contents/Helpers/GamePackUpdateHelper"); Check([NSFileManager.defaultManager isExecutableFileAtPath:helper],"This GamePack installation cannot install updates. Use the release installer first.");
-  NSString *jobPath=Path(directory,@"job.plist"); GPWriteUpdatePlist(@{@"root":_root,@"destination":Path(_root,@"app/GamePack.app"),@"staged":app,@"version":version,@"process":GPUpdateProcessIdentity(getpid())},jobPath);
+  NSString *jobPath=Path(directory,@"job.plist"); GPWriteUpdatePlist(@{@"root":_root,@"destination":managed,@"runningApp":GPCanonicalUpdatePath(NSBundle.mainBundle.bundlePath),@"staged":app,@"version":version,@"process":GPUpdateProcessIdentity(getpid())},jobPath);
   [NSFileManager.defaultManager removeItemAtPath:Path(directory,@"helper-ready.plist") error:nil];
   [NSFileManager.defaultManager removeItemAtPath:Path(directory,@"install-permitted.plist") error:nil];
   NSTask *task=[NSTask new]; task.executableURL=[NSURL fileURLWithPath:helper]; task.arguments=@[jobPath]; task.standardInput=NSFileHandle.fileHandleWithNullDevice; task.standardOutput=NSFileHandle.fileHandleWithNullDevice; task.standardError=NSFileHandle.fileHandleWithNullDevice;

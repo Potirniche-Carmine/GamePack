@@ -123,6 +123,10 @@ check(['validate', candidate, '1.0.2', architecture], false);
 fs.writeFileSync(path.join(candidate, 'Contents/Info.plist'), plist('1.0.1')); run('codesign', ['--force', '--sign', '-', candidate]);
 const root = path.join(directory, 'managed root'); fs.mkdirSync(path.join(root, 'app'), {recursive: true});
 const current = appFixture(path.join(root, 'app'), '1.0.0');
+const runningCopy = path.join(directory, 'randomized location/GamePack.app');
+fs.cpSync(current, runningCopy, {recursive: true});
+check(['managed', root, runningCopy]);
+check(['managed', root, candidate], false);
 const fixtureArchive = path.join(directory, 'candidate.tar.gz');
 run('/usr/bin/tar', ['-czf', fixtureArchive, '-C', path.dirname(candidate), 'GamePack.app']);
 const fixtureDigest = createHash('sha256').update(fs.readFileSync(fixtureArchive)).digest('hex');
@@ -149,6 +153,11 @@ try {
     await delay(100); check(['install-job', jobPath], false);
     assert.match(readPlist(path.join(root, 'updates/state.plist')).error, /Another GamePack window/);
   } finally { const stopped = new Promise(resolve => other.once('exit', resolve)); other.kill(); await stopped; }
+  const relocated = spawn(path.join(runningCopy, 'Contents/MacOS/GamePack'), [], {stdio: 'ignore', env: {...process.env, GAMEPACK_HOME: root}});
+  try {
+    await delay(100); check(['install-job', jobPath], false);
+    assert.match(readPlist(path.join(root, 'updates/state.plist')).error, /Another GamePack window/);
+  } finally { const stopped = new Promise(resolve => relocated.once('exit', resolve)); relocated.kill(); await stopped; }
   const helper = spawn(harness, ['install-job', jobPath], {stdio: 'ignore'});
   const done = new Promise(resolve => helper.once('exit', resolve));
   for (let n = 0; n < 100 && !fs.existsSync(path.join(jobDirectory, 'helper-ready.plist')); n++) await delay(50);
@@ -169,13 +178,13 @@ try {
 // A later ordinary quit must not install after a failed/missing restart commit.
 fs.writeFileSync(path.join(current, 'Contents/Info.plist'), plist('1.0.0'));
 run('codesign', ['--force', '--sign', '-', current]);
-const uncommitted = spawn(path.join(current, 'Contents/MacOS/GamePack'), [], {stdio: 'ignore'});
+const uncommitted = spawn(path.join(runningCopy, 'Contents/MacOS/GamePack'), [], {stdio: 'ignore', env: {...process.env, GAMEPACK_HOME: root}});
 try {
   await delay(100);
   const identity = JSON.parse(check(['identity', String(uncommitted.pid)]));
   for (const name of ['helper-ready.plist', 'install-permitted.plist']) fs.rmSync(path.join(jobDirectory, name), {force: true});
   const jobPath = path.join(jobDirectory, 'job.plist');
-  fs.writeFileSync(jobPath, JSON.stringify({root, destination: current, staged: path.join(jobDirectory, 'payload/GamePack.app'), version: '1.0.1', process: identity}));
+  fs.writeFileSync(jobPath, JSON.stringify({root, destination: current, runningApp: runningCopy, staged: path.join(jobDirectory, 'payload/GamePack.app'), version: '1.0.1', process: identity}));
   run('/usr/bin/plutil', ['-convert', 'binary1', jobPath]);
   const helper = spawn(harness, ['install-job', jobPath], {stdio: 'ignore'});
   const done = new Promise(resolve => helper.once('exit', resolve));
