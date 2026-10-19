@@ -33,7 +33,7 @@ Packages are retained for 14 days. Compressed archives upload without redundant 
 
 ```bash
 npm run release:prepare -- --ci-run 123456789 \
-  --sign-identity 'Developer ID Application: Your Name (TEAMID)' \
+  --sign-identity YOUR_40_CHARACTER_CERTIFICATE_SHA1 \
   --notary-profile GamePack-DeveloperID
 ```
 
