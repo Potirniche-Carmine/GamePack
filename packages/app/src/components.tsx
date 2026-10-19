@@ -23,7 +23,7 @@ export function Button({children, onPress, disabled, active, primary, compact, l
   const hint = useShortcutHint(target, shortcut, label ?? (typeof children === 'string' ? children : ''), hovered, focused, !disabled && hasTooltip);
   const button = <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint.keyLabel || undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
     onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-    disabled={disabled} onPress={() => { if (toolbar) target.current?.focus(); onPress?.(); }} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
+    disabled={disabled} onPress={() => { hint.dismiss(); if (toolbar) target.current?.focus(); onPress?.(); }} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
       hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && !primary && {backgroundColor: colors.inset},
       disabled && s.buttonDisabled, toolbar && {width: 36, height: 36, padding: 0, borderRadius: 18, borderColor: 'transparent'}, style, focused && s.focusRing]}>
     {!!icon && <Icon name={icon} color={disabled ? colors.faint : danger ? colors.danger : primary ? colors.primaryText : active ? colors.accentText : colors.text} />}
@@ -41,20 +41,23 @@ export function useShortcutHint(target: React.RefObject<View | null>, shortcut: 
   const chord = shortcut ? binding(shortcut, bindings) : null;
   const keyLabel = chord ? shortcutLabel(chord, Platform.OS === 'macos') : '';
   const [visible, setVisible] = useState(false);
+  const [focusDismissed, setFocusDismissed] = useState(false);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const tooltip = useContext(TooltipContext);
   const owner = useRef({}).current;
+  useEffect(() => { if (!focused) setFocusDismissed(false); }, [focused]);
   useEffect(() => {
     setVisible(false);
     if (!enabled || !hovered) return;
-    const timer = setTimeout(() => setVisible(true), 350);
-    return () => clearTimeout(timer);
+    hoverTimer.current = setTimeout(() => setVisible(true), 350);
+    return () => { if (hoverTimer.current !== undefined) clearTimeout(hoverTimer.current); };
   }, [enabled, hovered]);
   useEffect(() => {
-    if (enabled && (visible || focused) && target.current) tooltip.show(owner, target.current, label, keyLabel);
+    if (enabled && (visible || (focused && !focusDismissed)) && target.current) tooltip.show(owner, target.current, label, keyLabel);
     else tooltip.hide(owner);
     return () => tooltip.hide(owner);
-  }, [enabled, visible, focused, target, label, keyLabel, tooltip, owner]);
-  return {keyLabel};
+  }, [enabled, visible, focused, focusDismissed, target, label, keyLabel, tooltip, owner]);
+  return {keyLabel, dismiss: () => { if (hoverTimer.current !== undefined) clearTimeout(hoverTimer.current); setVisible(false); setFocusDismissed(true); tooltip.hide(owner); }};
 }
 
 const textStyleKeys = new Set(['color', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'fontVariant', 'letterSpacing', 'lineHeight', 'textAlign', 'textDecorationLine', 'textDecorationStyle', 'textDecorationColor', 'textTransform', 'writingDirection', 'includeFontPadding', 'textAlignVertical']);
