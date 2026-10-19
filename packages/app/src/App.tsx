@@ -814,7 +814,7 @@ export default function App() {
           onPlay={play} rate={rate} zoom={zoom} presenting={presenting}
           onSpeed={() => { setSpeedOpen(value => !value); setZoomOpen(false); }} onZoom={() => { setZoomOpen(value => !value); setSpeedOpen(false); }} onPresent={togglePresentation}
           toolbar={<>
-            <Button quiet compact label={`Annotation timing: ${annotationMode === 'play' ? 'Play' : 'Moment'}`} active={annotationMode === 'play'} disabled={!!busy || dialogOpen || !!draft?.parent_comment_id || !!draft?.drawings.length} onPress={changeAnnotationMode}>{annotationMode === 'play' ? 'Play' : 'Moment'}</Button>
+            <Button quiet compact icon="cycle" style={{flexDirection: 'column', gap: 2, paddingHorizontal: 6, paddingVertical: 6}} label={`Annotation timing: ${annotationMode === 'play' ? 'Play' : 'Moment'}`} active={annotationMode === 'play'} disabled={!!busy || dialogOpen || !!draft?.parent_comment_id || !!draft?.drawings.length} onPress={changeAnnotationMode}>{annotationMode === 'play' ? 'Play' : 'Moment'}</Button>
             {!draft && resumableDraft(data.drafts, video.id, null) && <Button quiet compact label="Resume comment" disabled={!!busy || dialogOpen} onPress={() => restoreDraftNow(resumableDraft(data.drafts, video.id, null)!)}>Resume</Button>}
             {draft?.anchor.kind === 'play' && !draft.drawings.length && <Button quiet compact icon="close" label="Cancel play comment" disabled={!!busy || dialogOpen} onPress={() => void discard()} />}
             <Button toolbar quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('pointer')} />
