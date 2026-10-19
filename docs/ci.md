@@ -4,9 +4,9 @@ Pull requests target `main`. Keep feature and fix branches focused; agent branch
 
 ## Checks and native builds
 
-The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It checks TypeScript, UI behavior, matching package versions, Rust formatting/tests/Clippy on Linux and Windows, Windows PowerShell transport fixtures, release/version and installer regression tests, native geometry/update contracts, and workflow syntax with actionlint.
+The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It checks TypeScript, UI behavior, matching package versions, Rust formatting/tests/Clippy on Linux and Windows, Windows PowerShell transport and updater rollback fixtures, release/version and installer regression tests, native geometry/update contracts, and workflow syntax with actionlint.
 
-After shared checks pass, `main` builds macOS ARM64/Intel and Windows ARM64/x64 in parallel. macOS also runs its Rust tests and installs/reinstalls each packaged app into an isolated library without launching it. Documentation/test-only pushes skip native packages. Manually dispatch `CI` on `main` to build all four packages regardless of changed paths. CI runs finish independently so delayed events and retries cannot cancel a newer commit's running or pending checks. Several commits can therefore build at once. PRs never run packaging or release jobs.
+After shared checks pass, `main` builds macOS ARM64/Intel and Windows ARM64/x64 in parallel. Each platform validates its packaged app against the updater. macOS also runs its Rust tests, updater archive/installation failure tests, and installs/reinstalls each packaged app into an isolated library without launching it. Documentation/test-only pushes skip native packages. Manually dispatch `CI` on `main` to build all four packages regardless of changed paths. CI runs finish independently so delayed events and retries cannot cancel a newer commit's running or pending checks. Several commits can therefore build at once. PRs never run packaging or release jobs.
 
 ## Caches
 
@@ -36,6 +36,8 @@ The draft workflow verifies the CI workflow identity, event, branch, commit, suc
 CI artifacts and draft releases are not app updates. Settings checks only GitHub's latest published stable release, and offers it only when its version is newer than the installed app. Keep published releases as download history. When replacing a stale draft, first preserve its notes, source commit, and assets; prepare the replacement from verified CI before removing the superseded draft. Do not reuse or move a published version tag.
 
 Downloads currently use ad hoc macOS signing (no notarization) and unsigned Windows layouts requiring Developer Mode. Signing and store distribution are separate work.
+
+The Windows updater runs only the trusted helper bundled with the installed app. It checks PowerShell policy first and respects explicit restrictions. When all five policy scopes are unset, it uses `Bypass` for that helper process only, as documented for embedded application scripts; it never changes saved policy, Developer Mode, AppLocker, or WDAC. A blocked helper leaves GamePack open. macOS retains download quarantine and uses the normal LaunchServices opening path, so operating-system approval may still be required for these unnotarized builds.
 
 ## Validate an update
 

@@ -80,6 +80,10 @@ jobs:
           cargo build --locked --bin gamepack
           if ($LASTEXITCODE -ne 0) { throw 'Could not compile the Rust fixture CLI.' }
           ./scripts/windows/test-contract.ps1 -CoreExecutable (Join-Path (Get-Location) 'target\debug\gamepack.exe')
+      - name: Verify Windows updater and rollback
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/windows/test-updater.ps1
 
   workflows:
     name: Workflow validation

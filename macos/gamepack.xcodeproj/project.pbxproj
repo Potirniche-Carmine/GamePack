@@ -14,9 +14,9 @@
 		514201582437B4B40078DB4F /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 514201572437B4B40078DB4F /* main.m */; };
 		7804C78AA112FA9B8401EE11 /* GamePackPlayer.mm in Sources */ = {isa = PBXBuildFile; fileRef = D0E698FB8589B714257B7A92 /* GamePackPlayer.mm */; };
 		9F6C780527A0CDE7842C4E75 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A23634C47CBD1016FD13AA30 /* PrivacyInfo.xcprivacy */; };
-		BAC60CF72C29C55276ECA904 /* GamePackModule.mm in Sources */ = {isa = PBXBuildFile; fileRef = 944520F862B4CADA35682374 /* GamePackModule.mm */; };
 		A788BBE91C924FE8A9B00001 /* GPUpdater.mm in Sources */ = {isa = PBXBuildFile; fileRef = A788BBE91C924FE8A9B00003 /* GPUpdater.mm */; };
 		A788BBE91C924FE8A9B00002 /* GPUpdateSupport.mm in Sources */ = {isa = PBXBuildFile; fileRef = A788BBE91C924FE8A9B00004 /* GPUpdateSupport.mm */; };
+		BAC60CF72C29C55276ECA904 /* GamePackModule.mm in Sources */ = {isa = PBXBuildFile; fileRef = 944520F862B4CADA35682374 /* GamePackModule.mm */; };
 		BFF0A672D2204ED4AD9C0EA6 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A23634C47CBD1016FD13AA30 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
@@ -32,10 +32,10 @@
 		514201592437B4B40078DB4F /* gamepack.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = gamepack.entitlements; sourceTree = "<group>"; };
 		644FC7B432C321D5F63FB07C /* libPods-gamepack-macOS.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-gamepack-macOS.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		944520F862B4CADA35682374 /* GamePackModule.mm */ = {isa = PBXFileReference; includeInIndex = 1; name = GamePackModule.mm; path = ../native/macos/GamePackModule.mm; sourceTree = "<group>"; };
-		A788BBE91C924FE8A9B00003 /* GPUpdater.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = GPUpdater.mm; path = ../native/macos/GPUpdater.mm; sourceTree = "<group>"; };
-		A788BBE91C924FE8A9B00004 /* GPUpdateSupport.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = GPUpdateSupport.mm; path = ../native/macos/GPUpdateSupport.mm; sourceTree = "<group>"; };
 		A23634C47CBD1016FD13AA30 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A62C7A3BAEFD370D08E25E0D /* Pods-gamepack-macOS.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-gamepack-macOS.debug.xcconfig"; path = "Target Support Files/Pods-gamepack-macOS/Pods-gamepack-macOS.debug.xcconfig"; sourceTree = "<group>"; };
+		A788BBE91C924FE8A9B00003 /* GPUpdater.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = GPUpdater.mm; path = ../native/macos/GPUpdater.mm; sourceTree = "<group>"; };
+		A788BBE91C924FE8A9B00004 /* GPUpdateSupport.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = GPUpdateSupport.mm; path = ../native/macos/GPUpdateSupport.mm; sourceTree = "<group>"; };
 		C67E3E6C8259CFB7DA8789C4 /* Pods-gamepack-macOS.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-gamepack-macOS.release.xcconfig"; path = "Target Support Files/Pods-gamepack-macOS/Pods-gamepack-macOS.release.xcconfig"; sourceTree = "<group>"; };
 		D0E698FB8589B714257B7A92 /* GamePackPlayer.mm */ = {isa = PBXFileReference; includeInIndex = 1; name = GamePackPlayer.mm; path = ../native/macos/GamePackPlayer.mm; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
