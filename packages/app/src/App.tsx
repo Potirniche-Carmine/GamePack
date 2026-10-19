@@ -439,12 +439,14 @@ export default function App() {
       replaceDraft(next); setRedo([]);
       if (current.anchor.kind === 'point') {
         setComposerOpen(true); setPaused(true);
-        focusParent.current = current.parent_comment_id ?? ''; setFocusRequest(value => value + 1);
+        // Keep playback shortcuts available after drawing. Clicking the comment
+        // field (or explicitly starting a reply) still enters text editing.
       } else if (paused) setComposerOpen(true);
     } catch (cause) { setError(message(cause)); }
   };
   const chooseTool = (value: DrawingTool) => {
     if (!video || busy || reviewMode !== 'review') return;
+    commentInput.current?.blur(); focusParent.current = null;
     setZoomOpen(false); setSpeedOpen(false);
     if (value === 'pointer' || value === 'laser' || tool === value) { setTool(tool === value ? 'pointer' : value); return; }
     if (!draft) { newDraftNow(); setTool(value); setComposerOpen(false); return; }
@@ -853,12 +855,16 @@ export default function App() {
           onPlay={play} rate={rate} zoom={zoom} presenting={presenting}
           onSpeed={() => { setSpeedOpen(value => !value); setZoomOpen(false); }} onZoom={() => { setZoomOpen(value => !value); setSpeedOpen(false); }} onPresent={togglePresentation}
           toolbar={<>
-            <Button quiet compact icon="cycle" style={{flexDirection: 'column', gap: 2, paddingHorizontal: 6, paddingVertical: 6}} label={`Annotation timing: ${annotationMode === 'play' ? 'Play' : 'Moment'}`} active={annotationMode === 'play'} disabled={!!busy || dialogOpen || !!draft?.parent_comment_id || !!draft?.drawings.length} onPress={changeAnnotationMode}>{annotationMode === 'play' ? 'Play' : 'Moment'}</Button>
-            {!draft && resumableDraft(data.drafts, video.id, null) && <Button quiet compact label="Resume comment" disabled={!!busy || dialogOpen} onPress={() => restoreDraftNow(resumableDraft(data.drafts, video.id, null)!)}>Resume</Button>}
-            {draft?.anchor.kind === 'play' && !draft.drawings.length && <Button quiet compact icon="close" label="Cancel play comment" disabled={!!busy || dialogOpen} onPress={() => void discard()} />}
+            <View style={{width: 64, height: 56}}>
+              <Button quiet compact icon="cycle" style={{width: 64, height: 56, flexDirection: 'column', gap: 2, paddingHorizontal: 0, paddingVertical: 6}} label={`Annotation timing: ${annotationMode === 'play' ? 'Play' : 'Moment'}`} active={annotationMode === 'play'} disabled={!!busy || dialogOpen || !!draft?.parent_comment_id || !!draft?.drawings.length} onPress={changeAnnotationMode}>{annotationMode === 'play' ? 'Play' : 'Moment'}</Button>
+            </View>
             <Button toolbar quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('pointer')} />
             {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} toolbar quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={!!busy || dialogOpen} onPress={() => chooseTool(value)} />)}
             <Button toolbar quiet compact shortcut="laser" icon="target" label="Laser pointer" active={tool === 'laser'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('laser')} />
+          </>}
+          toolbarAccessory={<>
+            {!draft && resumableDraft(data.drafts, video.id, null) && <Button compact label="Resume comment" disabled={!!busy || dialogOpen} onPress={() => restoreDraftNow(resumableDraft(data.drafts, video.id, null)!)}>Resume</Button>}
+            {draft?.anchor.kind === 'play' && !draft.drawings.length && <Button compact icon="close" label="Cancel play comment" disabled={!!busy || dialogOpen} onPress={() => void discard()} />}
           </>}
           timeline={<ReviewTimeline reviewEnd={reviewEnd} paused={paused} rate={rate} seekToken={seekState.token} mode={reviewMode} video={video} time={time} duration={duration} comments={originalComments} draftAnchor={draft?.anchor} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => { const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectComment(next); }} onSeek={scrubTo} />}
           popoverKind={speedOpen ? 'speed' : 'zoom'}

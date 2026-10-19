@@ -17,7 +17,7 @@ import type {Comment, Draft, Video} from './types';
 type Props = {
   video: Video; time: number; duration: number; paused: boolean; reviewMode: 'watch' | 'review';
   activityToken: number; sceneReady: boolean; comments: Comment[]; notes: Comment[]; selectedId: string | null; draft: Draft | null; expanded: ReadonlySet<string>;
-  disabled: boolean; header: ReactNode; composer: ReactNode; toolbar: ReactNode; timeline: ReactNode; popover: ReactNode; children: ReactNode;
+  disabled: boolean; header: ReactNode; composer: ReactNode; toolbar: ReactNode; toolbarAccessory: ReactNode; timeline: ReactNode; popover: ReactNode; children: ReactNode;
   rate: number; zoom: number; presenting: boolean; popoverKind: 'speed' | 'zoom';
   onMode: (mode: 'watch' | 'review') => void; onSelect: (note: Comment) => void; onReply: (note: Comment) => void;
   onExpand: (note: Comment) => void; onReplay: (note: Comment) => void;
@@ -65,7 +65,12 @@ export function ReviewWorkspace(props: Props) {
       </View>
     </View>
     {!props.presenting && <Glass style={styles.header}>{props.header}</Glass>}
-    {reviewing && <View pointerEvents="box-none" style={[styles.toolRail, {top: props.presenting ? 16 : 76}]}><Glass style={styles.tools}>{props.toolbar}</Glass></View>}
+    {reviewing && <View pointerEvents="box-none" style={[styles.toolRail, {top: props.presenting ? 16 : 76}]}>
+      <View pointerEvents="box-none" style={styles.toolRow}>
+        <Glass style={styles.tools}>{props.toolbar}</Glass>
+        {!!props.toolbarAccessory && <View style={styles.toolAccessory}>{props.toolbarAccessory}</View>}
+      </View>
+    </View>}
     {reviewing && ((props.sceneReady && !!visibleNotes.length) || !!visibleDraft) && <View style={[styles.conversations, placement]}>
       <NoteColumn {...props} notes={props.sceneReady ? visibleNotes : []} draft={visibleDraft} numbers={numbers} composer={visibleDraft ? composer : null} />
     </View>}
@@ -118,7 +123,7 @@ function NoteColumn(props: Props & {numbers: ReadonlyMap<string, number>}) {
   const replying = props.draft?.parent_comment_id ? conversationRoot(props.comments, props.draft.parent_comment_id) : null;
   const hasComposer = !!props.draft;
   const rows = props.notes.map(note => ({note, replies: discussionReplies(props.comments, note.comment_id)}));
-  const rowHeight = (index: number) => props.expanded.has(rows[index].note.comment_id) && rows[index].replies.length ? 224 : 134;
+  const rowHeight = (index: number) => props.expanded.has(rows[index].note.comment_id) && rows[index].replies.length ? 236 : 146;
   const selectedIndex = props.notes.findIndex(note => note.comment_id === props.selectedId);
   const selectedOffset = rows.slice(0, Math.max(0, selectedIndex)).reduce((sum, _, index) => sum + rowHeight(index) + 10, 0);
   useEffect(() => {
@@ -166,18 +171,20 @@ const styles = StyleSheet.create({
   header: {position: 'absolute', top: 12, left: 16, right: 16, borderRadius: 20},
   toolRail: {position: 'absolute', left: 16, top: 86, bottom: 150, justifyContent: 'center', alignItems: 'flex-start', zIndex: 10},
   tools: {alignItems: 'center', padding: 6, gap: 4, borderRadius: 24},
+  toolRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
+  toolAccessory: {paddingTop: 18},
   conversations: {position: 'absolute'},
   pinNumber: {color: '#15344e', fontSize: 11, fontWeight: '700'},
   noteColumn: {flexShrink: 1},
   noteContent: {gap: 10, paddingVertical: 1},
-  note: {paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18},
+  note: {paddingHorizontal: 13, paddingTop: 10, paddingBottom: 12, borderRadius: 18},
   noteHeader: {flexDirection: 'row', alignItems: 'center', gap: 7, height: 28, marginBottom: 5},
   number: {width: 21, height: 21, borderRadius: 11, backgroundColor: ANNOTATION_COLOR, alignItems: 'center', justifyContent: 'center'},
   author: {fontSize: 12, fontWeight: '600', flex: 1},
   timestamp: {fontSize: 11, fontVariant: ['tabular-nums']},
   noteBody: {flex: 1, minHeight: 20},
   noteText: {fontSize: 13, lineHeight: 19},
-  noteActions: {flexDirection: 'row', alignItems: 'center', height: 30, marginBottom: -4},
+  noteActions: {flexDirection: 'row', alignItems: 'center', minHeight: 32, marginTop: 8, gap: 4},
   reply: {padding: 10, marginTop: 10, borderLeftWidth: 2, borderTopRightRadius: 9, borderBottomRightRadius: 9},
   replyHeader: {flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 5},
   replyAuthor: {fontSize: 11, fontWeight: '600', flex: 1},

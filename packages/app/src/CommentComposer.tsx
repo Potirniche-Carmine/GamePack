@@ -32,7 +32,7 @@ export function CommentComposer({draft, name, input, disabled, saving, failed, o
     </View>
     <View style={[styles.textArea, nativeHeight !== undefined && {height: nativeHeight}]}>
       <Text accessible={false} pointerEvents="none" style={styles.measure}>{`${draft.text} `}</Text>
-      <TextField ref={input} autoFocus={draft.anchor.kind === 'point'} accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Add a reply…' : 'Add a comment…'}
+      <TextField ref={input} accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Add a reply…' : 'Add a comment…'}
         onLayout={measure}
         multiline editable={!disabled} style={[styles.field, {backgroundColor: 'transparent'}]} inputStyle={styles.editor}
         value={draft.text} onFocus={onFocus} onChangeText={onText} maxLength={16000} />

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {clusterTimelineComments, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePrediction, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
+import {clusterTimelineComments, timelineClusterPresentation, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePrediction, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
 
 test('pausing holds the presented position until the stopped native frame arrives; resume never snaps', () => {
   const playing = {time: 2000000, duration: 30000000, paused: false, rate: 1, seekToken: 1};
@@ -114,6 +114,25 @@ test('clustering follows rendered pixel proximity and responds to resizing', () 
   const comments = [note('a', 40), note('b', 47), note('c', 90)];
   assert.deepEqual(ids(clusterTimelineComments(comments, 100, 1000)), [['a'], ['b'], ['c']]);
   assert.deepEqual(ids(clusterTimelineComments(comments, 100, 300)), [['a', 'b'], ['c']]);
+});
+
+test('nearby moments retain exact ticks without claiming multiple comments on one frame', () => {
+  const comments = [note('first', 1000000), note('second', 1500000)];
+  const [cluster] = clusterTimelineComments(comments, 16000000, 600);
+  assert.equal(cluster.comments.length, 2);
+  const view = timelineClusterPresentation(cluster, 16000000, 600, 'second');
+  assert.equal(view.count, null);
+  assert.deepEqual(view.positions, comments.map(comment => timelinePosition(comment.anchor.at_us, 16000000, 600)));
+  assert.equal(view.anchor, view.positions[1]);
+  assert.equal(timelineClusterPresentation(cluster, 16000000, 600, null).anchor, view.positions[0]);
+});
+
+test('simultaneous conversations still have an accurate count, including play anchors', () => {
+  const comments = [note('moment', 1000000), {comment_id: 'play', anchor: {kind: 'play', at_us: 1000000, end_us: 6000000}}];
+  const [cluster] = clusterTimelineComments(comments, 16000000, 600);
+  assert.equal(timelineClusterPresentation(cluster, 16000000, 600, 'moment').count, 2);
+  const [single] = clusterTimelineComments(comments.slice(0, 1), 16000000, 600);
+  assert.equal(timelineClusterPresentation(single, 16000000, 600, 'moment').count, null);
 });
 
 test('expanded labels merge neighbors and remain within both timeline edges', () => {

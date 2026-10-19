@@ -29,16 +29,20 @@ export function UpdateSettings({disabled, onRestart, controller = updates}: {
   };
   return <View style={s.footer}>
     <View style={s.row}>
-      <Text style={s.title} accessibilityLiveRegion="polite">{view.title}</Text>
-      <Button compact quiet={!view.primary} primary={view.primary} disabled={disabled || view.disabled} onPress={press}>{view.label}</Button>
+      <View style={s.copy}>
+        <Text style={s.title} accessibilityLiveRegion="polite">{view.title}</Text>
+        <Text accessibilityRole={view.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={[s.status, view.error && {color: colors.errorText}]}>{view.status || ' '}</Text>
+      </View>
+      <Button compact style={s.action} quiet={!view.primary} primary={view.primary} disabled={disabled || view.disabled} onPress={press}>{view.label}</Button>
     </View>
-    {!!view.status && <Text accessibilityRole={view.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={[s.status, view.error && {color: colors.errorText}]}>{view.status}</Text>}
   </View>;
 }
 
 const styles = (c: Colors) => StyleSheet.create({
   footer: {paddingTop: 14, borderTopWidth: 1, borderTopColor: c.separator},
-  row: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8},
-  title: {flex: 1, minWidth: 140, color: c.muted, fontSize: 13, lineHeight: 19},
-  status: {color: c.muted, fontSize: 12, lineHeight: 18, marginTop: 7},
+  row: {flexDirection: 'row', alignItems: 'center', gap: 16, minHeight: 48},
+  copy: {flex: 1, gap: 3},
+  action: {width: 154, flexShrink: 0},
+  title: {color: c.muted, fontSize: 13, lineHeight: 19},
+  status: {color: c.muted, fontSize: 12, lineHeight: 18, minHeight: 18},
 });
