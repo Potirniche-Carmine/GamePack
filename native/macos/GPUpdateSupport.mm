@@ -236,6 +236,23 @@ static NSRunningApplication *Launch(NSString *app,NSString *root,bool &uncertain
   if(dispatch_semaphore_wait(signal,dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC))!=0) { uncertain=true; return nil; }
   return running;
 }
+static void RequireNoOtherInstances(NSString *destination,pid_t allowed) {
+  // LaunchServices also sees graphical app instances, while proc_listallpids
+  // covers a second instance started directly from its executable.
+  NSString *executable=Join(destination,@"Contents/MacOS/GamePack");
+  int capacity=proc_listallpids(nullptr,0)+64;
+  Require(capacity>64 && capacity<1000000,"Could not check running GamePack instances. Try again.");
+  std::vector<pid_t> pids(capacity);
+  int count=proc_listallpids(pids.data(),(int)(pids.size()*sizeof(pid_t)));
+  Require(count>=0 && count<capacity,"Could not check running GamePack instances. Try again.");
+  for(int n=0;n<count;n++) if(pids[n]>0 && pids[n]!=allowed) {
+    char path[PROC_PIDPATHINFO_MAXSIZE];
+    if(proc_pidpath(pids[n],path,sizeof(path))>0)
+      Require(![Canonical([NSString stringWithUTF8String:path]) isEqual:executable],"Another GamePack window is still open. Close it and try again.");
+  }
+  for(NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:@"app.gamepack.desktop"])
+    Require(app.processIdentifier==allowed || ![Canonical(app.bundleURL.path) isEqual:destination],"Another GamePack window is still open. Close it and try again.");
+}
 int GPRunUpdateInstallJob(NSString *jobPath) {
   NSString *root=nil,*destination=nil,*backup=nil,*staged=nil,*statePath=nil; bool movedOld=false,movedNew=false,started=false;
   Descriptor operation(-1);
@@ -243,20 +260,19 @@ int GPRunUpdateInstallJob(NSString *jobPath) {
     NSDictionary *job=GPReadUpdatePlist(jobPath); root=job[@"root"]; destination=job[@"destination"]; staged=job[@"staged"];
     Require([root isKindOfClass:NSString.class]&&[destination isKindOfClass:NSString.class]&&[staged isKindOfClass:NSString.class],"The update installation request is invalid.");
     GPRequireManagedInstallation(root,destination); NSString *directory=jobPath.stringByDeletingLastPathComponent;
-    Require([Canonical(directory) isEqual:directory] && Inside(directory,Join(root,@"updates")) && [jobPath isEqual:Join(directory,@"job.plist")] && [staged isEqual:Join(directory,@"payload/GamePack.app")],"The update staging location is invalid.");
+    Require([Canonical(directory) isEqual:directory] && Inside(directory,Join(root,@"updates")) && [jobPath isEqual:Join(directory,@"job.plist")] && [staged isEqual:Join(directory,@"payload/GamePack.app")] && [Canonical(staged) isEqual:staged],"The update staging location is invalid.");
     operation.value=open(Join(root,@"updates/operation.lock").fileSystemRepresentation,O_CREAT|O_RDWR|O_NOFOLLOW,0600);
     Require(operation.value>=0 && flock(operation.value,LOCK_EX|LOCK_NB)==0,"Another GamePack window is updating. Try again after it finishes.");
     statePath=Join(root,@"updates/state.plist"); backup=Join(directory,@"previous.app");
     NSString *version=GPUpdateVersion(job[@"version"]),*architecture=GPUpdateArchitecture();
     NSString *oldVersion=[NSDictionary dictionaryWithContentsOfFile:Join(destination,@"Contents/Info.plist")][@"CFBundleShortVersionString"];
-    Require(gamepack::updates::newerStableVersion(version.UTF8String,oldVersion.UTF8String?:""),"The update is not newer than the installed app.");
+    Require([oldVersion isKindOfClass:NSString.class] && gamepack::updates::newerStableVersion(version.UTF8String,oldVersion.UTF8String),"The update is not newer than the installed app.");
     GPValidateUpdateApp(staged,version,architecture,destination);
     NSDictionary *process=job[@"process"];
     Require([process isKindOfClass:NSDictionary.class] && [process[@"pid"] isKindOfClass:NSNumber.class],"The running GamePack process changed. Check for updates again.");
     pid_t pid=[process[@"pid"] intValue];
     Require([process[@"path"] isEqual:Join(destination,@"Contents/MacOS/GamePack")] && GPUpdateProcessMatches(pid,process),"The running GamePack process changed. Check for updates again.");
-    for(NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:@"app.gamepack.desktop"])
-      Require(app.processIdentifier==pid || ![Canonical(app.bundleURL.path) isEqual:destination],"Another GamePack window is still open. Close it and try again.");
+    RequireNoOtherInstances(destination,pid);
     Require(![NSFileManager.defaultManager fileExistsAtPath:backup],"A previous update is still pending. Restart GamePack and try again.");
     NSDictionary *helper=GPUpdateProcessIdentity(getpid());
     GPWriteUpdatePlist(@{@"ready":@YES,@"process":helper},Join(directory,@"helper-ready.plist"));
@@ -277,8 +293,7 @@ int GPRunUpdateInstallJob(NSString *jobPath) {
     while(GPUpdateProcessMatches(pid,process) && NSDate.timeIntervalSinceReferenceDate<deadline) usleep(100000);
     Require(!GPUpdateProcessMatches(pid,process),"GamePack did not quit. Close it, then try the update again.");
     // Refuse replacement if a second instance opened this installation meanwhile.
-    for(NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:@"app.gamepack.desktop"])
-      Require(![Canonical(app.bundleURL.path) isEqual:destination],"Another GamePack window is still open. Close it and try again.");
+    RequireNoOtherInstances(destination,0);
     GPRequireManagedInstallation(root,destination);
     oldVersion=[NSDictionary dictionaryWithContentsOfFile:Join(destination,@"Contents/Info.plist")][@"CFBundleShortVersionString"];
     Require([oldVersion isKindOfClass:NSString.class] && gamepack::updates::newerStableVersion(version.UTF8String,oldVersion.UTF8String),"The installed app changed while this update was prepared. Check for updates again.");

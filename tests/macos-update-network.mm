@@ -42,6 +42,8 @@ int main() { @autoreleasepool {
   [download URLSession:nil dataTask:nil didReceiveData:[@"oversized" dataUsingEncoding:NSUTF8StringEncoding]];
   assert(download.failure.code==2); checks++;
   NSString *name=@"GamePack-macos-arm64.tar.gz";
+  assert(ReleaseDigest([@"sha256:" stringByAppendingString:[@"a" stringByPaddingToLength:64 withString:@"a" startingAtIndex:0]])!=nil); checks++;
+  for(id digest in @[[NSNull null],@"",@"sha256:invalid",@"md5:abc",@"sha256:0000"]) { assert(ReleaseDigest(digest)==nil); checks++; }
   NSDictionary *asset=@{@"name":name,@"state":@"uploaded",@"size":@10};
   assert([Asset(@{@"assets":@[asset]},name) isEqual:asset]); checks++;
   for(id assets in @[[NSNull null],@[],@[asset,asset],@[@{@"name":name,@"state":@"new",@"size":@10}],@[@{@"name":name,@"state":@"uploaded",@"size":@-1}],@[@{@"name":name,@"state":@"uploaded",@"size":@"10"}]]) {

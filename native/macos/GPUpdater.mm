@@ -22,6 +22,7 @@ static bool ActiveProcess(id value) {
 @property(nonatomic) uint64_t received;
 @property(nonatomic) NSUInteger redirects;
 @property(nonatomic) BOOL metadata;
+@property(atomic) BOOL stopped;
 @property(nonatomic,copy) void (^progress)(double);
 @end
 @implementation GPUpdateDownload
@@ -39,6 +40,7 @@ static bool ActiveProcess(id value) {
   } completion(NSURLSessionResponseAllow);
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
+  if(self.stopped) return;
   self.received+=data.length;
   if(self.received>self.limit) { self.failure=[NSError errorWithDomain:@"GamePackUpdate" code:2 userInfo:@{NSLocalizedDescriptionKey:@"The update download is larger than expected. Try again."}]; [task cancel]; return; }
   NSError *error=nil; if(![self.file writeData:data error:&error]) { self.failure=error; [task cancel]; return; }
@@ -61,7 +63,7 @@ static void Download(NSString *url,NSString *destination,uint64_t maximum,BOOL m
   NSURLSessionDataTask *task=[session dataTaskWithRequest:request]; [task resume];
   bool timedOut=dispatch_semaphore_wait(delegate.complete,dispatch_time(DISPATCH_TIME_NOW,905*NSEC_PER_SEC))!=0;
   if(timedOut) { [task cancel]; dispatch_semaphore_wait(delegate.complete,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)); }
-  [session invalidateAndCancel];
+  delegate.stopped=YES; [session invalidateAndCancel];
   // Delegate I/O is serial. Close behind pending writes, including cancellation.
   [queue addOperationWithBlock:^{ [delegate.file closeFile]; }];
   [queue waitUntilAllOperationsAreFinished];
@@ -75,6 +77,11 @@ static NSDictionary *Asset(NSDictionary *release,NSString *name) {
   NSArray *assets=release[@"assets"]; Check([assets isKindOfClass:NSArray.class] && assets.count<=1000,"GitHub returned invalid update information."); NSDictionary *found=nil;
   for(id value in assets) if([value isKindOfClass:NSDictionary.class] && [value[@"name"] isEqual:name]) { Check(!found,"GitHub returned duplicate update assets."); found=value; }
   Check(found && [found[@"state"] isEqual:@"uploaded"] && [found[@"size"] isKindOfClass:NSNumber.class] && [found[@"size"] longLongValue]>0,"A complete update download is not available for this Mac yet."); return found;
+}
+static NSString *ReleaseDigest(id value) {
+  if(![value isKindOfClass:NSString.class] || ![value hasPrefix:@"sha256:"]) return nil;
+  NSString *digest=[value substringFromIndex:7];
+  return digest.length==64 && [digest rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet]].location==NSNotFound?digest:nil;
 }
 static NSString *DownloadURL(NSString *tag) {
   auto url=gamepack::updates::releaseUrl(tag.UTF8String?:"","macos",GPUpdateArchitecture().UTF8String,true);
@@ -121,9 +128,8 @@ static NSString *DownloadURL(NSString *tag) {
       Check([release isKindOfClass:NSDictionary.class] && [release[@"tag_name"] isEqual:tag] && [release[@"draft"] isEqual:@NO] && [release[@"prerelease"] isEqual:@NO] && [release[@"published_at"] isKindOfClass:NSString.class] && [release[@"published_at"] length]>0,"This update is not a published stable release. Check for updates again.");
       NSString *name=[NSString stringWithFormat:@"GamePack-macos-%@.tar.gz",GPUpdateArchitecture()]; NSDictionary *asset=Asset(release,name);
       uint64_t size=[asset[@"size"] unsignedLongLongValue]; Check(size<=512ULL*1024*1024,"The update package is too large.");
-      NSString *url=DownloadURL(tag),*checksum=nil; id digest=asset[@"digest"];
-      if([digest isKindOfClass:NSString.class] && [digest hasPrefix:@"sha256:"]) checksum=[digest substringFromIndex:7];
-      else {
+      NSString *url=DownloadURL(tag),*checksum=ReleaseDigest(asset[@"digest"]);
+      if(!checksum) {
         NSDictionary *sidecar=Asset(release,[name stringByAppendingString:@".sha256"]); Check([sidecar[@"size"] unsignedLongLongValue]<=4096,"The release checksum is invalid.");
         NSString *file=Path(directory,@"checksum.txt"); Download([url stringByAppendingString:@".sha256"],file,4096,NO,nil);
         NSString *text=[NSString stringWithContentsOfFile:file encoding:NSUTF8StringEncoding error:nil];
@@ -141,7 +147,10 @@ static NSString *DownloadURL(NSString *tag) {
       NSString *app=Path(directory,@"payload/GamePack.app"); GPValidateUpdateApp(app,version,GPUpdateArchitecture(),NSBundle.mainBundle.bundlePath); GPQuarantineUpdate(app,url);
       GPWriteUpdatePlist(@{@"version":version,@"tag":tag,@"sha256":checksum},Path(directory,@"prepared.plist"));
       GPWriteUpdatePlist(@{@"status":@"ready",@"version":version,@"directory":directory},statePath);
-    } catch(std::exception const& error) { try { GPWriteUpdatePlist(@{@"status":@"error",@"error":[NSString stringWithUTF8String:error.what()]},statePath); } catch(...) {} }
+    } catch(std::exception const& error) {
+      [NSFileManager.defaultManager removeItemAtPath:directory error:nil];
+      try { GPWriteUpdatePlist(@{@"status":@"error",@"error":[NSString stringWithUTF8String:error.what()]},statePath); } catch(...) {}
+    }
     close(lockFD); [self->_lock lock]; self->_working=NO; [self->_lock unlock];
   }});
 }
@@ -161,6 +170,10 @@ static NSString *DownloadURL(NSString *tag) {
   try {
     auto deadline=NSDate.timeIntervalSinceReferenceDate+30;
     while(task.running && ![NSFileManager.defaultManager fileExistsAtPath:Path(directory,@"helper-ready.plist")] && NSDate.timeIntervalSinceReferenceDate<deadline) usleep(50000);
+    if(!task.running) {
+      NSDictionary *failure=GPReadUpdatePlist(_statePath);
+      if([failure[@"status"] isEqual:@"error"] && [failure[@"error"] isKindOfClass:NSString.class]) throw std::runtime_error([failure[@"error"] UTF8String]);
+    }
     NSDictionary *helperIdentity=GPUpdateProcessIdentity(task.processIdentifier);
     NSDictionary *ready=GPReadUpdatePlist(Path(directory,@"helper-ready.plist"));
     Check([ready[@"process"] isEqual:helperIdentity],"The update installer could not prepare the restart. Check for updates and try again.");

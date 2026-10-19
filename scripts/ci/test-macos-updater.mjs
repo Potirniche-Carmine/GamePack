@@ -144,6 +144,11 @@ try {
   saveJob({...job, destination: candidate}); check(['install-job', jobPath], false);
   saveJob({...job, version: '1.0.0'}); check(['install-job', jobPath], false);
   saveJob(job);
+  const other = spawn(path.join(current, 'Contents/MacOS/GamePack'), [], {stdio: 'ignore'});
+  try {
+    await delay(100); check(['install-job', jobPath], false);
+    assert.match(readPlist(path.join(root, 'updates/state.plist')).error, /Another GamePack window/);
+  } finally { const stopped = new Promise(resolve => other.once('exit', resolve)); other.kill(); await stopped; }
   const helper = spawn(harness, ['install-job', jobPath], {stdio: 'ignore'});
   const done = new Promise(resolve => helper.once('exit', resolve));
   for (let n = 0; n < 100 && !fs.existsSync(path.join(jobDirectory, 'helper-ready.plist')); n++) await delay(50);
