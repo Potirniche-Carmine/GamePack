@@ -57,7 +57,7 @@ export function timelineMotion(previous: TimelineSample | null, current: Timelin
   if (discontinuity || (paused && reviewEnd >= 0 && Math.abs(time - reviewEnd) <= 2000)) return {kind: 'snap' as const, time};
   // The pause request still carries the previous periodic sample. Freeze the
   // presentation until native reports the stopped frame, instead of rewinding.
-  if (paused && time === previous.time) return {kind: 'hold' as const, time};
+  if (paused && time === previous.time) return {kind: previous.paused ? 'snap' as const : 'hold' as const, time};
   return {kind: 'animate' as const, ...(paused ? {time, duration: 100} : timelinePrediction(current))};
 }
 

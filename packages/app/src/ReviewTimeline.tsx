@@ -23,7 +23,8 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
   onSelect: (comment: Comment) => void; onCluster?: (comments: Comment[]) => void; onSeek: (time: number) => void;
 }) {
   const {colors} = useTheme();
-  const {width, setWidth, position, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, reviewEnd, disabled, onSeek});
+  const {width, setWidth, position, scrubbing, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, reviewEnd, disabled, onSeek});
+  const playheadX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [0, Math.max(0, width - 24)]}), [position, width]);
   const [focused, setFocused] = useState<string | null>(null);
   const thumbnails = useVideoThumbnails(video);
   const aspectRatio = video && video.width > 0 && video.height > 0 ? video.width / video.height : 16 / 9;
@@ -93,7 +94,9 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
           </Pressable>
         </React.Fragment>;
       })}
-      <Animated.View pointerEvents="none" style={[styles.playhead, {left: 12, backgroundColor: colors.text, transform: [{translateX: position.interpolate({inputRange: [0, 1], outputRange: [0, Math.max(0, width - 24)]})}]}]} />
+      {paused && !scrubbing
+        ? <View key="resting-playhead" pointerEvents="none" style={[styles.playhead, {left: timelinePosition(time, duration, width), backgroundColor: colors.text}]} />
+        : <Animated.View key="moving-playhead" pointerEvents="none" style={[styles.playhead, {left: 12, backgroundColor: colors.text, transform: [{translateX: playheadX}]}]} />}
     </View>
     <View style={styles.labels}>{Array.from({length: width < 580 ? 4 : 7}, (_, i) => <Text key={i} style={[styles.label, {color: colors.text}]}>{timeLabel(duration * i / (width < 580 ? 3 : 6))}</Text>)}</View>
   </View>;

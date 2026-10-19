@@ -9,21 +9,25 @@ import {MotionPressable} from './motion';
 import {TooltipContext} from './Tooltips';
 
 export const ShortcutContext = createContext<Keybindings>({});
+// Short native flushes block interaction without flashing disabled colors.
+export const PendingInteractionContext = createContext(false);
 
 export function Button({children, onPress, disabled, active, primary, compact, label, style, icon, danger, expanded, shortcut, quiet, autoFocus, toolbar}: {
   children?: ReactNode; icon?: IconName; danger?: boolean; expanded?: boolean; onPress?: () => void; disabled?: boolean; active?: boolean;
   primary?: boolean; compact?: boolean; label?: string; style?: StyleProp<ViewStyle>; shortcut?: string; quiet?: boolean; autoFocus?: boolean; toolbar?: boolean;
 }) {
   const {styles: s, colors} = useTheme();
+  const pending = useContext(PendingInteractionContext);
+  const blocked = disabled || pending;
   const target = useRef<View>(null);
   useEffect(() => { if (autoFocus && !disabled) { const frame = requestAnimationFrame(() => target.current?.focus()); return () => cancelAnimationFrame(frame); } }, [autoFocus, disabled]);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const hasTooltip = !!(toolbar || shortcut);
-  const hint = useShortcutHint(target, shortcut, label ?? (typeof children === 'string' ? children : ''), hovered, focused, !disabled && hasTooltip);
-  const button = <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint.keyLabel || undefined} accessibilityState={{disabled: !!disabled, selected: !!active, expanded}}
+  const hint = useShortcutHint(target, shortcut, label ?? (typeof children === 'string' ? children : ''), hovered, focused, !blocked && hasTooltip);
+  const button = <MotionPressable ref={target} focusable={!disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint.keyLabel || undefined} accessibilityState={{disabled: !!blocked, selected: !!active, expanded}}
     onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-    disabled={disabled} onPress={() => { hint.dismiss(); if (toolbar) target.current?.focus(); onPress?.(); }} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
+    disabled={blocked} onPress={() => { hint.dismiss(); if (toolbar) target.current?.focus(); onPress?.(); }} style={({pressed}) => [s.button, compact && s.buttonCompact, quiet && s.buttonQuiet,
       hovered && !disabled && s.buttonHover, primary && s.buttonPrimary, active && s.buttonActive, danger && s.buttonDanger, pressed && !disabled && !primary && {backgroundColor: colors.inset},
       disabled && s.buttonDisabled, toolbar && {width: 36, height: 36, padding: 0, borderRadius: 18, borderColor: 'transparent'}, style, focused && s.focusRing]}>
     {!!icon && <Icon name={icon} color={disabled ? colors.faint : danger ? colors.danger : primary ? colors.primaryText : active ? colors.accentText : colors.text} />}

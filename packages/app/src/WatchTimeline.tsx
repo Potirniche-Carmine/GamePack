@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useMemo} from 'react';
 import {Animated, StyleSheet, View} from 'react-native';
 import {timeLabel} from './components';
 import {useTheme} from './theme';
@@ -14,6 +14,9 @@ export function WatchTimeline({time, duration, paused, rate, seekToken, disabled
   const {width, setWidth, focused, setFocused, hovered, setHovered, scrubbing, position, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, disabled, onSeek});
   const emphasized = focused || hovered || scrubbing;
   const travel = Math.max(0, width - 24);
+  const fillX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [-travel, 0]}), [position, travel]);
+  const thumbX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [0, travel]}), [position, travel]);
+  const restingX = Math.max(0, Math.min(1, time / Math.max(1, duration))) * travel;
   return <View ref={slider} {...{enableFocusRing: false, onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false)}}
     focusable={canSeek} accessible accessibilityRole="adjustable" accessibilityLabel="Video timeline" accessibilityState={{disabled: !canSeek}}
     accessibilityValue={{min: 0, max: Math.round(duration / 1000000), now: Math.round(time / 1000000), text: timeLabel(time)}}
@@ -25,11 +28,13 @@ export function WatchTimeline({time, duration, paused, rate, seekToken, disabled
     onResponderGrant={start} onResponderMove={move} onResponderTerminationRequest={() => false}
     onResponderRelease={finish} onResponderTerminate={cancel}>
     <View pointerEvents="none" style={[styles.track, {height: emphasized ? 6 : 4, backgroundColor: dark ? '#ffffff30' : '#17233030', borderColor: focused ? colors.selectedLine : 'transparent', borderWidth: focused ? 1 : 0}]}>
-      <Animated.View style={[styles.fill, {width: travel, backgroundColor: colors.text,
-        transform: [{translateX: position.interpolate({inputRange: [0, 1], outputRange: [-travel, 0]})}]}]} />
+      {paused && !scrubbing ? <View key="resting-fill" style={[styles.fill, {width: restingX, backgroundColor: colors.text}]} />
+        : <Animated.View key="moving-fill" style={[styles.fill, {width: travel, backgroundColor: colors.text, transform: [{translateX: fillX}]}]} />}
     </View>
-    <Animated.View pointerEvents="none" style={[styles.thumb, {backgroundColor: colors.text, opacity: emphasized ? 1 : .95,
-      transform: [{translateX: position.interpolate({inputRange: [0, 1], outputRange: [0, travel]})}, {scale: emphasized ? 1.2 : 1}]}]} />
+    {paused && !scrubbing ? <View key="resting-thumb" pointerEvents="none" style={[styles.thumb, {left: 7 + restingX, backgroundColor: colors.text, opacity: emphasized ? 1 : .95,
+      transform: [{scale: emphasized ? 1.2 : 1}]}]} />
+      : <Animated.View key="moving-thumb" pointerEvents="none" style={[styles.thumb, {backgroundColor: colors.text, opacity: emphasized ? 1 : .95,
+        transform: [{translateX: thumbX}, {scale: emphasized ? 1.2 : 1}]}]} />}
   </View>;
 }
 

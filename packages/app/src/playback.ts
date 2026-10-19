@@ -1,6 +1,8 @@
 import type {Anchor, Comment} from './types';
 import {conversationRoot} from './discussion';
 
+export const PLAYBACK_SPEEDS = [.25, .5, .75, 1, 2, 4] as const;
+
 export const compareComments = (a: Comment, b: Comment) => a.anchor.at_us - b.anchor.at_us
   || (a.created_at_reported || 0) - (b.created_at_reported || 0) || a.comment_id.localeCompare(b.comment_id);
 

@@ -20,7 +20,7 @@ export function createStyles(c: Colors) { return StyleSheet.create({
   title: {color: c.text, fontSize: 13, fontWeight: '500', letterSpacing: -0.1},
   transport: {paddingHorizontal: 10, paddingTop: 2, paddingBottom: 6},
   time: {color: c.text, fontSize: 12, fontVariant: ['tabular-nums'], marginHorizontal: 5},
-  statusRow: {minHeight: 29, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 12},
+  statusRow: {position: 'absolute', bottom: 12, right: 20, flexDirection: 'row', alignItems: 'center'},
   status: {color: c.muted, fontSize: 11, flex: 1},
   replyAuthor: {fontSize: 12, lineHeight: 18, fontWeight: '600', color: c.muted},
   draft: {padding: 16, borderTopWidth: 1, borderTopColor: c.separator, backgroundColor: c.panel},
