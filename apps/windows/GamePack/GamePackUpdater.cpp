@@ -82,8 +82,9 @@ JsonObject State() {
     if (!WorkerAlive(state)) {
       // Read once more: a finishing worker may have atomically committed its terminal state.
       state = Read(Cache()/L"state.json"); status = Text(state,L"status");
-      if (status == "downloading" || status == "verifying" || status == "installing") {
-        Put(state,L"status","error"); Put(state,L"error","The update was interrupted. Download it again."); Write(Cache()/L"state.json",state);
+      if ((status == "downloading" || status == "verifying" || status == "installing") && !WorkerAlive(state)) {
+        // Derive interrupted state without writing: another app instance may begin a new transaction.
+        Put(state,L"status","error"); Put(state,L"error","The update was interrupted. Download it again.");
       }
     }
   }
