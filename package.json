@@ -10,7 +10,12 @@
     "test:rust": "cargo test --workspace",
     "build:macos": "bash scripts/build-macos.sh",
     "install:macos": "bash scripts/install-macos.sh",
-    "check:version": "node scripts/ci/check-version.mjs"
+    "check:version": "node scripts/ci/check-version.mjs",
+    "version:prepare": "node scripts/release/prepare-version.mjs",
+    "test:release": "node --test tests/release/*.test.mjs",
+    "build": "node scripts/desktop.mjs build",
+    "app:install": "node scripts/desktop.mjs install",
+    "package": "node scripts/desktop.mjs package"
   },
   "dependencies": {
     "lucide-react-native": "^1.55.0",

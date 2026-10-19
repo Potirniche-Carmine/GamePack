@@ -25,6 +25,7 @@ function Run([string]$Exe, [string[]]$Arguments) {
 New-Item -ItemType Directory -Path (Join-Path $root 'artifacts\windows') -Force | Out-Null
 Push-Location $root
 try {
+    Run 'node.exe' @('scripts/ci/check-version.mjs')
     if (-not $SkipNpmInstall) { Run 'npm.cmd' @('ci', '--no-audit', '--no-fund') }
     Run 'rustup.exe' @('target', 'add', $rustTarget)
     # The offline notice collector needs all target dependency metadata even

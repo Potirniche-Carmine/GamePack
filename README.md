@@ -2,8 +2,6 @@
 
 An offline desktop app for reviewing video. Organize footage into projects, draw on a frame, and leave comments and replies. Review mode pauses at commented frames. Everything stays on your computer.
 
-Version **1.0.0** is being prepared for macOS and Windows.
-
 ![GamePack showing frame annotations, a comment and reply, and the review timeline](docs/assets/review.png)
 
 ## Built with
@@ -21,7 +19,7 @@ git clone https://github.com/Potirniche-Carmine/GamePack.git
 cd GamePack
 git switch main
 bash scripts/bootstrap-macos.sh
-bash scripts/install-macos.sh
+npm run app:install
 ```
 
 [Windows setup, tests, and codebase guide →](docs/development.md)
