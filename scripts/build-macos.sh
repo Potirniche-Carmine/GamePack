@@ -6,6 +6,7 @@ macos_sdk="$(xcrun --sdk macosx --show-sdk-version)"
 [[ "${macos_sdk%%.*}" -ge 26 ]] || { echo 'Building GamePack requires Xcode 26 or newer (macOS 26 SDK).' >&2; exit 1; }
 gamepack_has_supported_node || { echo 'Run bash scripts/bootstrap-macos.sh to install a supported Node version.' >&2; exit 1; }
 command -v cargo >/dev/null 2>&1 || source "$HOME/.cargo/env"
+node scripts/ci/check-version.mjs
 [[ -d node_modules ]] || npm ci
 [[ -d macos/Pods ]] || bundle exec pod install --project-directory=macos
 # The offline notice collector resolves the complete target dependency graph,

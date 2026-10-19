@@ -30,7 +30,7 @@
     <Manifest><AdditionalManifestFiles>Application.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="AutolinkedNativeModules.g.cpp"/><ClCompile Include="Main.cpp"/><ClCompile Include="GamePackModule.cpp"/><ClCompile Include="GamePackPlayer.cpp"/></ItemGroup>
-  <ItemGroup><ClInclude Include="pch.h"/><ClInclude Include="GamePackModule.h"/><ClInclude Include="GamePackPlayer.h"/></ItemGroup>
+  <ItemGroup><ClInclude Include="pch.h"/><ClInclude Include="GamePackModule.h"/><ClInclude Include="GamePackVersion.h"/><ClInclude Include="GamePackPlayer.h"/></ItemGroup>
   <ItemGroup><Content Include="Bundle\**\*"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><DeploymentContent>true</DeploymentContent></Content></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
   <Import Project="$(ReactNativeWindowsDir)PropertySheets\External\Microsoft.ReactNative.Uwp.CppApp.targets"/>
