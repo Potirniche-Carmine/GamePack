@@ -276,6 +276,7 @@ export default function App() {
   };
   const restoreDraftNow = (pending: Draft) => {
     if (pending.anchor.kind === 'play' && captureRate.current === null) captureRate.current = rate;
+    if (pending.anchor.kind === 'point' && captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
     setAnnotationMode(pending.anchor.kind);
     activeDraftRef.current = pending.id; setDraftId(pending.id); setCommentId(null);
     setComposerOpen(true); setLibraryVisible(false);
@@ -322,6 +323,7 @@ export default function App() {
         anchor: parent?.anchor ?? (timing === 'play' ? {kind: 'play', at_us: Math.min(time, duration || time), end_us: Math.min(time, duration || time)} : {kind: 'point', at_us: Math.min(time, duration || time)}),
         parent_comment_id: parent?.comment_id ?? null, drawings: [], position: parent?.position};
       if (value.anchor.kind === 'play' && captureRate.current === null) captureRate.current = rate;
+      if (value.anchor.kind === 'point' && captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
       setAnnotationMode(value.anchor.kind);
       replaceDraft(value); activeDraftRef.current = value.id; setDraftId(value.id); setCommentId(null);
       setTool('pointer'); setRedo([]);
@@ -359,7 +361,7 @@ export default function App() {
     if (draft?.anchor.kind === 'play') {
       commentInput.current?.blur(); setComposerOpen(false); setReviewStop(null);
       if (rate < 0) setRate(Math.abs(rate));
-      if (draft.parent_comment_id && time >= draft.anchor.end_us) seek(draft.anchor.at_us);
+      if (time >= (draft.parent_comment_id ? draft.anchor.end_us : duration)) seek(draft.anchor.at_us);
       setPaused(false); return;
     }
     leaveDraft(() => startPlayback());
