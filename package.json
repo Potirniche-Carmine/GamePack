@@ -15,7 +15,8 @@
     "test:release": "node --test tests/release/*.test.mjs",
     "build": "node scripts/desktop.mjs build",
     "app:install": "node scripts/desktop.mjs install",
-    "package": "node scripts/desktop.mjs package"
+    "package": "node scripts/desktop.mjs package",
+    "release:prepare": "node scripts/release/prepare-release.mjs"
   },
   "dependencies": {
     "lucide-react-native": "^1.55.0",
