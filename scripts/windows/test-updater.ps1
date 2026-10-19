@@ -43,11 +43,30 @@ function New-Zip([string]$Path, [string[]]$Names, [switch]$Link) {
     $stream = [IO.File]::Create($Path); $zip = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create)
     try {
         foreach ($name in $Names) {
-            $entry = $zip.CreateEntry($name)
+            # .NET Framework rejects some hostile names at creation time. Patch
+            # equal-length names into the ZIP headers after the archive is closed.
+            $entry = $zip.CreateEntry(('x' * [Text.Encoding]::UTF8.GetByteCount($name)))
             if ($Link) { $entry.ExternalAttributes = -1577058304 } # Unix S_IFLNK | 0777.
             $writer = [IO.StreamWriter]::new($entry.Open()); try { $writer.Write('fixture') } finally { $writer.Dispose() }
         }
     } finally { $zip.Dispose(); $stream.Dispose() }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    # Fixture archives have no ZIP comment or ZIP64 records. The central directory
+    # gives the matching local header offset, avoiding filename pattern searches.
+    $central = [int][BitConverter]::ToUInt32($bytes, $bytes.Length - 6)
+    foreach ($name in $Names) {
+        if ([BitConverter]::ToUInt32($bytes, $central) -ne 0x02014b50) { throw 'Invalid ZIP fixture central directory.' }
+        $nameLength = [BitConverter]::ToUInt16($bytes, $central + 28)
+        $extraLength = [BitConverter]::ToUInt16($bytes, $central + 30)
+        $commentLength = [BitConverter]::ToUInt16($bytes, $central + 32)
+        $local = [int][BitConverter]::ToUInt32($bytes, $central + 42)
+        $replacement = [Text.Encoding]::UTF8.GetBytes($name)
+        if ($replacement.Length -ne $nameLength -or [BitConverter]::ToUInt16($bytes, $local + 26) -ne $nameLength) { throw 'ZIP fixture name lengths differ.' }
+        [Array]::Copy($replacement, 0, $bytes, $central + 46, $nameLength)
+        [Array]::Copy($replacement, 0, $bytes, $local + 30, $nameLength)
+        $central += 46 + $nameLength + $extraLength + $commentLength
+    }
+    [IO.File]::WriteAllBytes($Path, $bytes)
 }
 try {
     Assert ((Assert-NewerVersion 'v1.0.1+build.2' '1.0.0').ToString() -eq '1.0.1.0') 'Stable version metadata was not normalized.'
