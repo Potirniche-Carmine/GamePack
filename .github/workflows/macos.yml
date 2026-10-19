@@ -118,6 +118,8 @@ jobs:
           codesign --verify --deep --strict dist/GamePack.app
       - name: Package the app and installer
         run: bash scripts/package-macos.sh
+      - name: Verify packaged installation and replacement
+        run: bash scripts/ci/verify-macos-install.sh "dist/packages/GamePack-macos-$GAMEPACK_PACKAGE_ARCH.tar.gz" "$RUNNER_TEMP/gamepack-install-verification"
       - name: Upload macOS desktop package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

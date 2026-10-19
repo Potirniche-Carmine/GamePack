@@ -13,19 +13,20 @@ git clone https://github.com/Potirniche-Carmine/GamePack.git
 cd GamePack
 git switch main
 bash scripts/bootstrap-macos.sh
-bash scripts/install-macos.sh
+npm run app:install
 ```
 
-The installer builds `dist/GamePack.app` if it does not already exist, copies it to `~/.gamepack/app/GamePack.app`, creates `~/.gamepack/Launch GamePack.command`, and opens the app. The build targets the current Mac's architecture: Apple silicon or Intel.
+The command builds the current checkout, installs `~/.gamepack/app/GamePack.app`, creates `~/.gamepack/Launch GamePack.command`, and opens the app. It targets the current Mac's architecture: Apple silicon or Intel.
 
 ### Rebuild after a change
 
-The installer reuses an existing `dist/GamePack.app`. Build explicitly before reinstalling an updated checkout:
+Quit GamePack, then build and install the current checkout:
 
 ```sh
-bash scripts/build-macos.sh
-bash scripts/install-macos.sh
+npm run app:install
 ```
+
+For a build without installation or launch, use `npm run build`. To install an already built app, use `bash scripts/install-macos.sh --no-build`. Add `--no-launch` when verifying an installation without opening the app.
 
 The build embeds production JavaScript and the Rust engine. The installed app does not need Node, Cargo, CocoaPods, Metro, or an open terminal. Source builds are ad-hoc signed and are not notarized.
 
@@ -46,11 +47,20 @@ The script needs `winget` from Microsoft's App Installer. It installs Node LTS, 
 Open a new PowerShell terminal so the installed tools are on `PATH`, return to the repository root, and build and install:
 
 ```powershell
-.\scripts\windows\build.ps1 -Architecture x64
-.\scripts\windows\install.ps1 -Architecture x64 -Launch
+npm run app:install
 ```
 
-On Windows ARM64, use `-Architecture arm64` in both commands. The installer copies the native package under the library root, registers it with Windows, and launches it when `-Launch` is supplied. Repeat the build and install commands after source changes.
+The command selects the host architecture, builds the current checkout, registers the package under the library root, and launches it. Repeat it after source changes. Use `npm run build` for a build without installation or launch. To cross-build, pass `-- --arch arm64` or `-- --arch x64`; the lower-level PowerShell scripts still accept `-Architecture` for explicit control.
+
+## Create a package
+
+On either supported OS, run:
+
+```sh
+npm run package
+```
+
+This builds the current checkout and packages its native app with installation instructions and a SHA-256 checksum. macOS writes to `dist/packages`; Windows writes to `artifacts/windows/release`. Windows accepts `-- --arch arm64` or `-- --arch x64`. CI produces all four platform/architecture packages from `main`; see [CI and releases](ci.md).
 
 ## Choose a library location
 
@@ -59,7 +69,7 @@ Use an absolute path for `GAMEPACK_HOME`. By default, GamePack uses `~/.gamepack
 On macOS:
 
 ```sh
-GAMEPACK_HOME="$HOME/GamePack" bash scripts/install-macos.sh
+GAMEPACK_HOME="$HOME/GamePack" npm run app:install
 ```
 
 Use the generated `Launch GamePack.command` in that folder for later launches so the same root is passed to the app.
@@ -68,7 +78,7 @@ On Windows, set the environment variable before installing:
 
 ```powershell
 $env:GAMEPACK_HOME = Join-Path $env:USERPROFILE 'GamePack'
-.\scripts\windows\install.ps1 -Architecture x64 -Launch
+npm run app:install
 ```
 
 The Windows installer records the root alongside the installed executable. App-owned SQLite data, profile, settings, managed media, drafts, cache, and temporary files stay under the configured root. OS frameworks may also maintain their usual system caches and preferences.
@@ -82,6 +92,7 @@ Install dependencies, then run the shared interface and engine checks:
 ```sh
 npm ci
 npm run check:version
+npm run test:release
 npm run typecheck
 npm run test:ui
 cargo fmt --all --check
