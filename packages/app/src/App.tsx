@@ -2,7 +2,7 @@ import {Glass, GlassSurface, LibraryBackdrop} from './Glass';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View, StyleSheet, useWindowDimensions} from 'react-native';
 import {anchorStart, Button, Dialog, Empty, ShortcutContext, TextField} from './components';
-import {chooseVideo, command, configureDrawingHistory, configureShortcuts, dataDirectory, GamePackPlayer, listenShortcuts, listenWindowState, setAppearance, setFullScreen} from './native';
+import {chooseVideo, command, configureDrawingHistory, configureShortcuts, dataDirectory, GamePackPlayer, installUpdate, listenShortcuts, listenWindowState, setAppearance, setFullScreen} from './native';
 import {expandedAncestors, mergeDrawings} from './review';
 import {annotationScene, annotationSceneKey, sameFrame} from './playback';
 import {Icon} from './Icon';
@@ -12,6 +12,7 @@ import {PointerPulse} from './PointerPulse';
 import {requestZoom, receiveZoom} from './zoom';
 import {adjacentNote, conversationTarget, nextReviewStop, notesAtTime, type ReviewStop} from './presentation';
 import {SettingsPage} from './SettingsPage';
+import {createSettingsWrites, restartAfterSaving, saveEveryDraft} from './updatePersistence';
 import {Avatar} from './Avatar';
 import {MotionPressable} from './motion';
 import {CommentComposer} from './CommentComposer';
@@ -30,7 +31,7 @@ const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, value
   return (value === 'x' ? random : (random & 3) | 8).toString(16);
 });
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-type StrokeFlushRequest = {token: number; draftId: string; purpose: 'save' | 'leave' | 'undo' | 'redo'; after?: () => void | Promise<void>};
+type StrokeFlushRequest = {token: number; draftId: string; purpose: 'save' | 'leave' | 'undo' | 'redo' | 'restart'; after?: () => void | Promise<void>; completion?: {resolve: () => void; reject: (cause: unknown) => void}};
 
 export default function App() {
   const {width, height} = useWindowDimensions();
@@ -110,6 +111,8 @@ export default function App() {
   const activeDraftRef = useRef<string | null>(null);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  const settingsWrites = useRef(createSettingsWrites());
+  const restartPending = useRef(false);
   const flushRequest = useRef<StrokeFlushRequest | null>(null);
   const savingDraftId = useRef<string | null>(null);
   const pendingPublish = useRef<string | null>(null);
@@ -494,19 +497,22 @@ export default function App() {
 
     } finally { setBusy(''); savingDraftId.current = null; }
   };
-  const requestStrokeFlush = (purpose: StrokeFlushRequest['purpose'], after?: StrokeFlushRequest['after']) => {
-    if (!draft || busy || flushRequest.current) return;
+  const requestStrokeFlush = (purpose: StrokeFlushRequest['purpose'], after?: StrokeFlushRequest['after'], completion?: StrokeFlushRequest['completion']) => {
+    const current = draftsRef.current.find(item => item.id === activeDraftRef.current);
+    if (!current || (busy && purpose !== 'restart') || flushRequest.current) return false;
     const token = ++flushSequence.current;
-    flushRequest.current = {token, draftId: draft.id, purpose, after};
-    savingDraftId.current = draft.id;
+    flushRequest.current = {token, draftId: current.id, purpose, after, completion};
+    savingDraftId.current = current.id;
     setBusy('Saving…'); setError('');
     // The native acknowledgment pauses and finishes a held stroke atomically.
     setFlushToken(token);
     flushTimer.current = setTimeout(() => {
       if (flushRequest.current?.token !== token) return;
       flushRequest.current = null; savingDraftId.current = null; setPaused(true); setBusy('');
-      setError('The player did not finish the drawing. Retry Post.');
+      const cause = new Error('The player did not finish the drawing. Try again.');
+      setError(cause.message); completion?.reject(cause);
     }, 10000);
+    return true;
   };
   const onStrokeFlushFinished = async (event: StrokeFlushFinished) => {
     const request = flushRequest.current;
@@ -519,7 +525,7 @@ export default function App() {
       const next = extendPlayDraft(current, event.time_us, event.drawingJson ? mergeDrawings(current.drawings, [parseDrawing(event.drawingJson)]) : current.drawings);
       replaceDraft(next); setTime(event.time_us); setPaused(true);
       setDrawingActive(false); setAcknowledgedFlushToken(event.flushToken);
-      if (request.purpose === 'save' || request.purpose === 'leave') setTool('pointer');
+      if (request.purpose === 'save' || request.purpose === 'leave' || request.purpose === 'restart') setTool('pointer');
       flushRequest.current = null;
       if (request.purpose === 'undo' || request.purpose === 'redo') {
         if (request.purpose === 'undo' && next.drawings.length) {
@@ -532,12 +538,14 @@ export default function App() {
         setBusy(''); savingDraftId.current = null; return;
       }
       await flushLatest(next.id);
+      if (request.purpose === 'restart') { savingDraftId.current = null; request.completion?.resolve(); return; }
       if (request.purpose === 'leave') { setBusy(''); savingDraftId.current = null; await request.after?.(); return; }
       setBusy(''); savingDraftId.current = null;
       if (!data?.profile.name.trim()) { pendingPublish.current = next.id; setProfileName(''); setProfileOpen(true); }
       else await publishDraft(next.id);
     } catch (cause) {
       flushRequest.current = null; savingDraftId.current = null; setPaused(true); setBusy(''); setError(message(cause));
+      request.completion?.reject(cause);
     }
   };
   const discard = async () => {
@@ -572,8 +580,10 @@ export default function App() {
     if (busy || choice === themeChoice) return;
     const previous = themeChoice; setThemeChoice(choice); setBusy('Saving…');
     try {
-      const settings = await command<Settings>(root, 'set_theme', {theme: choice});
-      setData(current => current ? {...current, settings} : current);
+      await settingsWrites.current.run('appearance', async () => {
+        const settings = await command<Settings>(root, 'set_theme', {theme: choice});
+        setData(current => current ? {...current, settings} : current); setThemeChoice(choice);
+      });
     } catch (cause) { setThemeChoice(previous); setError(`Could not save appearance: ${message(cause)}`); }
     finally { setBusy(''); }
   };
@@ -600,12 +610,14 @@ export default function App() {
     setSettingsOpen(true);
   });
   const saveSettingsProfile = async (name: string) => {
-    if (busy || !name.trim()) return;
+    if (!name.trim()) throw new Error('Enter your name.');
     setBusy('Saving…'); setSettingsError('');
     try {
-      const profile = await command<Profile>(root, 'set_profile', {name: name.trim()});
-      setData(previous => previous ? {...previous, profile} : previous);
-    } catch (cause) { setSettingsError(message(cause)); }
+      await settingsWrites.current.run('profile', async () => {
+        const profile = await command<Profile>(root, 'set_profile', {name: name.trim()});
+        setData(previous => previous ? {...previous, profile} : previous);
+      });
+    } catch (cause) { setSettingsError(message(cause)); throw cause; }
     finally { setBusy(''); }
   };
   const editFolder = (kind: 'create' | 'renameFolder' | 'renameProject', item?: {id: string; title: string}) => leaveDraft(() => {
@@ -640,10 +652,31 @@ export default function App() {
     if (busy) return;
     setBusy('Saving settings…'); setSettingsError('');
     try {
-      const saved = await command<Settings>(root, 'set_preferences', {keybindings: settings.keybindings});
-      setData(current => current ? {...current, settings: saved} : current);
+      await settingsWrites.current.run('shortcuts', async () => {
+        const saved = await command<Settings>(root, 'set_preferences', {keybindings: settings.keybindings});
+        setData(current => current ? {...current, settings: saved} : current);
+      });
     } catch (cause) { setSettingsError(message(cause)); }
     finally { setBusy(''); }
+  };
+  const restartForUpdate = async () => {
+    if (restartPending.current || flushRequest.current) throw new Error('A save is still in progress. Try again.');
+    restartPending.current = true; setBusy('Saving…'); setPaused(true); setSettingsError(''); setError('');
+    try {
+      await restartAfterSaving({
+        finishStroke: () => new Promise<void>((resolve, reject) => {
+          if (!draftsRef.current.some(item => item.id === activeDraftRef.current)) { resolve(); return; }
+          if (!requestStrokeFlush('restart', undefined, {resolve, reject})) reject(new Error('The drawing could not be finished. Try again.'));
+        }),
+        saveDrafts: async () => {
+          // Include timerless drafts: a failed autosave may already have removed its timer.
+          await saveEveryDraft(() => draftsRef.current, flushLatest);
+          await saveChain.current;
+        },
+        saveSettings: () => settingsWrites.current.flush(),
+        install: installUpdate,
+      });
+    } finally { restartPending.current = false; setBusy(''); }
   };
   const askDelete = (kind: 'video' | 'project' | 'folder', item: {id: string; title: string}) => {
     leaveDraft(() => { setPaused(true); setError(''); setDeleteTarget({kind, ...item}); });
@@ -678,7 +711,7 @@ export default function App() {
     if (item) selectComment(item);
   };
   shortcutHandler.current = event => {
-    if (busy || !data) return;
+    if (busy || restartPending.current || !data) return;
     if (recording) {
       if (event.chord === 'Escape') { setRecording(null); setSettingsError(''); return; }
       if (event.repeat) return;
@@ -847,8 +880,8 @@ export default function App() {
     </View>
     {libraryOpen && !settingsOpen && <><Pressable accessible={false} focusable={false} style={[StyleSheet.absoluteFill, {zIndex: 3}]} onPress={() => setLibraryOpen(false)} />{libraryPanel}</>}
     {settingsOpen && <View style={[StyleSheet.absoluteFill, {zIndex: 100, alignItems: 'center', justifyContent: 'center', padding: 24}]} accessibilityViewIsModal>
-      <Pressable accessible={false} style={[StyleSheet.absoluteFill, {backgroundColor: '#00000045'}]} onPress={() => { setRecording(null); setSettingsOpen(false); }} />
-      <SettingsPage animateEntrance={settingsAnimate} profile={data.profile} initialTab={settingsTab} onProfileSave={saveSettingsProfile} settings={data.settings} recording={recording} error={settingsError || error} busy={!!busy} onRecord={id => { setRecording(id); setSettingsError(''); }} onChange={settings => void savePreferences(settings)} onTheme={choice => void changeTheme(choice)} onClose={() => { setRecording(null); setSettingsOpen(false); }} />
+      <Pressable accessible={false} style={[StyleSheet.absoluteFill, {backgroundColor: '#00000045'}]} onPress={() => { if (!restartPending.current) { setRecording(null); setSettingsOpen(false); } }} />
+      <SettingsPage onRestart={restartForUpdate} animateEntrance={settingsAnimate} profile={data.profile} initialTab={settingsTab} onProfileSave={saveSettingsProfile} settings={data.settings} recording={recording} error={settingsError || error} busy={!!busy} onRecord={id => { setRecording(id); setSettingsError(''); }} onChange={settings => void savePreferences(settings)} onTheme={choice => void changeTheme(choice)} onClose={() => { if (!restartPending.current) { setRecording(null); setSettingsOpen(false); } }} />
     </View>}
     <Dialog visible={!!deleteTarget} onDismiss={() => { if (!busy) setDeleteTarget(null); }}>
       <Text style={s.modalTitle}>Delete {deleteTarget?.kind}?</Text>

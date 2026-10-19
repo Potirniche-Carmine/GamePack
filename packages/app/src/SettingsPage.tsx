@@ -7,8 +7,8 @@ import {easeOut, MotionPressable, useReducedMotion} from './motion';
 import type {Colors} from './colors';
 import {binding, shortcutLabel, shortcuts} from './shortcuts';
 import {useTheme} from './theme';
-import {appBuild, openUpdateRelease} from './native';
-import {checkForUpdates, type AppBuild, type UpdateResult} from './updates';
+import {UpdateSettings} from './UpdateSettings';
+import type {UpdateController} from './updateFlow';
 import type {Profile, Settings, ThemeChoice} from './types';
 
 type SettingsTab = 'profile' | 'appearance' | 'shortcuts';
@@ -16,11 +16,11 @@ const tabs: {id: SettingsTab; label: string}[] = [
   {id: 'profile', label: 'Profile'}, {id: 'appearance', label: 'Appearance'}, {id: 'shortcuts', label: 'Shortcuts'},
 ];
 
-export function SettingsPage({settings, profile, recording, error, busy, onProfileSave, onRecord, onChange, onTheme, onClose, initialTab = 'appearance', animateEntrance = true}: {
+export function SettingsPage({settings, profile, recording, error, busy: externalBusy, onRestart, onProfileSave, onRecord, onChange, onTheme, onClose, updateController, initialTab = 'appearance', animateEntrance = true}: {
   settings: Settings; profile: Profile; recording: string | null; error: string; busy: boolean;
-  onProfileSave: (name: string) => void | Promise<void>;
+  onProfileSave: (name: string) => void | Promise<void>; onRestart: () => Promise<void>;
   onRecord: (id: string | null) => void; onChange: (settings: Settings) => void;
-  onTheme: (theme: ThemeChoice) => void; onClose: () => void; initialTab?: SettingsTab; animateEntrance?: boolean;
+  onTheme: (theme: ThemeChoice) => void; onClose: () => void; updateController?: UpdateController; initialTab?: SettingsTab; animateEntrance?: boolean;
 }) {
   const {colors} = useTheme();
   const s = useMemo(() => createSettingsStyles(colors), [colors]);
@@ -28,6 +28,9 @@ export function SettingsPage({settings, profile, recording, error, busy, onProfi
   const [query, setQuery] = useState('');
   const [name, setName] = useState(profile.name);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const busy = externalBusy || restarting;
+  const profileSave = useRef<Promise<void> | null>(null);
   const [profileError, setProfileError] = useState('');
   const [nameFocused, setNameFocused] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -41,12 +44,27 @@ export function SettingsPage({settings, profile, recording, error, busy, onProfi
   }, [animateEntrance, entrance, reduceMotion]);
   useEffect(() => { setName(profile.name); }, [profile.name]);
   const changedName = name.trim() !== profile.name.trim();
+  const persistName = () => {
+    if (profileSave.current) return profileSave.current;
+    if (!name.trim()) return Promise.reject(new Error('Enter your name before restarting.'));
+    setSavingProfile(true); setProfileError('');
+    const save = Promise.resolve().then(() => onProfileSave(name.trim()));
+    profileSave.current = save;
+    void save.finally(() => { profileSave.current = null; setSavingProfile(false); }).catch(() => {});
+    return save;
+  };
   const saveName = async () => {
     if (busy || savingProfile || !changedName || !name.trim()) return;
-    setSavingProfile(true); setProfileError('');
-    try { await onProfileSave(name.trim()); }
+    try { await persistName(); }
     catch (cause) { setProfileError(cause instanceof Error ? cause.message : 'Could not save your name.'); }
-    finally { setSavingProfile(false); }
+  };
+  const restart = async () => {
+    setRestarting(true); onRecord(null);
+    try {
+      if (profileSave.current) await profileSave.current;
+      else if (changedName) await persistName();
+      await onRestart();
+    } finally { setRestarting(false); }
   };
   const filtered = shortcuts.filter(item => `${item.label} ${item.group}`.toLowerCase().includes(query.trim().toLowerCase()));
   const visibleError = error || (tab === 'profile' ? profileError : '');
@@ -55,7 +73,7 @@ export function SettingsPage({settings, profile, recording, error, busy, onProfi
     <GlassSurface radius={28} />
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, {borderRadius: 28, backgroundColor: colors.panel, opacity: .14}]} />
     <View style={s.header}>
-      <Button icon="close" quiet compact label="Close settings" onPress={onClose} style={s.close} />
+      <Button icon="close" quiet compact label="Close settings" disabled={restarting} onPress={onClose} style={s.close} />
       <Text accessibilityRole="header" style={s.title}>Settings</Text>
       <View style={s.close} />
     </View>
@@ -109,62 +127,8 @@ export function SettingsPage({settings, profile, recording, error, busy, onProfi
         })}
       </View>}
     </ScrollView>
-    <UpdateSettings disabled={busy} />
+    <UpdateSettings disabled={externalBusy || savingProfile} onRestart={restart} controller={updateController} />
   </Animated.View>;
-}
-
-function UpdateSettings({disabled}: {disabled: boolean}) {
-  const {colors} = useTheme();
-  const s = useMemo(() => createSettingsStyles(colors), [colors]);
-  const [build, setBuild] = useState<AppBuild | null>(null);
-  const [result, setResult] = useState<UpdateResult | null>(null);
-  const [error, setError] = useState('');
-  const [checking, setChecking] = useState(false);
-  const [opening, setOpening] = useState(false);
-  const mounted = useRef(false);
-  const request = useRef<AbortController | null>(null);
-  const openingRef = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    // Reading the installed binary is local. Network access starts only on press.
-    void appBuild().then(value => { if (mounted.current) setBuild(value); }).catch(() => {});
-    return () => { mounted.current = false; request.current?.abort(); };
-  }, []);
-  const check = async () => {
-    if (request.current || openingRef.current || disabled) return;
-    const controller = new AbortController();
-    request.current = controller;
-    setChecking(true); setError(''); setResult(null);
-    try {
-      const installed = build ?? await appBuild();
-      if (!mounted.current) return;
-      setBuild(installed);
-      const next = await checkForUpdates(installed, {signal: controller.signal});
-      if (mounted.current) setResult(next);
-    } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : 'Could not check for updates. Try again.');
-    } finally {
-      request.current = null;
-      if (mounted.current) setChecking(false);
-    }
-  };
-  const open = async () => {
-    if (result?.kind !== 'available' || openingRef.current || disabled) return;
-    openingRef.current = true; setOpening(true); setError('');
-    try { await openUpdateRelease(result.tag, result.asset !== null); }
-    catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : 'Could not open your browser. Try again.'); }
-    finally { openingRef.current = false; if (mounted.current) setOpening(false); }
-  };
-  const status = error || (result?.kind === 'current' ? 'No updates available.' : result?.kind === 'unpublished' ? 'No published release is available yet.'
-    : result?.kind === 'available' && !result.asset ? 'A download for this device is not available yet.' : '');
-  return <View style={s.updates}>
-    <View style={s.updateRow}>
-      <Text style={s.updateLabel} accessibilityLiveRegion="polite">{result?.kind === 'available' ? `Version ${result.version} available` : build ? `GamePack ${build.version}` : 'GamePack'}</Text>
-      <Button compact quiet disabled={disabled || checking || opening} onPress={() => void check()}>{checking ? 'Checking…' : 'Check for updates'}</Button>
-      {result?.kind === 'available' && <Button compact primary disabled={disabled || opening} onPress={() => void open()}>{opening ? 'Opening…' : result.asset ? 'Download' : 'View release'}</Button>}
-    </View>
-    {!!status && <Text accessibilityRole={error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={[s.updateStatus, !!error && {color: colors.errorText}]}>{status}</Text>}
-  </View>;
 }
 
 function SettingsTabButton({label, selected, onPress}: {label: string; selected: boolean; onPress: () => void}) {
@@ -234,10 +198,6 @@ const createSettingsStyles = (c: Colors) => StyleSheet.create({
   tabLabelSelected: {color: c.text, fontWeight: '600'},
   scroll: {flex: 1},
   content: {paddingBottom: 16, paddingRight: 10, width: '100%'},
-  updates: {paddingTop: 14, borderTopWidth: 1, borderTopColor: c.separator},
-  updateRow: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8},
-  updateLabel: {flex: 1, minWidth: 140, color: c.muted, fontSize: 13, lineHeight: 19},
-  updateStatus: {color: c.muted, fontSize: 12, lineHeight: 18, marginTop: 7},
   error: {color: c.errorText, backgroundColor: c.errorBg, padding: 12, borderRadius: 8, fontSize: 13, lineHeight: 19, marginBottom: 20},
   profilePanel: {width: '100%', maxWidth: 360, alignSelf: 'center'},
   identity: {alignItems: 'center', marginTop: 8, marginBottom: 26},

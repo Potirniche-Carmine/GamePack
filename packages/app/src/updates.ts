@@ -61,7 +61,12 @@ export function evaluateRelease(value: unknown, build: AppBuild): UpdateResult {
   if (compareVersions(tag, build.version)! <= 0) return {kind: 'current'};
   if (!Array.isArray(value.assets)) throw new Error('GitHub returned invalid release information. Try again later.');
   const matching = value.assets.filter(asset => record(asset) && asset.name === assetName);
-  const asset = matching.length === 1 && matching[0].state === 'uploaded' && typeof matching[0].size === 'number' && matching[0].size > 0 ? assetName : null;
+  const uploaded = (asset: unknown): asset is Record<string, unknown> => record(asset) && asset.state === 'uploaded' && typeof asset.size === 'number' && Number.isSafeInteger(asset.size) && asset.size > 0;
+  const archive = matching.length === 1 && uploaded(matching[0]) ? matching[0] : null;
+  const checksums = value.assets.filter(asset => record(asset) && asset.name === `${assetName}.sha256`);
+  const digest = archive && typeof archive.digest === 'string' && archive.digest.length === 71 && /^sha256:[a-fA-F0-9]{64}$/.test(archive.digest);
+  const checksum = checksums.length === 1 && uploaded(checksums[0]);
+  const asset = archive && (digest || checksum) ? assetName : null;
   // Never follow URLs supplied by the API. The native bridge constructs the
   // release/download URL from a validated tag and its own platform information.
   return {kind: 'available', version: tag.replace(/^v/, ''), tag, asset};
