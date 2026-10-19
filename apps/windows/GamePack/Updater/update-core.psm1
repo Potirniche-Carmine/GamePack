@@ -1,5 +1,7 @@
 # Trusted code bundled with the running app. Downloaded installer scripts are never loaded.
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 does not automatically load ZipArchive with the FileSystem facade.
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.Net.Http
 
