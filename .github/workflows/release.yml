@@ -79,8 +79,11 @@ jobs:
           cp "docs/releases/${RELEASE_TAG#v}.md" "$RUNNER_TEMP/release-notes.md"
           printf '\nBuilt from commit %s in [CI run %s](%s/%s/actions/runs/%s).\n' \
             "$GITHUB_SHA" "$CI_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$CI_RUN_ID" >> "$RUNNER_TEMP/release-notes.md"
-          if gh release view "$RELEASE_TAG" --json isDraft,targetCommitish > "$RUNNER_TEMP/release.json" 2>/dev/null; then
-            jq -e --arg sha "$GITHUB_SHA" '.isDraft == true and .targetCommitish == $sha' "$RUNNER_TEMP/release.json"
+          printf '\nmacOS: development ad-hoc signatures; not notarized. Windows: unsigned.\n<!-- gamepack-draft-source: ci -->\n' >> "$RUNNER_TEMP/release-notes.md"
+          if gh release view "$RELEASE_TAG" --json isDraft,targetCommitish,body > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+            # Only refresh drafts created by this workflow. In particular, never
+            # replace locally signed and notarized packages with CI artifacts.
+            jq -e --arg sha "$GITHUB_SHA" '.isDraft == true and .targetCommitish == $sha and (.body | contains("<!-- gamepack-draft-source: ci -->"))' "$RUNNER_TEMP/release.json"
             gh release upload "$RELEASE_TAG" release-packages/* --clobber
             gh release edit "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
           else
