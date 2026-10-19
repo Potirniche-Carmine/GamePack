@@ -29,6 +29,7 @@ import ClockIcon from 'lucide-react-native/icons/clock';
 import CheckIcon from 'lucide-react-native/icons/check';
 import UndoIcon from 'lucide-react-native/icons/undo-2';
 import RedoIcon from 'lucide-react-native/icons/redo-2';
+import CycleIcon from 'lucide-react-native/icons/repeat-2';
 
 // Per-icon imports keep the rest of Lucide out of the production bundle.
 const icons = {
@@ -62,6 +63,7 @@ const icons = {
   check: CheckIcon,
   undo: UndoIcon,
   redo: RedoIcon,
+  cycle: CycleIcon,
 };
 export type IconName = keyof typeof icons;
 export function Icon({name, color}: {name: IconName; color: string}) {

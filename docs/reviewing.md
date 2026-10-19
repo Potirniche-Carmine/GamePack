@@ -15,13 +15,17 @@ Imported footage is copied into GamePack's managed library. Original files are r
 Click empty video space with the pointer selected, or press **Space**, to play or pause.
 
 - **Watch** plays continuously and hides drawings, comments, review shortcuts, and comment markers.
-- **Review** stops at commented frames and waits for Play. Conversations on the same frame share a stop. Seeking backward lets you review those moments again.
+- **Review** stops at Moment comments and at the end of Play comments, then waits for Play. Conversations ending on the same frame share a stop. Seeking backward lets you review those moments again.
 
 Press **R** to switch modes. Use **← / →** to step frames, **Shift + ← / →** to seek five seconds, or **J / K / L** to shuttle backward, stop, and shuttle forward.
 
 ## Draw and post
 
-In Review, choose **Pen**, **Arrow**, or **Ellipse** to start a comment on a frozen frame. All marks use the same blue ink. A conversation stores completed drawings at one instant; drawing while footage plays and timed stroke replay are not supported.
+In Review, choose **Pen**, **Arrow**, or **Ellipse** to start a comment on a frozen frame. **Moment** is the default. All marks use the same blue ink.
+
+For one conversation over several seconds, switch **Moment** to **Play**, choose a drawing tool, and press **Space** or the playback button. Switching modes alone does not start the video. Draw as the video progresses; pause to add details or text, then resume to continue the same play. The speed control offers **0.5×** for slower capture. Your previous speed returns when you leave the draft. The timestamp and blue filmstrip range show the covered time.
+
+Play drawings replay in source time, including strokes drawn while paused. Scrub backward within the draft to revisit an earlier frame without losing later marks. The play retains its furthest captured endpoint; seeking earlier or undoing a stroke does not shorten it. A reply stays inside its original conversation's window.
 
 Add text and choose **Post**, or press **Command/Control + Enter**. Set your display name when prompted. New conversations require at least one drawing; replies can contain only text. The laser pointer (**B**) is temporary and is not posted.
 
@@ -29,17 +33,17 @@ Posted comments cannot be edited or individually deleted. Deleting their video o
 
 ## Drafts
 
-Playing or seeking away saves the current draft at its original timestamp. **Discard** removes the active draft and its drawings; **Post** publishes them.
+Leaving a conversation saves its draft. Playing or seeking away from a Moment keeps its original timestamp; playback and seeking within a Play continue that draft. **Discard** removes the active draft and its drawings; **Post** publishes them after the native player pauses and finishes any held stroke.
 
-Draft recovery is incomplete in the current interface. Choosing **Reply** again can restore a saved reply for that comment, but there is no control to reopen an unfinished new conversation after leaving it. Post or discard a new conversation before playing, seeking, or changing videos. Saved drafts do not currently appear as filmstrip markers.
+**Resume** in the drawing tools reopens the most recent unfinished new conversation for the current video. Choose **Reply** again to restore a saved reply. Play drafts reopen paused at their end. The active Play draft appears as a filmstrip range.
 
 Use **Command/Control + Z** and **Command/Control + Shift + Z** to undo and redo unposted drawings.
 
 ## Conversations
 
-Drawings and conversations appear together once the video has paused on their frame. Comments stay on the right; selecting a card emphasizes its drawings. Frames with multiple conversations number those cards from 1. A lone conversation has no number. Filmstrip markers show a dot for one comment and a count for grouped comments.
+Moment drawings and conversations appear together once the video has paused on their frame. Play conversations appear throughout their window while the strokes reveal in time. Select a Play card or marker to read it at its final frame; choose **Replay** to watch from its beginning. Replay still stops at any Moment comments along the way and holds the play’s final frame. Comments stay on the right; selecting a card emphasizes its drawings. Frames with multiple conversations number those cards from 1. A lone conversation has no number. Filmstrip markers show a dot for one comment and a count for grouped comments.
 
-Choose **Reply** to open a composer at the same frame. Replies remain nested in the conversation. Expand or collapse them with the reply control, or use **Command/Control + Shift + R** for all replies. Scroll the right-hand column for more comments.
+Choose **Reply** to open a composer on the same moment or play. Play replies initially open at the final frame; scrub within the range to attach new strokes earlier. Replies remain nested in the conversation. Expand or collapse them with the reply control, or use **Command/Control + Shift + R** for all replies. Scroll the right-hand column for more comments.
 
 ## Zoom and fullscreen
 
@@ -55,6 +59,6 @@ The profile avatar opens your name and initials settings. Appearance and shortcu
 
 ## Older libraries
 
-Legacy timed comments are converted once to a completed drawing on the final included instant of their clip. Original posted records are retained for recovery. New comments use a single frame with no intervals or timed stroke replay.
+Libraries from before the Moment-only format retain their existing one-time conversion: legacy timed comments become completed drawings on the final included instant of their clip, with original records archived for recovery. Existing Moment comments remain unchanged. New Play comments use source-clock sample times. After upgrading, older GamePack versions refuse the newer library format.
 
 Close GamePack before backing up the library folder, especially before trying a new build. ZIP import/export is not available.

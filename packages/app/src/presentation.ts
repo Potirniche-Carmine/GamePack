@@ -1,16 +1,16 @@
 import type {Comment} from './types';
-import {sameFrame, compareComments} from './playback';
+import {anchorContains, sameFrame, compareComments} from './playback';
 import {conversationRoot} from './discussion';
 
 /** Replies open the visible root card, including a just-posted reply that has
  * not reached the current React state snapshot yet. */
 export function conversationTarget(comments: readonly Comment[], item: Comment, _duration: number): {comment: Comment; time: number} {
   const root = item.parent_comment_id ? conversationRoot(comments, item.parent_comment_id) ?? item : item;
-  return {comment: root, time: root.anchor.at_us};
+  return {comment: root, time: root.anchor.kind === 'play' ? root.anchor.end_us : root.anchor.at_us};
 }
 
 export function notesAtTime(comments: readonly Comment[], time: number): Comment[] {
-  return comments.filter(comment => !comment.parent_comment_id && sameFrame(comment.anchor.at_us, time))
+  return comments.filter(comment => !comment.parent_comment_id && anchorContains(comment.anchor, time))
     .sort(compareComments);
 }
 
@@ -42,7 +42,7 @@ export function nextReviewStop(comments: readonly Comment[], from: number, durat
   let result: ReviewStop | null = null;
   for (const comment of comments) {
     if (comment.parent_comment_id) continue;
-    const time = comment.anchor.at_us;
+    const time = comment.anchor.kind === 'play' && direction > 0 ? comment.anchor.end_us : comment.anchor.at_us;
     if (time < 0 || time > duration || (direction > 0 ? time < from : time > from) || (skipCurrent && sameFrame(time, from))) continue;
     if (!result || (direction > 0 ? time < result.time : time > result.time)) result = {time, commentIds: [comment.comment_id]};
     else if (time === result.time) result.commentIds.push(comment.comment_id);

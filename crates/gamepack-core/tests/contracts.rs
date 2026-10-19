@@ -349,9 +349,21 @@ fn pen() -> Drawing {
         tool: Tool::Pen,
         width: 4000,
         samples: vec![
-            Sample { x: 0, y: 0 },
-            Sample { x: 5, y: 5 },
-            Sample { x: 20, y: 20 },
+            Sample {
+                x: 0,
+                y: 0,
+                t_us: None,
+            },
+            Sample {
+                x: 5,
+                y: 5,
+                t_us: None,
+            },
+            Sample {
+                x: 20,
+                y: 20,
+                t_us: None,
+            },
         ],
     }
 }
@@ -720,4 +732,140 @@ fn failed_migration_rolls_back_records_archive_version_and_immutability_guard() 
     assert!(db
         .execute("UPDATE comments SET body='changed'", [])
         .is_err());
+}
+
+#[test]
+fn play_samples_are_bounded_ordered_and_persist_with_their_conversation() {
+    let fixture = Fixture::new();
+    fixture.named("Maya");
+    let mut draft = fixture.draft("play");
+    draft["anchor"] = json!({"kind":"play","at_us":1_000_000,"end_us":5_000_000});
+    draft["drawings"] = json!([{"id":"ink","tool":"pen","width":3500,"samples":[
+        {"x":0,"y":0,"t_us":1_000_000},{"x":50,"y":100,"t_us":3_000_000},{"x":100,"y":200,"t_us":3_000_000}
+    ]}]);
+    fixture.save(draft.clone());
+    for invalid in [
+        json!(-1),
+        json!(999_999),
+        json!(5_000_001),
+        json!(null),
+        json!(1.5),
+        json!(9_007_199_254_740_992i64),
+    ] {
+        let mut bad = draft.clone();
+        bad["drawings"][0]["samples"][0]["t_us"] = invalid;
+        failure(fixture.root(), json!({"command":"save_draft","draft":bad}));
+    }
+    let mut bad = draft.clone();
+    bad["drawings"][0]["samples"][2]["t_us"] = json!(2_000_000);
+    failure(fixture.root(), json!({"command":"save_draft","draft":bad}));
+    for end in [0, 999_999, 20_000_001, 9_007_199_254_740_992i64] {
+        let mut bad = draft.clone();
+        bad["anchor"]["end_us"] = json!(end);
+        failure(fixture.root(), json!({"command":"save_draft","draft":bad}));
+    }
+    let posted = fixture.post("play");
+    assert_eq!(posted["schema_version"], 3);
+    assert_eq!(posted["drawings"], draft["drawings"]);
+    assert_eq!(fixture.boot()["comments"], json!([posted.clone()]));
+    let mut canonical = posted.clone();
+    canonical.as_object_mut().unwrap().remove("digest");
+    assert_eq!(
+        posted["digest"],
+        blake3::hash(&serde_json::to_vec(&canonical).unwrap())
+            .to_hex()
+            .as_str()
+    );
+    let mut reply = fixture.draft("play-reply");
+    reply["parent_comment_id"] = json!("play");
+    reply["anchor"] = draft["anchor"].clone();
+    fixture.save(reply.clone());
+    fixture.post("play-reply");
+    reply["id"] = json!("invalid-reply");
+    reply["anchor"]["end_us"] = json!(4_000_000);
+    failure(
+        fixture.root(),
+        json!({"command":"save_draft","draft":reply}),
+    );
+}
+
+#[test]
+fn timed_ink_reconstructs_pauses_interpolation_and_backward_seeks() {
+    let anchor = Anchor::Play {
+        at_us: 100,
+        end_us: 400,
+    };
+    let mut drawing = pen();
+    drawing.samples = vec![
+        Sample {
+            x: 0,
+            y: 0,
+            t_us: Some(100),
+        },
+        Sample {
+            x: 10,
+            y: 20,
+            t_us: Some(200),
+        },
+        Sample {
+            x: 30,
+            y: 40,
+            t_us: Some(200),
+        },
+        Sample {
+            x: 50,
+            y: 60,
+            t_us: Some(400),
+        },
+    ];
+    let drawings = vec![drawing];
+    assert!(evaluate_drawings(&anchor, &drawings, 99).is_empty());
+    let half = evaluate_drawings(&anchor, &drawings, 150);
+    assert_eq!(
+        half[0].samples.last().unwrap(),
+        &Sample {
+            x: 5,
+            y: 10,
+            t_us: Some(150)
+        }
+    );
+    assert_eq!(
+        evaluate_drawings(&anchor, &drawings, 200)[0].samples.len(),
+        3
+    );
+    assert_eq!(evaluate_drawings(&anchor, &drawings, 400), drawings);
+    assert!(evaluate_drawings(&anchor, &drawings, 401).is_empty());
+    assert_eq!(
+        evaluate_drawings(&anchor, &drawings, 100)[0].samples.len(),
+        1
+    );
+    assert_eq!(drawings[0].samples.len(), 4);
+}
+
+#[test]
+fn v7_upgrade_keeps_v2_bytes_and_digests_and_rejects_future_databases() {
+    let fixture = Fixture::new();
+    fixture.named("Maya");
+    fixture.save(fixture.draft("moment"));
+    fixture.post("moment");
+    let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
+    let before: String = db
+        .query_row("SELECT body FROM comments", [], |r| r.get(0))
+        .unwrap();
+    db.execute_batch("PRAGMA user_version=6;").unwrap();
+    drop(db);
+    fixture.boot();
+    let db = Connection::open(fixture.root().join("gamepack.sqlite3")).unwrap();
+    let after: String = db
+        .query_row("SELECT body FROM comments", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(before, after);
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+    db.execute_batch("PRAGMA user_version=8;").unwrap();
+    drop(db);
+    assert!(failure(fixture.root(), json!({"command":"bootstrap"})).contains("newer GamePack"));
 }
