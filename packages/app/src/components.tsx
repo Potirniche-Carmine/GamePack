@@ -117,7 +117,7 @@ export function parseTime(text: string): number | null {
   return Number.isFinite(seconds) && seconds <= Number.MAX_SAFE_INTEGER / 1000000 ? Math.round(seconds * 1000000) : null;
 }
 export function anchorLabel(anchor: Anchor): string {
-  return timeLabel(anchor.at_us);
+  return anchor.kind === 'play' ? `${timeLabel(anchor.at_us)}–${timeLabel(anchor.end_us)}` : timeLabel(anchor.at_us);
 }
 export function anchorStart(anchor: Anchor): number { return anchor.at_us; }
 export function bytesLabel(bytes: number): string {

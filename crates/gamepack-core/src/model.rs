@@ -69,6 +69,7 @@ pub struct Video {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Anchor {
     Point { at_us: i64 },
+    Play { at_us: i64, end_us: i64 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,6 +85,8 @@ pub enum Tool {
 pub struct Sample {
     pub x: i64,
     pub y: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub t_us: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

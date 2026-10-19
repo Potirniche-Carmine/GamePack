@@ -87,7 +87,7 @@ impl Store {
         )?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         ensure!(
-            version <= 6,
+            version <= 7,
             "This database was created by a newer GamePack version"
         );
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -116,7 +116,7 @@ impl Store {
         if version == 0 {
             tx.execute("INSERT INTO projects(id,title,created_at) SELECT ?1,'Review library',?2 WHERE NOT EXISTS(SELECT 1 FROM projects)", params![id(), now()?])?;
         }
-        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); INSERT OR IGNORE INTO preferences(singleton) VALUES(1); PRAGMA user_version=6;")?;
+        tx.execute_batch("INSERT OR IGNORE INTO settings(singleton,theme) VALUES(1,'system'); INSERT OR IGNORE INTO preferences(singleton) VALUES(1); PRAGMA user_version=7;")?;
         tx.commit()?;
         Ok(Self { root, db })
     }
@@ -535,7 +535,7 @@ impl Store {
                 .context("Reply parent does not exist")?;
             ensure!(
                 draft.anchor == parent_comment.draft.anchor,
-                "Replies must use their conversation's frame"
+                "Replies must use their conversation's time window"
             );
             // Existing immutable rows cannot point forward to a new ID. Bounded
             // traversal also refuses a corrupted/imported cyclic graph.
@@ -600,6 +600,11 @@ impl Store {
         validation::label(&profile.name, "Display name")?;
         // Presentation state does not enter the immutable body or v2 digest.
         let position = draft.position.take();
+        let schema_version = if matches!(draft.anchor, crate::model::Anchor::Play { .. }) {
+            3
+        } else {
+            2
+        };
         let mut comment = Comment {
             comment_id: draft.id.clone(),
             draft,
@@ -608,9 +613,9 @@ impl Store {
             name_at_posting: profile.name,
             created_at_reported: now()?,
             digest: String::new(),
-            schema_version: 2,
+            schema_version,
         };
-        // Canonical v2: lexicographically sorted object keys at every depth,
+        // Canonical v2/v3: lexicographically sorted object keys at every depth,
         // UTF-8 compact JSON and decimal integers, with digest omitted.
         let mut canonical = serde_json::to_value(&comment)?;
         canonical

@@ -17,7 +17,7 @@ import {MotionPressable} from './motion';
 import {CommentComposer} from './CommentComposer';
 import {drawingEndPosition, type Point} from './spatial';
 import {conversationRoot} from './discussion';
-import {canPostDraft, resumableDraft} from './drafts';
+import {canPostDraft, extendPlayDraft, playDraftSeek, resumableDraft} from './drafts';
 import {LibraryBrowser} from './LibraryBrowser';
 import {libraryContents, videoTitle} from './library';
 import {ReviewTimeline} from './ReviewTimeline';
@@ -30,7 +30,7 @@ const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, value
   return (value === 'x' ? random : (random & 3) | 8).toString(16);
 });
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-type StrokeFlushRequest = {token: number; draftId: string; purpose: 'save' | 'leave'; after?: () => void | Promise<void>};
+type StrokeFlushRequest = {token: number; draftId: string; purpose: 'save' | 'leave' | 'undo' | 'redo'; after?: () => void | Promise<void>};
 
 export default function App() {
   const {width, height} = useWindowDimensions();
@@ -64,6 +64,8 @@ export default function App() {
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rate, setRate] = useState(1);
+  const [annotationMode, setAnnotationMode] = useState<'point' | 'play'>('point');
+  const captureRate = useRef<number | null>(null);
   const [reviewMode, setReviewMode] = useState<'watch' | 'review'>('review');
   const [reviewStop, setReviewStop] = useState<ReviewStop | null>(null);
   const lastReviewStop = useRef<number | null>(null);
@@ -71,6 +73,8 @@ export default function App() {
   const [seekState, setSeekState] = useState({us: 0, token: 0});
   const seekRequest = useRef(seekState);
   const [flushToken, setFlushToken] = useState(0);
+  const [acknowledgedFlushToken, setAcknowledgedFlushToken] = useState(0);
+  const [drawingActive, setDrawingActive] = useState(false);
   const [tool, setTool] = useState<DrawingTool>('pointer');
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -122,33 +126,34 @@ export default function App() {
   const originalComments = useMemo(() => videoComments.filter(item => !item.parent_comment_id), [videoComments]);
   const allRepliesExpanded = originalComments.length > 0 && originalComments.every(item => expanded.has(item.comment_id));
   const projectVideos = data ? libraryContents(data.projects, data.folders, data.videos, projectId, folderId).videos : [];
+  const sceneTime = paused ? time : -1;
   const sceneJson = useMemo(() => {
     if (reviewMode !== 'review' || !annotationsVisible) return '';
     if (draft) {
       const root = draft.parent_comment_id ? conversationRoot(videoComments, draft.parent_comment_id) : undefined;
       const context = root ? annotationScene(videoComments.filter(item => conversationRoot(videoComments, item.comment_id)?.comment_id === root.comment_id), draft.anchor.at_us, true) : null;
-      return JSON.stringify({id: draft.id, anchor: draft.anchor, drawings: [...(context?.drawings ?? []), ...draft.drawings]});
+      return JSON.stringify({id: draft.id, anchor: draft.anchor, capture: true, flushed: acknowledgedFlushToken, captureEndUs: draft.anchor.kind === 'play' ? draft.parent_comment_id ? draft.anchor.end_us : duration : undefined, drawings: [...(context?.drawings ?? []), ...draft.drawings]});
     }
-    const scene = annotationScene(videoComments, time, paused, commentId, reviewStop?.time);
+    const scene = annotationScene(videoComments, sceneTime, paused, commentId, reviewStop?.time);
     return scene ? JSON.stringify(scene) : '';
-  }, [draft, videoComments, time, paused, commentId, annotationsVisible, reviewMode, reviewStop?.time]);
+  }, [draft, videoComments, sceneTime, paused, commentId, annotationsVisible, reviewMode, reviewStop?.time, duration, acknowledgedFlushToken]);
   const onVideoNotes = useMemo(() => {
-    const notes = paused ? notesAtTime(videoComments, time) : [];
+    const notes = notesAtTime(videoComments, time).filter(note => paused || note.anchor.kind === 'play');
     const root = draft?.parent_comment_id ? conversationRoot(videoComments, draft.parent_comment_id) : undefined;
     if (root && !notes.some(note => note.comment_id === root.comment_id)) notes.push(root);
     return notes;
   }, [videoComments, time, paused, draft?.parent_comment_id]);
   const sceneKey = useMemo(() => annotationSceneKey(sceneJson, seekState.token, step.token), [sceneJson, seekState.token, step.token]);
-  const presentedSceneKey = paused && sceneKey === readyScene ? sceneKey : '';
+  const presentedSceneKey = sceneKey === readyScene ? sceneKey : '';
   const previousNote = adjacentNote(videoComments, commentId, time, duration, -1);
   const nextNote = adjacentNote(videoComments, commentId, time, duration, 1);
   playbackContext.current = {comments: originalComments, duration, rate, editing: !!draft || reviewMode !== 'review'};
-  const reviewEnd = !draft && reviewMode === 'review' ? reviewStop?.time ?? -1 : -1;
+  const reviewEnd = draft?.anchor.kind === 'play' && draft.parent_comment_id ? draft.anchor.end_us : !draft && reviewMode === 'review' ? reviewStop?.time ?? -1 : -1;
   const dialogOpen = profileOpen || projectOpen || discardOpen || !!deleteTarget || !!folderDialog || !!moveTarget;
   const historyEnabled = !!video && reviewMode === 'review' && !busy && !dialogOpen && !settingsOpen && !libraryOpen;
   useEffect(() => {
-    configureDrawingHistory(historyEnabled && !!draft?.drawings.length, historyEnabled && !!redo.length);
-  }, [historyEnabled, draft?.drawings.length, redo.length]);
+    configureDrawingHistory(historyEnabled && (!!draft?.drawings.length || drawingActive), historyEnabled && !!redo.length);
+  }, [historyEnabled, draft?.drawings.length, redo.length, drawingActive]);
 
   useEffect(() => {
     if (!draft || !composerOpen || focusParent.current === null || (draft.parent_comment_id ?? '') !== focusParent.current) return;
@@ -260,6 +265,8 @@ export default function App() {
   };
 
   const clearEditing = () => {
+    if (captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
+    setAnnotationMode('point'); setDrawingActive(false);
     setDraftId(null); activeDraftRef.current = null; setTool('pointer'); setRedo([]);
   };
   const leaveDraft = (after: () => void | Promise<void>) => {
@@ -268,16 +275,19 @@ export default function App() {
     else void after();
   };
   const restoreDraftNow = (pending: Draft) => {
+    if (pending.anchor.kind === 'play' && captureRate.current === null) captureRate.current = rate;
+    if (pending.anchor.kind === 'point' && captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
+    setAnnotationMode(pending.anchor.kind);
     activeDraftRef.current = pending.id; setDraftId(pending.id); setCommentId(null);
     setComposerOpen(true); setLibraryVisible(false);
     setPaused(true); setTool('pointer'); setRedo([]);
     const parent = data?.comments.find(item => item.comment_id === pending.parent_comment_id);
     const pendingDuration = data?.videos.find(item => item.id === pending.video_id)?.duration_us || duration;
-    seek(parent ? conversationTarget(data?.comments ?? [], parent, pendingDuration).time : anchorStart(pending.anchor));
+    seek(pending.anchor.kind === 'play' ? pending.anchor.end_us : parent ? conversationTarget(data?.comments ?? [], parent, pendingDuration).time : anchorStart(pending.anchor));
   };
   const openVideoNow = async (item: Video) => {
     const generation = ++sourceGeneration.current;
-    setPaused(true); setRate(1); clearEditing(); setZoomOpen(false); setSpeedOpen(false); setZoom(1); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false);
+    setPaused(true); clearEditing(); setRate(1); setZoomOpen(false); setSpeedOpen(false); setZoom(1); setVideoId(item.id); setProjectId(item.project_id); setFolderId(item.folder_id ?? null); setLibraryOpen(false);
     setCommentId(null); setExpanded(new Set()); setDuration(item.duration_us); seek(0);
     setComposerOpen(false);
     try {
@@ -301,7 +311,7 @@ export default function App() {
     finally { setBusy(''); }
   };
   const importVideo = () => leaveDraft(importVideoNow);
-  const newDraftNow = (parent?: Comment) => {
+  const newDraftNow = (parent?: Comment, timing = annotationMode) => {
     if (!video || busy || reviewMode !== 'review') return;
     setComposerOpen(!!parent); setLibraryVisible(false);
     if (draft && !parent) return draft;
@@ -310,11 +320,14 @@ export default function App() {
 
     try {
       const value: Draft = {id: uuid(), project_id: video.project_id, video_id: video.id, text: '',
-        anchor: parent?.anchor ?? {kind: 'point', at_us: Math.min(time, duration || time)},
+        anchor: parent?.anchor ?? (timing === 'play' ? {kind: 'play', at_us: Math.min(time, duration || time), end_us: Math.min(time, duration || time)} : {kind: 'point', at_us: Math.min(time, duration || time)}),
         parent_comment_id: parent?.comment_id ?? null, drawings: [], position: parent?.position};
+      if (value.anchor.kind === 'play' && captureRate.current === null) captureRate.current = rate;
+      if (value.anchor.kind === 'point' && captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
+      setAnnotationMode(value.anchor.kind);
       replaceDraft(value); activeDraftRef.current = value.id; setDraftId(value.id); setCommentId(null);
       setTool('pointer'); setRedo([]);
-      setPaused(true); seek(anchorStart(value.anchor));
+      setPaused(true); seek(parent && value.anchor.kind === 'play' ? value.anchor.end_us : anchorStart(value.anchor));
       return value;
     } catch (cause) { setError(message(cause)); }
   };
@@ -329,7 +342,7 @@ export default function App() {
   const dismissSelectionNow = () => { clearEditing(); setCommentId(null); };
   const armReview = (at: number, nextRate = rate, skipCurrent = paused || (lastReviewStop.current !== null && sameFrame(lastReviewStop.current, at))) => setReviewStop(reviewMode === 'review'
     ? nextReviewStop(originalComments, at, duration, nextRate < 0 ? -1 : 1, skipCurrent) : null);
-  const startPlayback = (nextRate = rate) => {
+  const startPlayback = (nextRate = captureRate.current ?? rate) => {
     const at = duration && time >= duration && nextRate > 0 ? 0 : time;
     clearEditing(); setComposerOpen(false); setCommentId(null); setLibraryOpen(false);
     setRate(nextRate);
@@ -344,12 +357,21 @@ export default function App() {
   };
   const play = () => {
     if (!video || busy) return;
-    if (!paused) { setPaused(true); return; }
+    if (!paused) { setPaused(true); if (draft?.anchor.kind === 'play' && draft.drawings.length) setComposerOpen(true); return; }
+    if (draft?.anchor.kind === 'play') {
+      commentInput.current?.blur(); setComposerOpen(false); setReviewStop(null);
+      if (rate < 0) setRate(Math.abs(rate));
+      if (time >= (draft.parent_comment_id ? draft.anchor.end_us : duration)) seek(draft.anchor.at_us);
+      setPaused(false); return;
+    }
     leaveDraft(() => startPlayback());
   };
   const scrubTo = (us: number) => {
     scrubTarget.current = us;
     if (flushRequest.current) return;
+    if (draft?.anchor.kind === 'play') {
+      setPaused(true); seek(playDraftSeek(draft, us, duration)); return;
+    }
     leaveDraft(() => {
       clearEditing(); setComposerOpen(false); setCommentId(null); setPaused(true); seek(scrubTarget.current);
     });
@@ -366,13 +388,23 @@ export default function App() {
   const onTime = (event: PlayerTime) => {
     if (event.seekToken !== undefined && event.seekToken !== seekRequest.current.token) return;
     if (Number.isFinite(event.time_us)) {
-      const now = Math.max(0, Math.round(event.time_us)); setTime(now);
+      const now = Math.max(0, Math.round(event.time_us));
+      const current = draftsRef.current.find(item => item.id === activeDraftRef.current);
+      if (current?.anchor.kind === 'play') {
+        const bounded = playDraftSeek(current, now, duration);
+        if (!sameFrame(now, bounded)) { setPaused(true); seek(bounded); return; }
+      }
+      setTime(now);
+      if (current?.anchor.kind === 'play' && !current.parent_comment_id && !flushRequest.current && !savingDraftId.current
+        && (now > current.anchor.end_us + 1000000 || (!event.playing && now > current.anchor.end_us)))
+        replaceDraft(extendPlayDraft(current, now));
 
     }
     if (event.duration_us > 0) setDuration(Math.round(event.duration_us));
     if (event.error) { setError(`Playback failed: ${event.error}`); setPaused(true); }
     if (event.ended) {
       setPaused(true);
+      if (draft?.anchor.kind === 'play' && draft.drawings.length) setComposerOpen(true);
       if (reviewMode === 'review' && !draft && reviewStop && (rate < 0 ? event.time_us <= reviewStop.time : event.time_us >= reviewStop.time)) {
         if (!sameFrame(event.time_us, reviewStop.time)) seek(reviewStop.time);
         lastReviewStop.current = reviewStop.time;
@@ -393,15 +425,19 @@ export default function App() {
     return drawing;
   };
   const onDrawing = (json: string) => {
+    setDrawingActive(false);
     const id = flushRequest.current?.draftId ?? savingDraftId.current ?? activeDraftRef.current;
     const current = draftsRef.current.find(item => item.id === id);
     if (!current || current.id === discarding.current) return;
     try {
       const drawings = mergeDrawings(current.drawings, [parseDrawing(json)]);
       if (drawings.length === current.drawings.length) return;
-      const next: Draft = {...current, drawings, position: drawingEndPosition(drawings[drawings.length - 1].samples)};
-      replaceDraft(next); setRedo([]); setComposerOpen(true); setPaused(true);
-      focusParent.current = current.parent_comment_id ?? ''; setFocusRequest(value => value + 1);
+      const next: Draft = {...extendPlayDraft(current, time, drawings), position: drawingEndPosition(drawings[drawings.length - 1].samples)};
+      replaceDraft(next); setRedo([]);
+      if (current.anchor.kind === 'point') {
+        setComposerOpen(true); setPaused(true);
+        focusParent.current = current.parent_comment_id ?? ''; setFocusRequest(value => value + 1);
+      } else if (paused) setComposerOpen(true);
     } catch (cause) { setError(message(cause)); }
   };
   const chooseTool = (value: DrawingTool) => {
@@ -411,15 +447,26 @@ export default function App() {
     if (!draft) { newDraftNow(); setTool(value); setComposerOpen(false); return; }
     setComposerOpen(false);
     setTool(value);
-    setPaused(true); seek(draft.anchor.at_us);
+    if (draft.anchor.kind === 'point') { setPaused(true); seek(draft.anchor.at_us); }
+  };
+  const changeAnnotationMode = () => {
+    if (busy || draft?.parent_comment_id || draft?.drawings.length) return;
+    const mode = annotationMode === 'point' ? 'play' : 'point';
+    setAnnotationMode(mode); setPaused(true); setRedo([]);
+    if (!draft && mode === 'play') newDraftNow(undefined, mode);
+    if (draft) {
+      if (mode === 'play' && captureRate.current === null) captureRate.current = rate;
+      updateDraft({anchor: mode === 'play' ? {...draft.anchor, kind: 'play', end_us: draft.anchor.at_us} : {kind: 'point', at_us: draft.anchor.at_us}});
+      if (mode === 'point') { seek(draft.anchor.at_us); if (captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; } }
+    }
   };
   const undoDrawing = () => {
-    if (!draft?.drawings.length || busy) return;
-    setRedo(previous => [...previous, draft.drawings[draft.drawings.length - 1]]); updateDraft({drawings: draft.drawings.slice(0, -1)});
+    if (!draft || busy) return;
+    requestStrokeFlush('undo');
   };
   const redoDrawing = () => {
     if (!draft || !redo.length || busy) return;
-    updateDraft({drawings: [...draft.drawings, redo[redo.length - 1]]}); setRedo(previous => previous.slice(0, -1));
+    requestStrokeFlush('redo');
   };
 
   const publishDraft = async (id: string) => {
@@ -469,9 +516,21 @@ export default function App() {
       const current = draftsRef.current.find(item => item.id === request.draftId);
       if (!current) throw new Error('The draft is no longer available.');
       if (!Number.isSafeInteger(event.time_us) || event.time_us < 0) throw new Error('The player returned an invalid frame time. Retry Post.');
-      const next = {...current, drawings: event.drawingJson ? mergeDrawings(current.drawings, [parseDrawing(event.drawingJson)]) : current.drawings};
-      replaceDraft(next); setTime(event.time_us); setPaused(true); setTool('pointer');
+      const next = extendPlayDraft(current, event.time_us, event.drawingJson ? mergeDrawings(current.drawings, [parseDrawing(event.drawingJson)]) : current.drawings);
+      replaceDraft(next); setTime(event.time_us); setPaused(true);
+      setDrawingActive(false); setAcknowledgedFlushToken(event.flushToken);
+      if (request.purpose === 'save' || request.purpose === 'leave') setTool('pointer');
       flushRequest.current = null;
+      if (request.purpose === 'undo' || request.purpose === 'redo') {
+        if (request.purpose === 'undo' && next.drawings.length) {
+          const removed = next.drawings[next.drawings.length - 1];
+          setRedo(previous => [...(event.drawingJson ? [] : previous), removed]);
+          replaceDraft({...next, drawings: next.drawings.slice(0, -1)});
+        } else if (request.purpose === 'redo' && !event.drawingJson && redo.length) {
+          replaceDraft({...next, drawings: [...next.drawings, redo[redo.length - 1]]}); setRedo(previous => previous.slice(0, -1));
+        } else if (event.drawingJson) setRedo([]);
+        setBusy(''); savingDraftId.current = null; return;
+      }
       await flushLatest(next.id);
       if (request.purpose === 'leave') { setBusy(''); savingDraftId.current = null; await request.after?.(); return; }
       setBusy(''); savingDraftId.current = null;
@@ -638,7 +697,7 @@ export default function App() {
       else if (commentInput.current?.isFocused()) { commentInput.current.blur(); }
       else if (libraryOpen || zoomOpen || speedOpen) { setLibraryOpen(false); setZoomOpen(false); setSpeedOpen(false); }
       else if (presenting) setFullScreen(false);
-      else { setTool('pointer'); commentInput.current?.blur(); }
+      else { setTool('pointer'); commentInput.current?.blur(); if (draft?.anchor.kind === 'play') { setPaused(true); setComposerOpen(true); } }
       return;
     }
     if (dialogOpen) return;
@@ -660,10 +719,15 @@ export default function App() {
       case 'reviewMode': changeReviewMode(reviewMode === 'watch' ? 'review' : 'watch'); break;
       case 'allReplies': setPaused(true); toggleAllReplies(); break;
       case 'play': play(); break;
-      case 'pause': setPaused(true); break;
+      case 'pause': setPaused(true); if (draft?.anchor.kind === 'play' && draft.drawings.length) setComposerOpen(true); break;
       case 'forward': shuttle(1); break;
       case 'reverse': shuttle(-1); break;
-      case 'previousFrame': case 'nextFrame': leaveDraft(() => { clearEditing(); setCommentId(null); setPaused(true); lastReviewStop.current = null; setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); }); break;
+      case 'previousFrame': case 'nextFrame': {
+        const stepFrame = () => { setReadyScene(''); setPaused(true); lastReviewStop.current = null; setStep(previous => ({token: previous.token + 1, frames: action === 'nextFrame' ? 1 : -1})); };
+        if (draft?.anchor.kind === 'play') stepFrame();
+        else leaveDraft(() => { clearEditing(); setCommentId(null); stepFrame(); });
+        break;
+      }
       case 'back': scrubTo(Math.max(0, time - 5000000)); break;
       case 'ahead': scrubTo(Math.min(duration, time + 5000000)); break;
       case 'start': scrubTo(0); break;
@@ -748,15 +812,18 @@ export default function App() {
         <ReviewWorkspace header={header} video={video} time={time} duration={duration} paused={paused} reviewMode={reviewMode} onMode={changeReviewMode}
           comments={videoComments} activityToken={activityToken} sceneReady={!!presentedSceneKey} notes={onVideoNotes} selectedId={commentId} draft={draft}
           composer={composerOpen ? composer : null} expanded={expanded} disabled={!!busy || dialogOpen}
-          onSelect={selectComment} onReply={replyToNote} onExpand={item => setExpanded(previous => { const next = new Set(previous); if (next.has(item.comment_id)) next.delete(item.comment_id); else next.add(item.comment_id); return next; })}
+          onSelect={selectComment} onReplay={item => leaveDraft(() => { selectCommentNow(item); seek(item.anchor.at_us); setRate(1); setComposerOpen(false); armReview(item.anchor.at_us, 1, true); setPaused(false); })} onReply={replyToNote} onExpand={item => setExpanded(previous => { const next = new Set(previous); if (next.has(item.comment_id)) next.delete(item.comment_id); else next.add(item.comment_id); return next; })}
           onPlay={play} rate={rate} zoom={zoom} presenting={presenting}
           onSpeed={() => { setSpeedOpen(value => !value); setZoomOpen(false); }} onZoom={() => { setZoomOpen(value => !value); setSpeedOpen(false); }} onPresent={togglePresentation}
           toolbar={<>
+            <Button quiet compact icon="cycle" style={{flexDirection: 'column', gap: 2, paddingHorizontal: 6, paddingVertical: 6}} label={`Annotation timing: ${annotationMode === 'play' ? 'Play' : 'Moment'}`} active={annotationMode === 'play'} disabled={!!busy || dialogOpen || !!draft?.parent_comment_id || !!draft?.drawings.length} onPress={changeAnnotationMode}>{annotationMode === 'play' ? 'Play' : 'Moment'}</Button>
+            {!draft && resumableDraft(data.drafts, video.id, null) && <Button quiet compact label="Resume comment" disabled={!!busy || dialogOpen} onPress={() => restoreDraftNow(resumableDraft(data.drafts, video.id, null)!)}>Resume</Button>}
+            {draft?.anchor.kind === 'play' && !draft.drawings.length && <Button quiet compact icon="close" label="Cancel play comment" disabled={!!busy || dialogOpen} onPress={() => void discard()} />}
             <Button toolbar quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('pointer')} />
             {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} toolbar quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={!!busy || dialogOpen} onPress={() => chooseTool(value)} />)}
             <Button toolbar quiet compact shortcut="laser" icon="target" label="Laser pointer" active={tool === 'laser'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('laser')} />
           </>}
-          timeline={<ReviewTimeline reviewEnd={reviewEnd} paused={paused} rate={rate} seekToken={seekState.token} mode={reviewMode} video={video} time={time} duration={duration} comments={originalComments} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => { const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectComment(next); }} onSeek={scrubTo} />}
+          timeline={<ReviewTimeline reviewEnd={reviewEnd} paused={paused} rate={rate} seekToken={seekState.token} mode={reviewMode} video={video} time={time} duration={duration} comments={originalComments} draftAnchor={draft?.anchor} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => { const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectComment(next); }} onSeek={scrubTo} />}
           popoverKind={speedOpen ? 'speed' : 'zoom'}
           popover={speedOpen || zoomOpen ? <View style={{gap: 2}}>{(speedOpen ? [.5, 1, 1.5, 2] : [1, 1.5, 2, 3, 4]).map(value => <Button quiet compact key={value} shortcut={!speedOpen && value === 1 ? 'zoomReset' : undefined} active={(speedOpen ? rate : zoom) === value} label={speedOpen ? `Playback speed ${value}×` : `Zoom ${value * 100}%`} onPress={() => { if (speedOpen) { setRate(value); armReview(time, value); } else setZoom(value); setSpeedOpen(false); setZoomOpen(false); }}>{speedOpen ? `${value}×` : value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}</View> : null}
           >
@@ -764,7 +831,7 @@ export default function App() {
             seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson} presentedSceneKey={presentedSceneKey}
             flushToken={flushToken} stepToken={step.token} stepFrames={step.frames} onStrokeFlushFinished={event => void onStrokeFlushFinished(event.nativeEvent)}
             tool={reviewMode === 'watch' ? busy ? 'none' : 'pointer' : (!busy || !!flushRequest.current) && (draft || tool === 'pointer' || tool === 'laser') ? tool : 'none'}
-            onDrawingStart={event => { setTime(event.nativeEvent.time_us); setPaused(true); }}
+            onDrawingStart={event => { setDrawingActive(true); setTime(event.nativeEvent.time_us); if (event.nativeEvent.paused) setPaused(true); }}
             onPointer={event => {
               setZoomOpen(false); setSpeedOpen(false);
               if (reviewMode === 'review' && tool === 'laser') setPointerPulse({...event.nativeEvent, token: Date.now()});
