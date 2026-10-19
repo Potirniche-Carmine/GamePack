@@ -90,7 +90,7 @@ export function ReviewWorkspace(props: Props) {
         </View>
         <View style={styles.transportSpace} />
         <View onLayout={event => { const {x, width} = event.nativeEvent.layout; setMenuAnchors(previous => ({...previous, speed: 20 + x + width / 2})); }}>
-        <Button quiet compact label="Playback speed" disabled={disabled} onPress={props.onSpeed}>{props.rate}×</Button></View>
+        <Button quiet compact style={{width: 60}} label="Playback speed" disabled={disabled} onPress={props.onSpeed}>{props.rate}×</Button></View>
         <View onLayout={event => { const {x, width} = event.nativeEvent.layout; setMenuAnchors(previous => ({...previous, zoom: 20 + x + width / 2})); }}>
         <Button quiet compact label="Video zoom" disabled={disabled} onPress={props.onZoom}>{props.zoom === 1 ? 'Fit' : `${Math.round(props.zoom * 100)}%`}</Button></View>
         <Button quiet compact icon={props.presenting ? 'minimize' : 'maximize'} label={props.presenting ? 'Exit full screen' : 'Enter full screen'} shortcut="present" disabled={disabled} onPress={props.onPresent} />
@@ -133,7 +133,7 @@ function NoteColumn(props: Props & {numbers: ReadonlyMap<string, number>}) {
   return <ScrollView ref={scroll} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" style={styles.noteColumn}
     onContentSizeChange={() => { if (hasComposer) scroll.current?.scrollToEnd({animated: false}); }}
     contentContainerStyle={styles.noteContent}>
-      {rows.map(({note, replies}, index) => {
+      {[...rows.map(({note, replies}, index) => {
         const expanded = props.expanded.has(note.comment_id);
         return <Glass key={note.comment_id} selected={props.selectedId === note.comment_id || replying?.comment_id === note.comment_id} style={[styles.note, {height: rowHeight(index)}]}>
           <Pressable disabled={props.disabled} accessibilityRole="button" accessibilityLabel={`Select comment${props.numbers.has(note.comment_id) ? ` ${props.numbers.get(note.comment_id)}` : ''} by ${note.name_at_posting}`}
@@ -157,10 +157,9 @@ function NoteColumn(props: Props & {numbers: ReadonlyMap<string, number>}) {
             <View style={{flex: 1}} /><Button quiet compact label={`Reply to ${note.name_at_posting}`} disabled={props.disabled} onPress={() => props.onReply(note)}>Reply</Button>
           </View>
         </Glass>;
-      })}
-      {hasComposer && <Glass selected style={[styles.note, replying && {marginLeft: 16}]}>
+      }), hasComposer && <Glass key={props.draft!.id} selected style={[styles.note, {minHeight: 146}, replying && {marginLeft: 16}]}>
         {props.composer}
-      </Glass>}
+      </Glass>]}
   </ScrollView>;
 }
 

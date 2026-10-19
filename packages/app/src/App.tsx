@@ -1,10 +1,10 @@
 import {Glass, GlassSurface, LibraryBackdrop} from './Glass';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View, StyleSheet, useWindowDimensions} from 'react-native';
-import {anchorStart, Button, Dialog, Empty, ShortcutContext, TextField} from './components';
+import {anchorStart, Button, Dialog, Empty, PendingInteractionContext, ShortcutContext, TextField} from './components';
 import {chooseVideo, command, configureDrawingHistory, configureShortcuts, dataDirectory, GamePackPlayer, installUpdate, listenShortcuts, listenWindowState, setAppearance, setFullScreen} from './native';
 import {expandedAncestors, mergeDrawings} from './review';
-import {annotationScene, annotationSceneKey, sameFrame} from './playback';
+import {annotationScene, annotationSceneKey, PLAYBACK_SPEEDS, sameFrame} from './playback';
 import {Icon} from './Icon';
 import {ReviewWorkspace} from './ReviewWorkspace';
 import {TooltipProvider} from './Tooltips';
@@ -18,7 +18,7 @@ import {MotionPressable} from './motion';
 import {CommentComposer} from './CommentComposer';
 import {drawingEndPosition, type Point} from './spatial';
 import {conversationRoot} from './discussion';
-import {canPostDraft, extendPlayDraft, playDraftSeek, resumableDraft} from './drafts';
+import {canPostDraft, extendPlayDraft, playDraftSeek, seekPlayDraft, resumableDraft} from './drafts';
 import {LibraryBrowser} from './LibraryBrowser';
 import {libraryContents, videoTitle} from './library';
 import {ReviewTimeline} from './ReviewTimeline';
@@ -42,6 +42,14 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const [visibleBusy, setVisibleBusy] = useState('');
+  const controlsBusy = !!busy && (busy !== 'Saving…' || !!visibleBusy);
+  useEffect(() => {
+    setVisibleBusy('');
+    if (!busy) return;
+    const timer = setTimeout(() => setVisibleBusy(busy), 400);
+    return () => clearTimeout(timer);
+  }, [busy]);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<'profile' | 'appearance'>('appearance');
   const [folderDialog, setFolderDialog] = useState<{kind: 'create' | 'renameFolder' | 'renameProject'; id?: string} | null>(null);
@@ -278,7 +286,7 @@ export default function App() {
     else void after();
   };
   const restoreDraftNow = (pending: Draft) => {
-    if (pending.anchor.kind === 'play' && captureRate.current === null) captureRate.current = rate;
+    if (pending.anchor.kind === 'play' && captureRate.current === null) { captureRate.current = rate; setRate((data?.settings.annotation_speed_percent ?? 50) / 100); }
     if (pending.anchor.kind === 'point' && captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
     setAnnotationMode(pending.anchor.kind);
     activeDraftRef.current = pending.id; setDraftId(pending.id); setCommentId(null);
@@ -317,7 +325,8 @@ export default function App() {
   const newDraftNow = (parent?: Comment, timing = annotationMode) => {
     if (!video || busy || reviewMode !== 'review') return;
     setComposerOpen(!!parent); setLibraryVisible(false);
-    if (draft && !parent) return draft;
+    const active = draftsRef.current.find(item => item.id === activeDraftRef.current);
+    if (active && !parent) return active;
     const pending = parent ? resumableDraft(draftsRef.current, video.id, parent.comment_id) : undefined;
     if (pending) { restoreDraftNow(pending); return pending; }
 
@@ -325,7 +334,7 @@ export default function App() {
       const value: Draft = {id: uuid(), project_id: video.project_id, video_id: video.id, text: '',
         anchor: parent?.anchor ?? (timing === 'play' ? {kind: 'play', at_us: Math.min(time, duration || time), end_us: Math.min(time, duration || time)} : {kind: 'point', at_us: Math.min(time, duration || time)}),
         parent_comment_id: parent?.comment_id ?? null, drawings: [], position: parent?.position};
-      if (value.anchor.kind === 'play' && captureRate.current === null) captureRate.current = rate;
+      if (value.anchor.kind === 'play' && captureRate.current === null) { captureRate.current = rate; setRate((data?.settings.annotation_speed_percent ?? 50) / 100); }
       if (value.anchor.kind === 'point' && captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; }
       setAnnotationMode(value.anchor.kind);
       replaceDraft(value); activeDraftRef.current = value.id; setDraftId(value.id); setCommentId(null);
@@ -373,6 +382,7 @@ export default function App() {
     scrubTarget.current = us;
     if (flushRequest.current) return;
     if (draft?.anchor.kind === 'play') {
+      replaceDraft(seekPlayDraft(draft, us, duration));
       setPaused(true); seek(playDraftSeek(draft, us, duration)); return;
     }
     leaveDraft(() => {
@@ -399,7 +409,7 @@ export default function App() {
       }
       setTime(now);
       if (current?.anchor.kind === 'play' && !current.parent_comment_id && !flushRequest.current && !savingDraftId.current
-        && (now > current.anchor.end_us + 1000000 || (!event.playing && now > current.anchor.end_us)))
+        && (now < current.anchor.at_us || now > current.anchor.end_us + 1000000 || (!event.playing && now > current.anchor.end_us)))
         replaceDraft(extendPlayDraft(current, now));
 
     }
@@ -455,12 +465,18 @@ export default function App() {
     if (draft.anchor.kind === 'point') { setPaused(true); seek(draft.anchor.at_us); }
   };
   const changeAnnotationMode = () => {
-    if (busy || draft?.parent_comment_id || draft?.drawings.length) return;
+    if (busy || draft?.parent_comment_id) return;
+    commentInput.current?.blur(); focusParent.current = null;
     const mode = annotationMode === 'point' ? 'play' : 'point';
+    if (annotationMode === 'play' || draft?.drawings.length) {
+      // Keep finished strokes as a resumable draft when ending this capture.
+      leaveDraft(() => { clearEditing(); setComposerOpen(false); setPaused(true); if (mode === 'play') newDraftNow(undefined, mode); });
+      return;
+    }
     setAnnotationMode(mode); setPaused(true); setRedo([]);
     if (!draft && mode === 'play') newDraftNow(undefined, mode);
     if (draft) {
-      if (mode === 'play' && captureRate.current === null) captureRate.current = rate;
+      if (mode === 'play' && captureRate.current === null) { captureRate.current = rate; setRate((data?.settings.annotation_speed_percent ?? 50) / 100); }
       updateDraft({anchor: mode === 'play' ? {...draft.anchor, kind: 'play', end_us: draft.anchor.at_us} : {kind: 'point', at_us: draft.anchor.at_us}});
       if (mode === 'point') { seek(draft.anchor.at_us); if (captureRate.current !== null) { setRate(captureRate.current); captureRate.current = null; } }
     }
@@ -474,8 +490,20 @@ export default function App() {
     requestStrokeFlush('redo');
   };
 
-  const publishDraft = async (id: string) => {
+  const publishDraft = async (id: string, settledTime = time) => {
     setBusy('Saving…'); savingDraftId.current = id; setError('');
+    const presentPosted = (posted: Comment, comments: Comment[]) => {
+      const target = conversationTarget(comments, posted, duration);
+      clearEditing(); setCommentId(target.comment.comment_id); setPaused(true);
+      setExpanded(previous => new Set(expandedAncestors(comments, posted.comment_id, previous)).add(target.comment.comment_id));
+      if (sameFrame(settledTime, target.time)) {
+        // The stroke flush already settled this frame. Publishing changes its
+        // identity, not the media frame, so keep ink and the card presented.
+        const scene = annotationScene(comments.filter(item => item.video_id === posted.video_id), settledTime, true, target.comment.comment_id);
+        setReadyScene(annotationSceneKey(scene ? JSON.stringify(scene) : '', seekRequest.current.token, step.token));
+      } else seek(target.time);
+      lastReviewStop.current = target.time;
+    };
     try {
       const latest = await flushLatest(id);
       if (!canPostDraft(latest)) throw new Error(latest.parent_comment_id ? 'Add a reply or drawing before saving.' : 'Add a drawing before saving.');
@@ -487,13 +515,13 @@ export default function App() {
         const comments = [...previous.comments.filter(item => item.comment_id !== posted.comment_id), posted];
         return {...previous, drafts: draftsRef.current, comments};
       });
-      selectCommentNow(posted);
+      presentPosted(posted, [...(data?.comments ?? []).filter(item => item.comment_id !== posted.comment_id), posted]);
 
     } catch (cause) {
       try {
         const refreshed = await command<Bootstrap>(root, 'bootstrap');
         const posted = refreshed.comments.find(item => item.comment_id === id);
-        if (posted) { draftsRef.current = refreshed.drafts; setData(refreshed); selectCommentNow(posted); return; }
+        if (posted) { draftsRef.current = refreshed.drafts; setData(refreshed); presentPosted(posted, refreshed.comments); return; }
       } catch { /* Keep the local draft when storage cannot be reached. */ }
       setError(`Could not save comment: ${message(cause)}. Retry Post.`);
 
@@ -544,7 +572,7 @@ export default function App() {
       if (request.purpose === 'leave') { setBusy(''); savingDraftId.current = null; await request.after?.(); return; }
       setBusy(''); savingDraftId.current = null;
       if (!data?.profile.name.trim()) { pendingPublish.current = next.id; setProfileName(''); setProfileOpen(true); }
-      else await publishDraft(next.id);
+      else await publishDraft(next.id, event.time_us);
     } catch (cause) {
       flushRequest.current = null; savingDraftId.current = null; setPaused(true); setBusy(''); setError(message(cause));
       request.completion?.reject(cause);
@@ -655,7 +683,7 @@ export default function App() {
     setBusy('Saving settings…'); setSettingsError('');
     try {
       await settingsWrites.current.run('shortcuts', async () => {
-        const saved = await command<Settings>(root, 'set_preferences', {keybindings: settings.keybindings});
+        const saved = await command<Settings>(root, 'set_preferences', {keybindings: settings.keybindings, annotation_speed_percent: settings.annotation_speed_percent});
         setData(current => current ? {...current, settings: saved} : current);
       });
     } catch (cause) { setSettingsError(message(cause)); }
@@ -848,27 +876,26 @@ export default function App() {
     <View pointerEvents={dialogOpen || settingsOpen ? 'none' : 'auto'} accessibilityElementsHidden={dialogOpen || settingsOpen} importantForAccessibility={dialogOpen || settingsOpen ? 'no-hide-descendants' : 'auto'} style={[s.workspace, !!video && {paddingHorizontal: 0, paddingBottom: 0, gap: 0}]}>
       <View style={s.stage}>
         {!video ? <LibraryBrowser {...libraryProps} /> : <>
-        <ReviewWorkspace header={header} video={video} time={time} duration={duration} paused={paused} reviewMode={reviewMode} onMode={changeReviewMode}
+        <PendingInteractionContext.Provider value={!!busy}><ReviewWorkspace header={header} video={video} time={time} duration={duration} paused={paused} reviewMode={reviewMode} onMode={changeReviewMode}
           comments={videoComments} activityToken={activityToken} sceneReady={!!presentedSceneKey} notes={onVideoNotes} selectedId={commentId} draft={draft}
-          composer={composerOpen ? composer : null} expanded={expanded} disabled={!!busy || dialogOpen}
+          composer={composerOpen ? composer : null} expanded={expanded} disabled={controlsBusy || dialogOpen}
           onSelect={selectComment} onReplay={item => leaveDraft(() => { selectCommentNow(item); seek(item.anchor.at_us); setRate(1); setComposerOpen(false); armReview(item.anchor.at_us, 1, true); setPaused(false); })} onReply={replyToNote} onExpand={item => setExpanded(previous => { const next = new Set(previous); if (next.has(item.comment_id)) next.delete(item.comment_id); else next.add(item.comment_id); return next; })}
           onPlay={play} rate={rate} zoom={zoom} presenting={presenting}
           onSpeed={() => { setSpeedOpen(value => !value); setZoomOpen(false); }} onZoom={() => { setZoomOpen(value => !value); setSpeedOpen(false); }} onPresent={togglePresentation}
           toolbar={<>
             <View style={{width: 64, height: 56}}>
-              <Button quiet compact icon="cycle" style={{width: 64, height: 56, flexDirection: 'column', gap: 2, paddingHorizontal: 0, paddingVertical: 6}} label={`Annotation timing: ${annotationMode === 'play' ? 'Play' : 'Moment'}`} active={annotationMode === 'play'} disabled={!!busy || dialogOpen || !!draft?.parent_comment_id || !!draft?.drawings.length} onPress={changeAnnotationMode}>{annotationMode === 'play' ? 'Play' : 'Moment'}</Button>
+              <Button quiet compact icon="cycle" style={{width: 64, height: 56, flexDirection: 'column', gap: 2, paddingHorizontal: 0, paddingVertical: 6}} label={`Annotation timing: ${annotationMode === 'play' ? 'Play' : 'Moment'}`} active={annotationMode === 'play'} disabled={controlsBusy || dialogOpen || !!draft?.parent_comment_id} onPress={changeAnnotationMode}>{annotationMode === 'play' ? 'Play' : 'Moment'}</Button>
             </View>
-            <Button toolbar quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('pointer')} />
-            {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} toolbar quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={!!busy || dialogOpen} onPress={() => chooseTool(value)} />)}
-            <Button toolbar quiet compact shortcut="laser" icon="target" label="Laser pointer" active={tool === 'laser'} disabled={!!busy || dialogOpen} onPress={() => chooseTool('laser')} />
+            <Button toolbar quiet compact shortcut="pointer" icon="pointer" label="Pointer" active={tool === 'pointer'} disabled={controlsBusy || dialogOpen} onPress={() => chooseTool('pointer')} />
+            {(['pen', 'arrow', 'ellipse'] as const).map(value => <Button key={value} toolbar quiet compact shortcut={value} icon={value} label={value === 'pen' ? 'Pen' : value === 'arrow' ? 'Arrow' : 'Ellipse'} active={tool === value} disabled={controlsBusy || dialogOpen} onPress={() => chooseTool(value)} />)}
+            <Button toolbar quiet compact shortcut="laser" icon="target" label="Laser pointer" active={tool === 'laser'} disabled={controlsBusy || dialogOpen} onPress={() => chooseTool('laser')} />
           </>}
           toolbarAccessory={<>
-            {!draft && resumableDraft(data.drafts, video.id, null) && <Button compact label="Resume comment" disabled={!!busy || dialogOpen} onPress={() => restoreDraftNow(resumableDraft(data.drafts, video.id, null)!)}>Resume</Button>}
-            {draft?.anchor.kind === 'play' && !draft.drawings.length && <Button compact icon="close" label="Cancel play comment" disabled={!!busy || dialogOpen} onPress={() => void discard()} />}
+            {!draft && resumableDraft(data.drafts, video.id, null) && <Button compact label="Resume comment" disabled={controlsBusy || dialogOpen} onPress={() => restoreDraftNow(resumableDraft(data.drafts, video.id, null)!)}>Resume</Button>}
           </>}
-          timeline={<ReviewTimeline reviewEnd={reviewEnd} paused={paused} rate={rate} seekToken={seekState.token} mode={reviewMode} video={video} time={time} duration={duration} comments={originalComments} draftAnchor={draft?.anchor} selectedId={commentId} disabled={!!busy || dialogOpen} onSelect={selectComment} onCluster={items => { const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectComment(next); }} onSeek={scrubTo} />}
+          timeline={<ReviewTimeline reviewEnd={reviewEnd} paused={paused} rate={rate} seekToken={seekState.token} mode={reviewMode} video={video} time={time} duration={duration} comments={originalComments} draftAnchor={draft?.anchor} selectedId={commentId} disabled={controlsBusy || dialogOpen} onSelect={selectComment} onCluster={items => { const next = items[(items.findIndex(item => item.comment_id === commentId) + 1) % items.length]; selectComment(next); }} onSeek={scrubTo} />}
           popoverKind={speedOpen ? 'speed' : 'zoom'}
-          popover={speedOpen || zoomOpen ? <View style={{gap: 2}}>{(speedOpen ? [.5, 1, 1.5, 2] : [1, 1.5, 2, 3, 4]).map(value => <Button quiet compact key={value} shortcut={!speedOpen && value === 1 ? 'zoomReset' : undefined} active={(speedOpen ? rate : zoom) === value} label={speedOpen ? `Playback speed ${value}×` : `Zoom ${value * 100}%`} onPress={() => { if (speedOpen) { setRate(value); armReview(time, value); } else setZoom(value); setSpeedOpen(false); setZoomOpen(false); }}>{speedOpen ? `${value}×` : value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}</View> : null}
+          popover={speedOpen || zoomOpen ? <View style={{gap: 2}}>{(speedOpen ? PLAYBACK_SPEEDS : [1, 1.5, 2, 3, 4]).map(value => <Button quiet compact key={value} shortcut={!speedOpen && value === 1 ? 'zoomReset' : undefined} active={(speedOpen ? rate : zoom) === value} label={speedOpen ? `Playback speed ${value}×` : `Zoom ${value * 100}%`} onPress={() => { if (speedOpen) { setRate(value); armReview(time, value); } else setZoom(value); setSpeedOpen(false); setZoomOpen(false); }}>{speedOpen ? `${value}×` : value === 1 ? 'Fit' : `${value * 100}%`}</Button>)}</View> : null}
           >
           <GamePackPlayer key={video.id} style={StyleSheet.absoluteFill} source={video.path} zoom={zoom} zoomToken={zoomState.token} onZoom={({nativeEvent}) => setZoomState(previous => receiveZoom(previous, nativeEvent))} paused={paused} rate={rate}
             seekUs={seekState.us} seekToken={seekState.token} reviewEndUs={reviewEnd} sceneJson={sceneJson} presentedSceneKey={presentedSceneKey}
@@ -883,9 +910,9 @@ export default function App() {
             onSceneReady={event => setReadyScene(event.nativeEvent.key)} onActivity={() => setActivityToken(value => value + 1)}
             onTime={event => onTime(event.nativeEvent)} onDrawing={event => onDrawing(event.nativeEvent.drawingJson)} />
           {reviewMode === 'review' && tool === 'laser' && <PointerPulse point={pointerPulse} />}
-        </ReviewWorkspace>
+        </ReviewWorkspace></PendingInteractionContext.Provider>
         </>}
-        {!!busy && <View style={s.statusRow}><Text style={s.status}>{busy}</Text></View>}
+        {!!visibleBusy && <View pointerEvents="none" style={s.statusRow}><Text style={s.status}>{visibleBusy}</Text></View>}
       </View>
     </View>
     {libraryOpen && !settingsOpen && <><Pressable accessible={false} focusable={false} style={[StyleSheet.absoluteFill, {zIndex: 3}]} onPress={() => setLibraryOpen(false)} />{libraryPanel}</>}

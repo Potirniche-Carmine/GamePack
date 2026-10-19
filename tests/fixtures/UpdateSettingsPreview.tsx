@@ -49,7 +49,7 @@ export default function UpdateSettingsPreview() {
       <Button onPress={() => setChoice(choice === 'dark' ? 'light' : 'dark')}>{choice === 'dark' ? 'Light' : 'Dark'}</Button>
       {!open && <Button onPress={() => setOpen(true)}>Open Settings</Button>}
     </View>
-    {open ? <SettingsPage key={scenario} animateEntrance={false} settings={{theme: choice, keybindings: {}}} profile={{author_id: 'preview', name}}
+    {open ? <SettingsPage key={scenario} animateEntrance={false} settings={{theme: choice, keybindings: {}, annotation_speed_percent: 50}} profile={{author_id: 'preview', name}}
       recording={null} error="" busy={false} onRecord={() => {}} onChange={() => {}} onTheme={setChoice} onClose={() => setOpen(false)}
       onProfileSave={async value => { setName(value); }} onRestart={fixture.restart} updateController={fixture.controller} />
       : <Text style={{color: theme.colors.text}}>Settings closed</Text>}

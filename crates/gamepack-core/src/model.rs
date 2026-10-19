@@ -30,6 +30,7 @@ impl Theme {
 pub struct Settings {
     pub theme: Theme,
     pub keybindings: std::collections::BTreeMap<String, Option<String>>,
+    pub annotation_speed_percent: u16,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -146,6 +147,7 @@ pub(crate) enum Request {
     },
     SetPreferences {
         keybindings: std::collections::BTreeMap<String, Option<String>>,
+        annotation_speed_percent: Option<u16>,
     },
     DeleteVideo {
         video_id: String,

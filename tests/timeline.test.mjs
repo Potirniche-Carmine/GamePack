@@ -171,3 +171,9 @@ test('unknown duration and initial layout preserve comments without invalid posi
   }
   assert.deepEqual(clusterTimelineComments([], 100, 300), []);
 });
+
+test('posting or changing speed while paused retains the settled playhead', () => {
+  const paused = {time: 7300000, duration: 30000000, paused: true, rate: .5, seekToken: 4};
+  assert.deepEqual(timelineMotion(paused, {...paused, rate: 1}), {kind: 'snap', time: paused.time});
+  assert.deepEqual(timelineMotion(paused, paused), {kind: 'snap', time: paused.time});
+});

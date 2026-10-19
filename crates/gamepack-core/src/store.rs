@@ -131,12 +131,28 @@ impl Store {
                 )?;
                 value(self.settings()?)
             }
-            Request::SetPreferences { keybindings } => {
+            Request::SetPreferences {
+                keybindings,
+                annotation_speed_percent,
+            } => {
                 crate::shortcuts::validate(&keybindings)?;
-                self.db.execute(
+                if let Some(speed) = annotation_speed_percent {
+                    ensure!(
+                        [25, 50, 75, 100, 200, 400].contains(&speed),
+                        "Invalid annotation playback speed"
+                    );
+                }
+                let tx = self
+                    .db
+                    .transaction_with_behavior(TransactionBehavior::Immediate)?;
+                tx.execute(
                     "UPDATE preferences SET keybindings=?1 WHERE singleton=1",
                     params![serde_json::to_string(&keybindings)?],
                 )?;
+                if let Some(speed) = annotation_speed_percent {
+                    tx.execute("UPDATE playback_preferences SET annotation_speed_percent=?1 WHERE singleton=1", [speed])?;
+                }
+                tx.commit()?;
                 value(self.settings()?)
             }
             Request::DeleteVideo { video_id } => self.delete_scope(&video_id, false),
@@ -385,6 +401,11 @@ impl Store {
         )?;
         Ok(Settings {
             keybindings: serde_json::from_str(&bindings)?,
+            annotation_speed_percent: self.db.query_row(
+                "SELECT annotation_speed_percent FROM playback_preferences WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )?,
             theme: match theme.as_str() {
                 "system" => Theme::System,
                 "light" => Theme::Light,

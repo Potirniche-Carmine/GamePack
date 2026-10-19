@@ -26,7 +26,7 @@ export function CommentComposer({draft, name, input, disabled, saving, failed, o
   }, [draft.text]);
   return <View style={[styles.composer, {backgroundColor: 'transparent'}]}>
     <View style={styles.header}>
-      <View style={styles.identity}><Avatar name={name} size={24} /><Text numberOfLines={1} style={[styles.author, {color: colors.text}]}>{name}</Text></View>
+      <View style={styles.identity}><Avatar name={name} size={22} /><Text numberOfLines={1} style={[styles.author, {color: colors.text}]}>{name}</Text></View>
       <Text style={{color: colors.muted, fontSize: 11, fontVariant: ['tabular-nums']}}>{anchorLabel(draft.anchor)}</Text>
       <Button quiet compact icon="close" label="Hide comment" disabled={disabled} onPress={onHide} />
     </View>
@@ -40,18 +40,18 @@ export function CommentComposer({draft, name, input, disabled, saving, failed, o
     <View style={styles.footer}>
       <Button quiet compact icon="trash" label="Discard comment" disabled={disabled} onPress={onDiscard} />
       {failed && <Button compact disabled={disabled} onPress={onRetry}>Retry</Button>}
-      <View style={{flex: 1}} /><Button primary compact shortcut="submit" disabled={disabled || !canPostDraft(draft)} onPress={onPost}>{saving ? 'Saving…' : 'Post'}</Button>
+      <View style={{flex: 1}} /><Button primary compact shortcut="submit" disabled={disabled || !canPostDraft(draft)} style={{minWidth: 75}} onPress={onPost}>{saving ? 'Saving…' : 'Post'}</Button>
     </View>
   </View>;
 }
 const styles = StyleSheet.create({
-  composer: {padding: 10, borderRadius: 11},
-  header: {flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6},
+  composer: {minHeight: 124, flex: 1},
+  header: {flexDirection: 'row', alignItems: 'center', gap: 7, height: 28, marginBottom: 5},
   identity: {flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8},
-  author: {fontSize: 11, lineHeight: 16, flex: 1},
-  textArea: {minHeight: 24, maxHeight: 152, overflow: 'hidden'},
+  author: {fontSize: 12, lineHeight: 16, fontWeight: '600', flex: 1},
+  textArea: {flexGrow: 1, minHeight: 24, maxHeight: 152, overflow: 'hidden'},
   field: {...StyleSheet.absoluteFillObject, minHeight: 24, borderWidth: 0, paddingHorizontal: 2, paddingVertical: 0},
   editor: {flex: 1, minHeight: 24, fontSize: 13, lineHeight: 19},
   measure: {opacity: 0, fontSize: 13, lineHeight: 19, paddingHorizontal: 4, paddingVertical: 5},
-  footer: {flexDirection: 'row', alignItems: 'center', marginTop: 6},
+  footer: {flexDirection: 'row', alignItems: 'center', minHeight: 32, marginTop: 8},
 });
