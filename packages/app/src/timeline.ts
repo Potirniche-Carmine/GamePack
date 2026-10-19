@@ -1,4 +1,4 @@
-import {compareComments} from './playback';
+import {compareComments, sameFrame} from './playback';
 import type {Comment} from './types';
 
 export type TimelineCluster = {
@@ -12,6 +12,16 @@ export type TimelineCluster = {
 const minimumGap = 6;
 const start = (comment: Comment) => comment.anchor.at_us;
 const safeWidth = (width: number) => Number.isFinite(width) ? Math.max(0, width) : 0;
+
+/** A proximity group is not a count of conversations on one frame. Keep every
+ * source anchor visible, and point the group leader at the selected moment. */
+export function timelineClusterPresentation(cluster: TimelineCluster, duration: number, width: number, selectedId: string | null) {
+  const selected = cluster.comments.find(comment => comment.comment_id === selectedId);
+  const simultaneous = cluster.comments.every(comment => sameFrame(start(comment), start(cluster.comments[0])));
+  const positions = [...new Set(cluster.comments.map(comment => timelinePosition(start(comment), duration, width)))];
+  return {positions, anchor: selected ? timelinePosition(start(selected), duration, width) : cluster.anchor,
+    count: simultaneous && cluster.comments.length > 1 ? cluster.comments.length : null};
+}
 
 export function timelineDockBounds(available: number) {
   const max = Math.max(1, safeWidth(available) - 48);
@@ -47,7 +57,7 @@ export function timelineMotion(previous: TimelineSample | null, current: Timelin
   if (discontinuity || (paused && reviewEnd >= 0 && Math.abs(time - reviewEnd) <= 2000)) return {kind: 'snap' as const, time};
   // The pause request still carries the previous periodic sample. Freeze the
   // presentation until native reports the stopped frame, instead of rewinding.
-  if (paused && time === previous.time) return {kind: 'hold' as const, time};
+  if (paused && time === previous.time) return {kind: previous.paused ? 'snap' as const : 'hold' as const, time};
   return {kind: 'animate' as const, ...(paused ? {time, duration: 100} : timelinePrediction(current))};
 }
 

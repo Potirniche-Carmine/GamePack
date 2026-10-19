@@ -8,12 +8,13 @@ import type {Colors} from './colors';
 import {binding, shortcutLabel, shortcuts} from './shortcuts';
 import {useTheme} from './theme';
 import {UpdateSettings} from './UpdateSettings';
+import {PLAYBACK_SPEEDS} from './playback';
 import type {UpdateController} from './updateFlow';
 import type {Profile, Settings, ThemeChoice} from './types';
 
-type SettingsTab = 'profile' | 'appearance' | 'shortcuts';
+type SettingsTab = 'profile' | 'appearance' | 'playback' | 'shortcuts';
 const tabs: {id: SettingsTab; label: string}[] = [
-  {id: 'profile', label: 'Profile'}, {id: 'appearance', label: 'Appearance'}, {id: 'shortcuts', label: 'Shortcuts'},
+  {id: 'profile', label: 'Profile'}, {id: 'appearance', label: 'Appearance'}, {id: 'playback', label: 'Playback'}, {id: 'shortcuts', label: 'Shortcuts'},
 ];
 
 export function SettingsPage({settings, profile, recording, error, busy: externalBusy, onRestart, onProfileSave, onRecord, onChange, onTheme, onClose, updateController, initialTab = 'appearance', animateEntrance = true}: {
@@ -103,6 +104,14 @@ export function SettingsPage({settings, profile, recording, error, busy: externa
           {(['system', 'light', 'dark'] as const).map(choice => <AppearanceOption key={choice} choice={choice} selected={settings.theme === choice} disabled={busy} onPress={() => onTheme(choice)} />)}
         </View>
 
+      </View>}
+      {tab === 'playback' && <View style={{gap: 14}}>
+        <Text style={s.fieldLabel}>Default annotation speed</Text>
+        <View style={{flexDirection: 'row', gap: 8, flexWrap: 'wrap'}}>
+          {PLAYBACK_SPEEDS.map(speed => <Button key={speed} compact style={{minWidth: 64}}
+            label={`Default annotation speed ${speed}×`} active={settings.annotation_speed_percent === speed * 100}
+            disabled={busy} onPress={() => onChange({...settings, annotation_speed_percent: speed * 100})}>{speed}×</Button>)}
+        </View>
       </View>}
       {tab === 'shortcuts' && <View>
         <View style={s.searchRow}>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {clusterTimelineComments, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePrediction, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
+import {clusterTimelineComments, timelineClusterPresentation, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePrediction, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
 
 test('pausing holds the presented position until the stopped native frame arrives; resume never snaps', () => {
   const playing = {time: 2000000, duration: 30000000, paused: false, rate: 1, seekToken: 1};
@@ -116,6 +116,25 @@ test('clustering follows rendered pixel proximity and responds to resizing', () 
   assert.deepEqual(ids(clusterTimelineComments(comments, 100, 300)), [['a', 'b'], ['c']]);
 });
 
+test('nearby moments retain exact ticks without claiming multiple comments on one frame', () => {
+  const comments = [note('first', 1000000), note('second', 1500000)];
+  const [cluster] = clusterTimelineComments(comments, 16000000, 600);
+  assert.equal(cluster.comments.length, 2);
+  const view = timelineClusterPresentation(cluster, 16000000, 600, 'second');
+  assert.equal(view.count, null);
+  assert.deepEqual(view.positions, comments.map(comment => timelinePosition(comment.anchor.at_us, 16000000, 600)));
+  assert.equal(view.anchor, view.positions[1]);
+  assert.equal(timelineClusterPresentation(cluster, 16000000, 600, null).anchor, view.positions[0]);
+});
+
+test('simultaneous conversations still have an accurate count, including play anchors', () => {
+  const comments = [note('moment', 1000000), {comment_id: 'play', anchor: {kind: 'play', at_us: 1000000, end_us: 6000000}}];
+  const [cluster] = clusterTimelineComments(comments, 16000000, 600);
+  assert.equal(timelineClusterPresentation(cluster, 16000000, 600, 'moment').count, 2);
+  const [single] = clusterTimelineComments(comments.slice(0, 1), 16000000, 600);
+  assert.equal(timelineClusterPresentation(single, 16000000, 600, 'moment').count, null);
+});
+
 test('expanded labels merge neighbors and remain within both timeline edges', () => {
   const comments = [note('start-a', 0), note('start-b', 0), note('near-start', 10),
     note('middle', 50), note('near-end', 90), note('end-a', 100), note('end-b', 100)];
@@ -151,4 +170,10 @@ test('unknown duration and initial layout preserve comments without invalid posi
     for (const cluster of clusters) for (const value of [cluster.anchor, cluster.left, cluster.width]) assert.ok(Number.isFinite(value));
   }
   assert.deepEqual(clusterTimelineComments([], 100, 300), []);
+});
+
+test('posting or changing speed while paused retains the settled playhead', () => {
+  const paused = {time: 7300000, duration: 30000000, paused: true, rate: .5, seekToken: 4};
+  assert.deepEqual(timelineMotion(paused, {...paused, rate: 1}), {kind: 'snap', time: paused.time});
+  assert.deepEqual(timelineMotion(paused, paused), {kind: 'snap', time: paused.time});
 });

@@ -21,10 +21,19 @@ export function extendPlayDraft(draft: Draft, time: number, drawings = draft.dra
   if (draft.anchor.kind !== 'play' || draft.parent_comment_id) return {...draft, drawings};
   const end = drawings.reduce((latest, drawing) => drawing.samples.reduce((end, sample) => Math.max(end, sample.t_us ?? 0), latest),
     Math.max(draft.anchor.end_us, Number.isSafeInteger(time) ? time : 0));
-  return {...draft, drawings, anchor: {...draft.anchor, end_us: end}};
+  return {...draft, drawings, anchor: {...draft.anchor, at_us: Number.isSafeInteger(time) && time >= 0 ? Math.min(draft.anchor.at_us, time) : draft.anchor.at_us, end_us: end}};
 }
 
 export function playDraftSeek(draft: Draft, time: number, duration: number): number {
   if (draft.anchor.kind !== 'play') return draft.anchor.at_us;
-  return Math.round(Math.max(draft.anchor.at_us, Math.min(draft.parent_comment_id ? draft.anchor.end_us : duration, time)));
+  return Math.round(Math.max(draft.parent_comment_id ? draft.anchor.at_us : 0, Math.min(draft.parent_comment_id ? draft.anchor.end_us : duration, time)));
+}
+
+/** An empty play follows the chosen start; existing strokes keep their source times. */
+export function seekPlayDraft(draft: Draft, time: number, duration: number): Draft {
+  if (draft.anchor.kind !== 'play' || draft.parent_comment_id) return draft;
+  const target = playDraftSeek(draft, time, duration);
+  return {...draft, anchor: draft.drawings.length
+    ? {...draft.anchor, at_us: Math.min(draft.anchor.at_us, target), end_us: Math.max(draft.anchor.end_us, target)}
+    : {kind: 'play', at_us: target, end_us: target}};
 }

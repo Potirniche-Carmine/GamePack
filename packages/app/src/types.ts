@@ -14,7 +14,7 @@ export type Video = {
 };
 export type Profile = {author_id: string; name: string};
 export type ThemeChoice = 'system' | 'light' | 'dark';
-export type Settings = {theme: ThemeChoice; keybindings: Record<string, string | null>};
+export type Settings = {theme: ThemeChoice; keybindings: Record<string, string | null>; annotation_speed_percent: number};
 export type Position = {x: number; y: number};
 export type Draft = {
   id: string; project_id: string; video_id: string; text: string; anchor: Anchor;
