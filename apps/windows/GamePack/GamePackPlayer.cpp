@@ -2,6 +2,7 @@
 #include <winrt/Windows.UI.ViewManagement.h>
 #include "GamePackPlayer.h"
 #include "../../../native/shared/PlayerViewport.h"
+#include "../../../native/shared/AnnotationTiming.h"
 using namespace winrt;
 using namespace Windows::Foundation;
 using namespace Windows::Data::Json;
@@ -152,11 +153,19 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     Finish(); ++seekGeneration; pendingSeekTarget=target; seeking=true; settlingReviewStop=reviewStop;
     player.Pause(); StartSeek();
   }
+  bool TimedCapture() { return scene && scene.GetNamedObject(L"anchor",JsonObject{}).GetNamedString(L"kind",L"point")==L"play"; }
+  bool AnchorVisible(JsonObject const& anchor, bool capture=false) {
+    auto t=Time(), start=static_cast<int64_t>(Number(anchor,L"at_us"));
+    if (anchor.GetNamedString(L"kind",L"point")==L"play") {
+      auto end=static_cast<int64_t>(capture ? Number(scene,L"captureEndUs") : Number(anchor,L"end_us"));
+      return t>=start-2000 && t<=end+2000;
+    }
+    return paused && std::abs(t-start)<=2000;
+  }
   bool CanAnnotate() {
     if (disposed || seeking || !scene || source.empty() || Duration()<=0) return false;
     auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
-    auto t=Time();
-    return paused && std::abs(t-static_cast<int64_t>(Number(anchor,L"at_us")))<=2000;
+    return AnchorVisible(anchor,true) && (!TimedCapture() || rate>0);
   }
   void Emit(bool force = false, std::string error = {}) {
     if (seeking && error.empty()) return;
@@ -231,7 +240,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
         if (r.Width <= 0 || p.X < r.X || p.Y < r.Y || p.X > r.X+r.Width || p.Y > r.Y+r.Height) return;
         if (!point.Properties().IsLeftButtonPressed() && point.PointerDevice().PointerDeviceType() == Windows::Devices::Input::PointerDeviceType::Mouse) return;
         self->Finish(); self->capturing = true;
-        self->player.Pause(); self->paused = true;
+        if (!self->TimedCapture()) { self->player.Pause(); self->paused = true; }
         self->overlay.CapturePointer(args.Pointer());
         self->samples = JsonArray{}; self->stroke = JsonObject{};
         GUID guid{}; CoCreateGuid(&guid); wchar_t id[40]{}; StringFromGUID2(guid, id, 40);
@@ -287,6 +296,12 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     JsonObject sample;
     sample.SetNamedValue(L"x", N(std::round(std::clamp((p.X-r.X)/r.Width, 0.0f, 1.0f)*scale)));
     sample.SetNamedValue(L"y", N(std::round(std::clamp((p.Y-r.Y)/r.Height, 0.0f, 1.0f)*scale)));
+    if (TimedCapture()) {
+      auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
+      auto start=static_cast<int64_t>(Number(anchor,L"at_us")), end=static_cast<int64_t>(Number(scene,L"captureEndUs"));
+      auto previous=samples.Size() ? static_cast<int64_t>(Number(samples.GetAt(samples.Size()-1).GetObject(),L"t_us")) : start;
+      sample.SetNamedValue(L"t_us",N(std::max(previous,std::clamp(Time(),start,end))));
+    }
     samples.Append(sample);
   }
   std::string Finish(bool notify=true) {
@@ -350,12 +365,17 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   void Draw(JsonObject const& drawing) {
     auto r=ContentRect(); if (r.Width <= 0) return;
     auto list=drawing.GetNamedArray(L"samples",JsonArray{});
+    auto anchor=drawing.GetNamedObject(L"anchor",scene.GetNamedObject(L"anchor",JsonObject{}));
+    if (!AnchorVisible(anchor,!drawing.HasKey(L"anchor") && scene.GetNamedBoolean(L"capture",false))) return;
     auto type=drawing.GetNamedString(L"tool",L"pen");
-    std::vector<Point> points;
+    std::vector<gamepack::InkSample> samples;
     for (auto const& item:list) {
       auto sample=item.GetObject();
-      points.push_back(Point{r.X+static_cast<float>(Number(sample,L"x")/scale*r.Width),r.Y+static_cast<float>(Number(sample,L"y")/scale*r.Height)});
+      samples.push_back({Number(sample,L"x"),Number(sample,L"y"),static_cast<int64_t>(Number(sample,L"t_us"))});
     }
+    auto visible=gamepack::visibleInk(samples,std::max(Time(),static_cast<int64_t>(Number(anchor,L"at_us"))),anchor.GetNamedString(L"kind",L"point")==L"play");
+    std::vector<Point> points;
+    for (auto const& sample:visible) points.push_back(Point{r.X+static_cast<float>(sample.x/scale*r.Width),r.Y+static_cast<float>(sample.y/scale*r.Height)});
     if (points.empty()) return;
     SolidColorBrush brush(Color{255,121,191,253}); brush.Opacity(Number(drawing,L"opacity",1));
     double thickness=std::max(1.0,Number(drawing,L"width",3500)/scale*r.Width);
@@ -384,8 +404,11 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     if (!scene) readyKey.clear();
     if (scene) {
       auto anchor=scene.GetNamedObject(L"anchor",JsonObject{});
-      int64_t t=Time(), start=static_cast<int64_t>(Number(anchor,L"at_us"));
-      if (paused && std::abs(t-start)<=2000) {
+      bool ready=false;
+      if (scene.HasKey(L"anchors")) {
+        for (auto const& value:scene.GetNamedArray(L"anchors")) if (AnchorVisible(value.GetObject())) { ready=true; break; }
+      } else ready=AnchorVisible(anchor,scene.GetNamedBoolean(L"capture",false));
+      if (ready) {
         auto drawings=scene.GetNamedArray(L"drawings",JsonArray{});
         auto key=to_string(scene.GetNamedString(L"id",L""))+":"+std::to_string(seekToken)+":"+std::to_string(stepToken);
         if (key!=readyKey) { readyKey=key; context.DispatchEvent(root,L"topSceneReady",JSValueObject{{"key",key}}); }

@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {Animated, Image, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {Avatar} from './Avatar';
-import {Button, timeLabel} from './components';
+import {anchorLabel, Button, timeLabel} from './components';
 import {conversationRoot, discussionReplies} from './discussion';
 import {Glass} from './Glass';
 import {ANNOTATION_COLOR} from './playback';
@@ -20,7 +20,7 @@ type Props = {
   disabled: boolean; header: ReactNode; composer: ReactNode; toolbar: ReactNode; timeline: ReactNode; popover: ReactNode; children: ReactNode;
   rate: number; zoom: number; presenting: boolean; popoverKind: 'speed' | 'zoom';
   onMode: (mode: 'watch' | 'review') => void; onSelect: (note: Comment) => void; onReply: (note: Comment) => void;
-  onExpand: (note: Comment) => void;
+  onExpand: (note: Comment) => void; onReplay: (note: Comment) => void;
   onPlay: () => void; onSpeed: () => void; onZoom: () => void; onPresent: () => void;
 };
 
@@ -135,7 +135,7 @@ function NoteColumn(props: Props & {numbers: ReadonlyMap<string, number>}) {
             onPress={() => props.onSelect(note)} style={styles.noteHeader}>
             {props.numbers.has(note.comment_id) && <View style={styles.number}><Text style={styles.pinNumber}>{props.numbers.get(note.comment_id)}</Text></View>}
             <Avatar name={note.name_at_posting} size={22} /><Text numberOfLines={1} style={[styles.author, {color: colors.text}]}>{note.name_at_posting}</Text>
-            <Text style={[styles.timestamp, {color: colors.muted}]}>{timeLabel(note.anchor.at_us)}</Text>
+            <Text style={[styles.timestamp, {color: colors.muted}]}>{anchorLabel(note.anchor)}</Text>
           </Pressable>
           <ScrollView keyboardShouldPersistTaps="handled" style={styles.noteBody}>
             <Text selectable style={[styles.noteText, {color: colors.text}]}>{note.text || 'Drawing'}</Text>
@@ -147,6 +147,7 @@ function NoteColumn(props: Props & {numbers: ReadonlyMap<string, number>}) {
             </View>)}
           </ScrollView>
           <View style={styles.noteActions}>
+            {note.anchor.kind === 'play' && <Button quiet compact icon="play" label="Replay play" disabled={props.disabled} onPress={() => props.onReplay(note)}>Replay</Button>}
             {!!replies.length && <Button quiet compact label={`${expanded ? 'Hide' : 'Show'} replies to ${note.name_at_posting}`} disabled={props.disabled} onPress={() => props.onExpand(note)}>{replies.length} {replies.length === 1 ? 'reply' : 'replies'}</Button>}
             <View style={{flex: 1}} /><Button quiet compact label={`Reply to ${note.name_at_posting}`} disabled={props.disabled} onPress={() => props.onReply(note)}>Reply</Button>
           </View>

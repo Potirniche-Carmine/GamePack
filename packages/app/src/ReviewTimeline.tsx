@@ -2,11 +2,11 @@ import {WatchTimeline} from './WatchTimeline';
 import React, {useMemo, useState} from 'react';
 import {Animated, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import Svg, {Rect} from 'react-native-svg';
-import {anchorStart, timeLabel} from './components';
+import {anchorLabel, anchorStart, timeLabel} from './components';
 import {ANNOTATION_COLOR, compareComments} from './playback';
 import {useTheme} from './theme';
-import {clusterTimelineComments} from './timeline';
-import type {Comment, Video} from './types';
+import {clusterTimelineComments, timelinePosition} from './timeline';
+import type {Anchor, Comment, Video} from './types';
 import {usePlaybackTimeline} from './usePlaybackTimeline';
 import {useVideoThumbnails} from './useVideoThumbnails';
 
@@ -16,10 +16,10 @@ export function ReviewTimeline(props: React.ComponentProps<typeof ReviewFilmstri
     : <ReviewFilmstrip {...props} />;
 }
 
-function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 0, reviewEnd, video, time, duration, comments, selectedId, disabled, onSelect, onCluster, onSeek}: {
+function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 0, reviewEnd, video, time, duration, comments, draftAnchor, selectedId, disabled, onSelect, onCluster, onSeek}: {
   mode?: 'watch' | 'review'; paused?: boolean; rate?: number; seekToken?: number; reviewEnd?: number;
   video?: Pick<Video, 'path' | 'media_id' | 'width' | 'height'> | null;
-  time: number; duration: number; comments: Comment[]; selectedId: string | null; disabled: boolean;
+  time: number; duration: number; comments: Comment[]; draftAnchor?: Anchor; selectedId: string | null; disabled: boolean;
   onSelect: (comment: Comment) => void; onCluster?: (comments: Comment[]) => void; onSeek: (time: number) => void;
 }) {
   const {colors} = useTheme();
@@ -59,10 +59,14 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
           <Rect x={.5} y={.5} width={Math.max(0, width - 25)} height={39} rx={7.5} fill="none" stroke={focused === 'track' ? colors.selectedLine : colors.separator} strokeWidth={1} />
         </Svg>
       </View>
+      {[...ordered.map(item => ({id: item.comment_id, anchor: item.anchor})), ...(draftAnchor ? [{id: 'draft', anchor: draftAnchor}] : [])].map(item => item.anchor.kind === 'play' && <View key={item.id} pointerEvents="none" style={[styles.playRange, {
+        left: timelinePosition(item.anchor.at_us, duration, width), width: Math.max(2, timelinePosition(item.anchor.end_us, duration, width) - timelinePosition(item.anchor.at_us, duration, width)),
+        backgroundColor: ANNOTATION_COLOR, opacity: item.id === selectedId || item.id === 'draft' ? .9 : .45,
+      }]} />)}
       {clusters.map(cluster => {
         const comment = cluster.comments[0], multiple = cluster.comments.length > 1;
         const selected = cluster.comments.some(item => item.comment_id === selectedId);
-        const description = cluster.comments.map(item => `Comment by ${item.name_at_posting} at ${timeLabel(anchorStart(item.anchor))}: ${item.text || 'Drawing'}`).join('; ');
+        const description = cluster.comments.map(item => `Comment by ${item.name_at_posting} at ${anchorLabel(item.anchor)}: ${item.text || 'Drawing'}`).join('; ');
         return <React.Fragment key={comment.comment_id}>
           {multiple && <View pointerEvents="none" style={[styles.clusterRange, {left: cluster.anchor, width: Math.max(1, cluster.endAnchor - cluster.anchor), backgroundColor: colors.line}]} />}
           <View pointerEvents="none" style={[styles.stem, {left: cluster.anchor, backgroundColor: multiple ? colors.line : ANNOTATION_COLOR}]} />
@@ -100,6 +104,7 @@ const styles = StyleSheet.create({
   ticks: {flex: 1, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 8, paddingBottom: 5},
   tick: {width: 1},
   marker: {position: 'absolute', top: 0, height: 24, flexDirection: 'row', gap: 4, alignItems: 'center', justifyContent: 'center', zIndex: 2},
+  playRange: {position: 'absolute', bottom: 0, height: 4, borderRadius: 2},
   clusterRange: {position: 'absolute', bottom: 1, height: 1, opacity: 0.7},
   stem: {position: 'absolute', top: 24, bottom: 0, width: 1, opacity: 0.9},
   commentDot: {width: 5, height: 5, borderRadius: 3, backgroundColor: '#163048'},

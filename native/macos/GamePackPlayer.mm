@@ -5,6 +5,7 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
 #include "../shared/PlayerViewport.h"
+#include "../shared/AnnotationTiming.h"
 
 @interface GPPlayer : NSView
 @property(nonatomic,copy) NSString *source;
@@ -117,6 +118,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   NSDictionary *_scene;
   NSMutableArray *_samples;
   NSString *_drawingTool;
+  BOOL _drawingTimed;
   NSTimeInterval _lastEvent;
   BOOL _seeking;
   BOOL _settlingReviewStop;
@@ -327,7 +329,14 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (NSDictionary *)sample:(NSEvent *)event {
   NSRect rect = [self contentRect]; NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
   double x = fmin(1,fmax(0,(p.x-rect.origin.x)/fmax(1,rect.size.width))), y = fmin(1,fmax(0,(p.y-rect.origin.y)/fmax(1,rect.size.height)));
-  return @{@"x":@(llround(x*1000000)),@"y":@(llround(y*1000000))};
+  NSMutableDictionary *sample = [@{@"x":@(llround(x*1000000)),@"y":@(llround(y*1000000))} mutableCopy];
+  if (_drawingTimed) {
+    int64_t start = [_scene[@"anchor"][@"at_us"] longLongValue];
+    int64_t end = [_scene[@"captureEndUs"] longLongValue];
+    int64_t previous = _samples.count ? [_samples.lastObject[@"t_us"] longLongValue] : start;
+    sample[@"t_us"] = @(MAX(previous, MIN(end, MAX(start, [self timeUs]))));
+  }
+  return sample;
 }
 - (void)beginStroke:(NSEvent *)event {
   if ([_tool isEqual:@"pointer"] || [_tool isEqual:@"laser"]) {
@@ -337,8 +346,12 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   }
   if ([_tool isEqual:@"none"] || !_tool.length || !_scene || _seeking) return;
   NSPoint p = [self convertPoint:event.locationInWindow fromView:nil]; if (!NSPointInRect(p,[self contentRect])) return;
-  if (!_paused || llabs([self timeUs]-[_scene[@"anchor"][@"at_us"] longLongValue]) > 2000) return;
-  [_player pause]; _paused = YES;
+  BOOL timed = [_scene[@"anchor"][@"kind"] isEqual:@"play"];
+  int64_t time = [self timeUs], start = [_scene[@"anchor"][@"at_us"] longLongValue];
+  if (timed ? (time < start - 2000 || time > [_scene[@"captureEndUs"] longLongValue] + 2000 || _rate < 0)
+            : (!_paused || llabs(time-start) > 2000)) return;
+  if (!timed) { [_player pause]; _paused = YES; }
+  _drawingTimed = timed;
   _samples = [NSMutableArray new]; _drawingTool = [_tool copy];
   [_samples addObject:[self sample:event]]; [_overlay setNeedsDisplay:YES];
   if (self.onDrawingStart) self.onDrawingStart(@{@"time_us":@([self timeUs]), @"paused":@(_paused)});
@@ -382,8 +395,23 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   [self emitTime:NO];
 }
 - (NSPoint)point:(NSDictionary *)sample rect:(NSRect)rect { return NSMakePoint(rect.origin.x+[sample[@"x"] doubleValue]/1000000*rect.size.width,rect.origin.y+[sample[@"y"] doubleValue]/1000000*rect.size.height); }
+- (BOOL)anchorVisible:(NSDictionary *)anchor capture:(BOOL)capture {
+  int64_t time = [self timeUs], start = [anchor[@"at_us"] longLongValue];
+  if ([anchor[@"kind"] isEqual:@"play"]) {
+    int64_t end = capture ? [_scene[@"captureEndUs"] longLongValue] : [anchor[@"end_us"] longLongValue];
+    return time >= start - 2000 && time <= end + 2000;
+  }
+  return _paused && llabs(time-start) <= 2000;
+}
 - (void)drawDrawing:(NSDictionary *)drawing rect:(NSRect)rect {
-  NSArray *visible=drawing[@"samples"]; if (!visible.count) return;
+  NSDictionary *anchor = drawing[@"anchor"] ?: _scene[@"anchor"];
+  if (![self anchorVisible:anchor capture:!drawing[@"anchor"] && [_scene[@"capture"] boolValue]]) return;
+  std::vector<gamepack::InkSample> samples;
+  for (NSDictionary *sample in drawing[@"samples"]) samples.push_back({[sample[@"x"] doubleValue], [sample[@"y"] doubleValue], [sample[@"t_us"] longLongValue]});
+  auto ink = gamepack::visibleInk(samples, MAX([anchor[@"at_us"] longLongValue], [self timeUs]), [anchor[@"kind"] isEqual:@"play"]);
+  NSMutableArray *visible = [NSMutableArray new];
+  for (auto const &sample : ink) [visible addObject:@{@"x":@(sample.x), @"y":@(sample.y)}];
+  if (!visible.count) return;
   NSString *tool=drawing[@"tool"];
   CGFloat width=fmax(1.5,[drawing[@"width"] doubleValue]/1000000*rect.size.width);
   NSBezierPath *path=[NSBezierPath bezierPath]; path.lineWidth=width; path.lineCapStyle=NSLineCapStyleRound; path.lineJoinStyle=NSLineJoinStyleRound;
@@ -401,8 +429,12 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 }
 - (void)drawOverlay {
   NSRect rect=[self contentRect]; [NSGraphicsContext saveGraphicsState]; NSRectClip(rect);
-  int64_t anchor = [_scene[@"anchor"][@"at_us"] longLongValue], time = [self timeUs];
-  BOOL ready = !_seeking && _paused && llabs(time-anchor) <= 2000;
+  BOOL ready = NO;
+  if (!_seeking && _scene) {
+    if (_scene[@"anchors"]) {
+      for (NSDictionary *anchor in _scene[@"anchors"]) if ([self anchorVisible:anchor capture:NO]) { ready = YES; break; }
+    } else ready = [self anchorVisible:_scene[@"anchor"] capture:[_scene[@"capture"] boolValue]];
+  }
   if (ready && _scene) {
     NSString *key = [NSString stringWithFormat:@"%@:%ld:%ld", _scene[@"id"], (long)_seekToken, (long)_stepToken];
     if (![_readyKey isEqual:key]) {
@@ -410,7 +442,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
       dispatch_async(dispatch_get_main_queue(), ^{ if (self.onSceneReady) self.onSceneReady(@{@"key":key}); });
     }
     // React acknowledges readiness in the same commit that mounts the cards.
-    // No pre-roll or per-stroke reveal: the whole paused scene arrives together.
+    // Timed samples are evaluated on the native media clock after readiness.
     if ([_presentedSceneKey isEqual:key]) {
       for (NSDictionary *drawing in _scene[@"drawings"]) [self drawDrawing:drawing rect:rect];
     }

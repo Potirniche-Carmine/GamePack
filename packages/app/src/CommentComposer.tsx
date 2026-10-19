@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState, type RefObject} from 'react';
 import {findNodeHandle, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Avatar} from './Avatar';
-import {Button, TextField} from './components';
+import {anchorLabel, Button, TextField} from './components';
 import {useTheme} from './theme';
 import {measureCommentInput} from './native';
 import {canPostDraft} from './drafts';
@@ -27,11 +27,12 @@ export function CommentComposer({draft, name, input, disabled, saving, failed, o
   return <View style={[styles.composer, {backgroundColor: 'transparent'}]}>
     <View style={styles.header}>
       <View style={styles.identity}><Avatar name={name} size={24} /><Text numberOfLines={1} style={[styles.author, {color: colors.text}]}>{name}</Text></View>
+      <Text style={{color: colors.muted, fontSize: 11, fontVariant: ['tabular-nums']}}>{anchorLabel(draft.anchor)}</Text>
       <Button quiet compact icon="close" label="Hide comment" disabled={disabled} onPress={onHide} />
     </View>
     <View style={[styles.textArea, nativeHeight !== undefined && {height: nativeHeight}]}>
       <Text accessible={false} pointerEvents="none" style={styles.measure}>{`${draft.text} `}</Text>
-      <TextField ref={input} autoFocus accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Add a reply…' : 'Add a comment…'}
+      <TextField ref={input} autoFocus={draft.anchor.kind === 'point'} accessibilityLabel={draft.parent_comment_id ? 'Write reply' : 'Write comment'} placeholder={draft.parent_comment_id ? 'Add a reply…' : 'Add a comment…'}
         onLayout={measure}
         multiline editable={!disabled} style={[styles.field, {backgroundColor: 'transparent'}]} inputStyle={styles.editor}
         value={draft.text} onFocus={onFocus} onChangeText={onText} maxLength={16000} />

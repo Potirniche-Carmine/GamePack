@@ -1,10 +1,10 @@
-export type Anchor = {kind: 'point'; at_us: number};
+export type Anchor = {kind: 'point'; at_us: number} | {kind: 'play'; at_us: number; end_us: number};
 export type DrawingTool = 'none' | 'pointer' | 'laser' | 'pen' | 'arrow' | 'ellipse';
 export type Drawing = {
   id: string;
   tool: Exclude<DrawingTool, 'none' | 'pointer' | 'laser'>;
   width: number;
-  samples: {x: number; y: number}[];
+  samples: {x: number; y: number; t_us?: number}[];
 };
 export type Project = {id: string; title: string; created_at: number};
 export type Folder = {id: string; project_id: string; title: string; created_at: number};
@@ -23,7 +23,7 @@ export type Draft = {
 };
 export type Comment = Draft & {
   comment_id: string; media_id: string; author_id: string; name_at_posting: string;
-  created_at_reported: number; digest: string; schema_version: 2;
+  created_at_reported: number; digest: string; schema_version: 2 | 3;
 };
 export type Bootstrap = {
   settings: Settings;
