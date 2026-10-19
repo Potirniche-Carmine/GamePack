@@ -10,9 +10,8 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+# Keep runs independent: delayed events and retries must not cancel a newer
+# commit's running or pending checks. GitHub does not order runs by commit age.
 
 env:
   CARGO_INCREMENTAL: '0'
