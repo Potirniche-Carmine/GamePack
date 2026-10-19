@@ -70,10 +70,13 @@ function Expand-UpdateArchive([string]$Archive, [string]$Destination) {
     [IO.Directory]::CreateDirectory($Destination) | Out-Null
     $zip = [IO.Compression.ZipFile]::OpenRead($Archive)
     try {
-        if ($zip.Entries.Count -gt 20000) { throw 'The update contains too many files.' }
+        # PowerShell suppresses exceptions from property getters. Invoke the getter
+        # explicitly so malformed central-directory records cannot appear empty.
+        $entries = $zip.get_Entries()
+        if ($entries.Count -gt 20000) { throw 'The update contains too many files.' }
         $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         [long]$total = 0
-        foreach ($entry in $zip.Entries) {
+        foreach ($entry in $entries) {
             $target = Get-SafeRelativePath $Destination $entry.FullName
             if (-not $names.Add($target)) { throw 'The update contains duplicate file paths.' }
             $type = ($entry.ExternalAttributes -shr 16) -band 0xF000

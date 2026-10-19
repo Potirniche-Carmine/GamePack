@@ -98,6 +98,12 @@ try {
         $index++; $zip = Join-Path $temporary "bad-$index.zip"; New-Zip $zip @($path)
         Reject { Expand-UpdateArchive $zip (Join-Path $temporary "bad-$index") } "Unsafe ZIP path accepted: $path"
     }
+    $zip=Join-Path $temporary 'malformed-central.zip'; New-Zip $zip @('Package/file.txt')
+    $bytes=[IO.File]::ReadAllBytes($zip)
+    $central=[int][BitConverter]::ToUInt32($bytes,$bytes.Length-6)
+    $bytes[$central]=0 # Invalid central-directory signature; entry parsing must throw.
+    [IO.File]::WriteAllBytes($zip,$bytes)
+    Reject { Expand-UpdateArchive $zip (Join-Path $temporary 'malformed-central') } 'A ZIP entry getter failure was silently treated as an empty archive.'
     $zip=Join-Path $temporary 'collision.zip'; New-Zip $zip @('Package\file.txt','package/file.txt')
     Reject { Expand-UpdateArchive $zip (Join-Path $temporary 'collision') } 'Case/separator path collision accepted.'
     $zip=Join-Path $temporary 'link.zip'; New-Zip $zip @('Package/link') -Link
