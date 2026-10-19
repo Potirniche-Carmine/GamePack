@@ -293,7 +293,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)performSeek {
   if (!_seeking && _paused && _duration > 0 && [self timeUs] == llround(_seekUs)) {
     _finished = NO; _settlingReviewStop = NO;
-    [_overlay setNeedsDisplay:YES]; [self emitTime:NO]; return;
+    [self emitCaptureIfReady]; [_overlay setNeedsDisplay:YES]; [self emitTime:NO]; return;
   }
   [self seekToUs:_seekUs reviewStop:NO];
 }
