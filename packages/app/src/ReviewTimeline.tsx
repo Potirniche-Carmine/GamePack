@@ -130,9 +130,11 @@ const styles = StyleSheet.create({
   commentDot: {width: 5, height: 5, borderRadius: 3, backgroundColor: '#163048'},
   number: {fontSize: 11, lineHeight: 16, textAlign: 'center', includeFontPadding: false, fontVariant: ['tabular-nums'], fontWeight: '700'},
   // The filmstrip contains video imagery in both themes; a light core and dark
-  // edge keep the playhead visible over both bright and dark frames.
+  // edge keep the playhead visible over both bright and dark frames. Clipping
+  // lets macOS draw this uniform border with CALayer instead of a nearest-
+  // filtered bitmap, preserving fractional-pixel movement at slow speeds.
   playhead: {position: 'absolute', left: 11.5, top: 28, bottom: 0, width: 3, borderRadius: 1.5,
-    backgroundColor: '#fff', borderWidth: .5, borderColor: '#0009'},
+    backgroundColor: '#fff', borderWidth: .5, borderColor: '#0009', overflow: 'hidden'},
   labels: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
   label: {fontSize: 11, lineHeight: 16, fontWeight: '500', fontVariant: ['tabular-nums']},
 });

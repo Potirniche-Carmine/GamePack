@@ -1,4 +1,4 @@
-import React, {memo, useMemo} from 'react';
+import React, {memo, useEffect, useMemo, useRef} from 'react';
 import {Animated, StyleSheet, View} from 'react-native';
 import {timeLabel} from './components';
 import {useTheme} from './theme';
@@ -13,6 +13,10 @@ export function WatchTimeline({time, duration, paused, rate, seekToken, disabled
   const {colors, dark} = useTheme();
   const {width, setWidth, focused, setFocused, hovered, setHovered, scrubbing, position, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, disabled, onSeek});
   const emphasized = focused || hovered || scrubbing;
+  const emphasis = useRef(new Animated.Value(emphasized ? 1 : 0)).current;
+  // Hover/focus feedback must not repaint a stale JS translation over the
+  // continuously running native playhead.
+  useEffect(() => emphasis.setValue(emphasized ? 1 : 0), [emphasis, emphasized]);
   const travel = Math.max(0, width - 24);
   const restingX = Math.max(0, Math.min(1, time / Math.max(1, duration))) * travel;
   return <View ref={slider} {...{enableFocusRing: false, onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false)}}
@@ -31,7 +35,7 @@ export function WatchTimeline({time, duration, paused, rate, seekToken, disabled
     </View>
     {paused && !scrubbing ? <View pointerEvents="none" style={[styles.thumb, {left: 7 + restingX, backgroundColor: colors.text, opacity: emphasized ? 1 : .95,
       transform: [{scale: emphasized ? 1.2 : 1}]}]} />
-      : <WatchThumb position={position} travel={travel} color={colors.text} emphasized={emphasized} />}
+      : <WatchThumb position={position} travel={travel} color={colors.text} emphasis={emphasis} />}
   </View>;
 }
 
@@ -42,10 +46,12 @@ const WatchProgress = memo(function WatchProgress({position, travel, color}: Ind
   const translateX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [-travel, 0]}), [position, travel]);
   return <Animated.View style={[styles.fill, {width: travel, backgroundColor: color, transform: [{translateX}]}]} />;
 });
-const WatchThumb = memo(function WatchThumb({position, travel, color, emphasized}: IndicatorProps & {emphasized: boolean}) {
+const WatchThumb = memo(function WatchThumb({position, travel, color, emphasis}: IndicatorProps & {emphasis: Animated.Value}) {
   const translateX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [0, travel]}), [position, travel]);
-  return <Animated.View pointerEvents="none" style={[styles.thumb, {backgroundColor: color, opacity: emphasized ? 1 : .95,
-    transform: [{translateX}, {scale: emphasized ? 1.2 : 1}]}]} />;
+  const scale = useMemo(() => emphasis.interpolate({inputRange: [0, 1], outputRange: [1, 1.2]}), [emphasis]);
+  const opacity = useMemo(() => emphasis.interpolate({inputRange: [0, 1], outputRange: [.95, 1]}), [emphasis]);
+  return <Animated.View pointerEvents="none" style={[styles.thumb, {backgroundColor: color, opacity,
+    transform: [{translateX}, {scale}]}]} />;
 });
 
 const styles = StyleSheet.create({

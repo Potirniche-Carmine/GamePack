@@ -1,6 +1,41 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {clusterTimelineComments, timelineClusterPresentation, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePrediction, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
+import {TIMELINE_RUN_MS, clusterTimelineComments, timelineCanContinue, timelineClusterPresentation, resizeTimelineDock, timelineDockBounds, timelineDockWidth, timelineMotion, timelinePrediction, timelinePosition, timelineSeekTime} from '../packages/app/src/timeline.ts';
+
+test('ordinary native samples leave one display-clock animation running at every playback speed', () => {
+  for (const rate of [.25, .5, .75, 1, 2, 4, -1, -2, -4]) {
+    const sample = {time: 100000000, duration: 300000000, paused: false, rate, seekToken: 1};
+    const run = {sample, startedAt: 500};
+    // Both native hosts sample more slowly than the display. Include delivery
+    // jitter without interrupting the animation on each 80–100 ms update.
+    for (const interval of [80, 100]) for (let elapsed = interval; elapsed < 19000; elapsed += interval) {
+      assert.equal(timelineCanContinue(run, {...sample, time: sample.time + elapsed * rate * 1000}, 500 + elapsed + elapsed % 37), true);
+    }
+    assert.equal(timelineCanContinue(run, {...sample, time: sample.time + 20000000 * rate}, 20500), false);
+  }
+});
+
+test('continuous motion is replaced immediately for control changes and media-clock drift', () => {
+  const sample = {time: 10000000, duration: 60000000, paused: false, rate: 1, seekToken: 1};
+  const run = {sample, startedAt: 0}, next = {...sample, time: 10100000};
+  assert.equal(timelineCanContinue(null, next, 100), false);
+  assert.equal(timelineCanContinue(run, next, 100), true);
+  for (const change of [{paused: true}, {rate: 2}, {rate: -1}, {rate: 0}, {seekToken: 2}, {duration: 65000000}, {reviewEnd: 11000000}, {time: 10400000}]) {
+    assert.equal(timelineCanContinue(run, {...next, ...change}, 100), false);
+  }
+  assert.equal(timelineCanContinue(run, sample, 250), false, 'a stopped media clock cannot sustain the run');
+});
+
+test('long native runs stay bounded by clip ends and review stops in both directions', () => {
+  const sample = {time: 10000000, duration: 120000000, paused: false, rate: 1, seekToken: 1};
+  assert.deepEqual(timelinePrediction(sample, TIMELINE_RUN_MS), {time: 40000000, duration: 30000});
+  assert.deepEqual(timelinePrediction({...sample, time: 119900000}, TIMELINE_RUN_MS), {time: 120000000, duration: 100});
+  for (const rate of [.25, 1, 4, -1, -4]) {
+    const reviewEnd = sample.time + rate * 50000;
+    assert.deepEqual(timelinePrediction({...sample, rate, reviewEnd}, TIMELINE_RUN_MS), {time: reviewEnd, duration: 50});
+  }
+  assert.deepEqual(timelinePrediction({...sample, rate: -4}, TIMELINE_RUN_MS), {time: 0, duration: 2500});
+});
 
 test('pausing holds the presented position until the stopped native frame arrives; resume never snaps', () => {
   const playing = {time: 2000000, duration: 30000000, paused: false, rate: 1, seekToken: 1};

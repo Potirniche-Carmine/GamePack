@@ -44,11 +44,30 @@ export function resizeTimelineDock(width: number, deltaX: number, side: -1 | 1, 
 
 export type TimelineSample = {time: number; duration: number; paused: boolean; rate: number; seekToken: number; reviewEnd?: number};
 
+export const TIMELINE_RUN_MS = 30000;
+export const TIMELINE_SAMPLE_TIMEOUT_MS = 250;
+export type TimelineRun = {sample: TimelineSample; startedAt: number};
+
+/** Native timing runs on the display clock. Ordinary media samples confirm that
+ * run instead of restarting it (and losing an animation frame) at every tick. */
+export function timelineCanContinue(run: TimelineRun | null, current: TimelineSample, now: number) {
+  if (!run || current.paused || !current.rate) return false;
+  const {sample, startedAt} = run;
+  if (sample.seekToken !== current.seekToken || sample.duration !== current.duration || sample.rate !== current.rate
+    || (sample.reviewEnd ?? -1) !== (current.reviewEnd ?? -1)) return false;
+  const elapsed = now - startedAt;
+  // Bound the native frame table even for hours-long videos. Renew before its
+  // end, or sooner if the media clock has drifted more than one sample interval.
+  if (elapsed < 0 || elapsed >= 20000) return false;
+  const predicted = sample.time + elapsed * sample.rate * 1000;
+  return Math.abs(predicted - current.time) <= Math.abs(current.rate) * 120000;
+}
+
 /** Never present a predicted frame beyond the stop already armed in the player. */
-export function timelinePrediction({time, duration, rate, reviewEnd = -1}: TimelineSample) {
+export function timelinePrediction({time, duration, rate, reviewEnd = -1}: TimelineSample, horizonMs = 140) {
   const limit = reviewEnd >= 0 ? reviewEnd : rate < 0 ? 0 : duration;
-  const target = rate < 0 ? Math.max(limit, time + rate * 140000) : Math.min(limit, time + rate * 140000);
-  return {time: target, duration: rate ? Math.min(140, Math.abs(target - time) / Math.abs(rate) / 1000) : 0};
+  const target = rate < 0 ? Math.max(limit, time + rate * horizonMs * 1000) : Math.min(limit, time + rate * horizonMs * 1000);
+  return {time: target, duration: rate ? Math.min(horizonMs, Math.abs(target - time) / Math.abs(rate) / 1000) : 0};
 }
 export function timelineMotion(previous: TimelineSample | null, current: TimelineSample) {
   const {time, duration, paused, rate, seekToken, reviewEnd = -1} = current;
