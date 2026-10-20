@@ -1,4 +1,4 @@
-import React, {useMemo} from 'react';
+import React, {memo, useMemo} from 'react';
 import {Animated, StyleSheet, View} from 'react-native';
 import {timeLabel} from './components';
 import {useTheme} from './theme';
@@ -14,8 +14,6 @@ export function WatchTimeline({time, duration, paused, rate, seekToken, disabled
   const {width, setWidth, focused, setFocused, hovered, setHovered, scrubbing, position, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, disabled, onSeek});
   const emphasized = focused || hovered || scrubbing;
   const travel = Math.max(0, width - 24);
-  const fillX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [-travel, 0]}), [position, travel]);
-  const thumbX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [0, travel]}), [position, travel]);
   const restingX = Math.max(0, Math.min(1, time / Math.max(1, duration))) * travel;
   return <View ref={slider} {...{enableFocusRing: false, onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false)}}
     focusable={canSeek} accessible accessibilityRole="adjustable" accessibilityLabel="Video timeline" accessibilityState={{disabled: !canSeek}}
@@ -28,15 +26,27 @@ export function WatchTimeline({time, duration, paused, rate, seekToken, disabled
     onResponderGrant={start} onResponderMove={move} onResponderTerminationRequest={() => false}
     onResponderRelease={finish} onResponderTerminate={cancel}>
     <View pointerEvents="none" style={[styles.track, {height: emphasized ? 6 : 4, backgroundColor: dark ? '#ffffff30' : '#17233030', borderColor: focused ? colors.selectedLine : 'transparent', borderWidth: focused ? 1 : 0}]}>
-      {paused && !scrubbing ? <View key="resting-fill" style={[styles.fill, {width: restingX, backgroundColor: colors.text}]} />
-        : <Animated.View key="moving-fill" style={[styles.fill, {width: travel, backgroundColor: colors.text, transform: [{translateX: fillX}]}]} />}
+      {paused && !scrubbing ? <View style={[styles.fill, {width: restingX, backgroundColor: colors.text}]} />
+        : <WatchProgress position={position} travel={travel} color={colors.text} />}
     </View>
-    {paused && !scrubbing ? <View key="resting-thumb" pointerEvents="none" style={[styles.thumb, {left: 7 + restingX, backgroundColor: colors.text, opacity: emphasized ? 1 : .95,
+    {paused && !scrubbing ? <View pointerEvents="none" style={[styles.thumb, {left: 7 + restingX, backgroundColor: colors.text, opacity: emphasized ? 1 : .95,
       transform: [{scale: emphasized ? 1.2 : 1}]}]} />
-      : <Animated.View key="moving-thumb" pointerEvents="none" style={[styles.thumb, {backgroundColor: colors.text, opacity: emphasized ? 1 : .95,
-        transform: [{translateX: thumbX}, {scale: emphasized ? 1.2 : 1}]}]} />}
+      : <WatchThumb position={position} travel={travel} color={colors.text} emphasized={emphasized} />}
   </View>;
 }
+
+// As in ReviewPlayhead, media-clock renders must not overwrite native motion
+// with the last position synchronized back to JS.
+type IndicatorProps = {position: Animated.Value; travel: number; color: string};
+const WatchProgress = memo(function WatchProgress({position, travel, color}: IndicatorProps) {
+  const translateX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [-travel, 0]}), [position, travel]);
+  return <Animated.View style={[styles.fill, {width: travel, backgroundColor: color, transform: [{translateX}]}]} />;
+});
+const WatchThumb = memo(function WatchThumb({position, travel, color, emphasized}: IndicatorProps & {emphasized: boolean}) {
+  const translateX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [0, travel]}), [position, travel]);
+  return <Animated.View pointerEvents="none" style={[styles.thumb, {backgroundColor: color, opacity: emphasized ? 1 : .95,
+    transform: [{translateX}, {scale: emphasized ? 1.2 : 1}]}]} />;
+});
 
 const styles = StyleSheet.create({
   root: {height: 28, marginHorizontal: 4, justifyContent: 'center'},

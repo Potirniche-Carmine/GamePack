@@ -1,5 +1,5 @@
 import {WatchTimeline} from './WatchTimeline';
-import React, {useMemo, useState} from 'react';
+import React, {memo, useMemo, useState} from 'react';
 import {Animated, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import Svg, {Rect} from 'react-native-svg';
 import {anchorLabel, anchorStart, timeLabel} from './components';
@@ -24,7 +24,6 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
 }) {
   const {colors} = useTheme();
   const {width, setWidth, position, scrubbing, slider, canSeek, start, move, finish, cancel} = usePlaybackTimeline({time, duration, paused, rate, seekToken, reviewEnd, disabled, onSeek});
-  const playheadX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [0, Math.max(0, width - 24)]}), [position, width]);
   const [focused, setFocused] = useState<string | null>(null);
   const thumbnails = useVideoThumbnails(video);
   const aspectRatio = video && video.width > 0 && video.height > 0 ? video.width / video.height : 16 / 9;
@@ -95,12 +94,23 @@ function ReviewFilmstrip({mode = 'review', paused = true, rate = 1, seekToken = 
         </React.Fragment>;
       })}
       {paused && !scrubbing
-        ? <View key="resting-playhead" pointerEvents="none" style={[styles.playhead, {left: timelinePosition(time, duration, width), backgroundColor: colors.text}]} />
-        : <Animated.View key="moving-playhead" pointerEvents="none" style={[styles.playhead, {left: 12, backgroundColor: colors.text, transform: [{translateX: playheadX}]}]} />}
+        ? <View pointerEvents="none" style={[styles.playhead, {left: timelinePosition(time, duration, width) - .5}]} />
+        : <ReviewPlayhead position={position} width={width} />}
     </View>
     <View style={styles.labels}>{Array.from({length: width < 580 ? 4 : 7}, (_, i) => <Text key={i} style={[styles.label, {color: colors.text}]}>{timeLabel(duration * i / (width < 580 ? 3 : 6))}</Text>)}</View>
   </View>;
 }
+
+// Keep native-driven transforms out of media-clock renders. Re-rendering an
+// Animated.View can write its older JS value over the current native position.
+// Paused frames use direct positioning so seeks and layout changes are exact.
+const ReviewPlayhead = memo(function ReviewPlayhead({position, width}: {
+  position: Animated.Value; width: number;
+}) {
+  const translateX = useMemo(() => position.interpolate({inputRange: [0, 1], outputRange: [0, Math.max(0, width - 24)]}), [position, width]);
+  return <Animated.View pointerEvents="none" style={[styles.playhead, {transform: [{translateX}]}]} />;
+});
+
 const styles = StyleSheet.create({
   root: {height: 92, paddingTop: 2, paddingHorizontal: 4},
   lane: {height: 68, justifyContent: 'flex-end'},
@@ -119,7 +129,10 @@ const styles = StyleSheet.create({
   groupDot: {width: 3, height: 3, borderRadius: 2},
   commentDot: {width: 5, height: 5, borderRadius: 3, backgroundColor: '#163048'},
   number: {fontSize: 11, lineHeight: 16, textAlign: 'center', includeFontPadding: false, fontVariant: ['tabular-nums'], fontWeight: '700'},
-  playhead: {position: 'absolute', top: 28, bottom: 0, width: 2, borderRadius: 1},
+  // The filmstrip contains video imagery in both themes; a light core and dark
+  // edge keep the playhead visible over both bright and dark frames.
+  playhead: {position: 'absolute', left: 11.5, top: 28, bottom: 0, width: 3, borderRadius: 1.5,
+    backgroundColor: '#fff', borderWidth: .5, borderColor: '#0009'},
   labels: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
   label: {fontSize: 11, lineHeight: 16, fontWeight: '500', fontVariant: ['tabular-nums']},
 });
