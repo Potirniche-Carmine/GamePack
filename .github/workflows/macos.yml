@@ -65,9 +65,11 @@ jobs:
           ccache --set-config compression=true
           ccache --set-config depend_mode=true
           ccache --set-config sloppiness=clang_index_store,ivfsoverlay,pch_defines,modules,time_macros
-          echo "ccache=$(ccache --get-config cache_dir)" >> "$GITHUB_OUTPUT"
-          echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-          echo "dependencies=$(node scripts/ci/macos-cache-key.mjs)" >> "$GITHUB_OUTPUT"
+          {
+            echo "ccache=$(ccache --get-config cache_dir)"
+            echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)"
+            echo "dependencies=$(node scripts/ci/macos-cache-key.mjs)"
+          } >> "$GITHUB_OUTPUT"
       - name: Cache CocoaPods dependencies
         id: pods-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
