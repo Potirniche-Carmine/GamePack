@@ -27,7 +27,7 @@ Packages are retained for 14 days. Compressed archives upload without redundant 
 ## Prepare a release
 
 1. Run `npm run version:prepare -- 1.2.3` with the intended stable version. It updates npm, Rust, macOS, and Windows versions together, including the compiled Windows version used by update checks. It does not commit, tag, or publish. Run `npm run check:version` and `npm run test:release`.
-2. Add `docs/releases/<version>.md` with the release notes and installation requirements.
+2. Add `docs/releases/<version>.md` with the release notes and installation requirements. Add a matching entry at the top of `CHANGELOG.md`, with concise patch notes and a link to the detailed version notes.
 3. Merge into `main` and wait for a successful `CI` run containing all four native packages. Exercise the native app on the platforms being released; CI package checks do not verify interactive playback or visual behavior.
 4. On the Mac containing the Developer ID certificate and notarization profile, run the signed preparation command below with that exact commit's CI run.
 5. Review the draft's notes and six assets: two Mac DMGs, two Mac app-only archives for existing automatic updaters, and two Windows ZIPs. Checksums stay in CI/local staging; GitHub's asset digests verify published downloads. Publishing remains a separate, explicit maintainer action. A draft is not offered by the app's update checker.

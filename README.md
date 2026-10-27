@@ -4,6 +4,8 @@ An offline desktop app for reviewing video. Organize footage into projects, draw
 
 ![GamePack showing frame annotations, a comment and reply, and the review timeline](docs/assets/review.png)
 
+[Patch notes](CHANGELOG.md)
+
 ## Built with
 
 - **React Native + TypeScript** — shared desktop interface.
