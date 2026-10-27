@@ -1,5 +1,5 @@
 import {NativeModules, NativeEventEmitter, requireNativeComponent, type NativeSyntheticEvent, type ViewProps} from 'react-native';
-import type {StrokeFlushFinished, DrawingTool, PlayerTime, ThemeChoice} from './types';
+import type {CaptureReady, StrokeFlushFinished, DrawingTool, PlayerTime, ThemeChoice} from './types';
 import type {AppBuild} from './updates';
 import type {NativeUpdateState} from './updateFlow';
 
@@ -51,6 +51,8 @@ export type PlayerProps = ViewProps & {
   source: string; paused: boolean; rate: number; zoom: number; zoomToken: number; seekUs: number; seekToken: number;
   reviewEndUs: number; sceneJson: string; presentedSceneKey: string; tool: DrawingTool;
   flushToken: number; stepToken: number; stepFrames: number;
+  captureToken: number;
+  onCaptureReady: (event: NativeSyntheticEvent<CaptureReady>) => void;
   onStrokeFlushFinished: (event: NativeSyntheticEvent<StrokeFlushFinished>) => void;
   onTime: (event: NativeSyntheticEvent<PlayerTime>) => void;
   onDrawing: (event: NativeSyntheticEvent<{drawingJson: string}>) => void;

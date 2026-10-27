@@ -16,6 +16,7 @@
 @property(nonatomic) double seekUs;
 @property(nonatomic) NSInteger seekToken;
 @property(nonatomic) NSInteger flushToken;
+@property(nonatomic) NSInteger captureToken;
 @property(nonatomic) NSInteger stepToken;
 @property(nonatomic) NSInteger stepFrames;
 @property(nonatomic) double reviewEndUs;
@@ -31,6 +32,7 @@
 @property(nonatomic,copy) RCTDirectEventBlock onActivity;
 - (void)pointerActivity;
 @property(nonatomic,copy) RCTDirectEventBlock onStrokeFlushFinished;
+@property(nonatomic,copy) RCTDirectEventBlock onCaptureReady;
 - (void)zoomByFactor:(double)factor atPoint:(NSPoint)point smooth:(BOOL)smooth;
 - (void)animateZoom:(CADisplayLink *)link;
 @end
@@ -128,6 +130,8 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   double _duration;
   CGSize _videoSize;
   NSInteger _pendingStrokeFlushToken;
+  NSInteger _pendingCaptureToken;
+  NSInteger _capturedToken;
   NSInteger _pendingStepFrames;
   NSDictionary *_pendingStrokeFlushDrawing;
   NSMutableDictionary<NSString *, NSDictionary *> *_pendingDrawings;
@@ -197,7 +201,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
     });
   }];
 }
-- (void)setPaused:(BOOL)paused { _paused = paused; if (!paused) _finished = NO; [_overlay setNeedsDisplay:YES]; }
+- (void)setPaused:(BOOL)paused { _paused = paused; if (paused) [_player pause]; else _finished = NO; [_overlay setNeedsDisplay:YES]; }
 - (void)setRate:(float)rate { _rate = (rate < 0 ? fmax(-4, rate) : fmax(0.25, fmin(4.0, rate))); }
 - (void)setZoom:(double)zoom { _requestedZoom = isfinite(zoom) ? fmin(4, fmax(1, zoom)) : 1; }
 - (void)applyZoom:(double)value notify:(BOOL)notify {
@@ -243,6 +247,10 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)setSeekUs:(double)seekUs { _seekUs = seekUs; }
 - (void)setSeekToken:(NSInteger)seekToken { _seekToken = seekToken; }
 - (void)didSetProps:(NSArray<NSString *> *)changedProps {
+  if ([changedProps containsObject:@"captureToken"]) {
+    _pendingCaptureToken = _captureToken;
+    if (_pendingCaptureToken > 0) { [_player pause]; _paused = YES; }
+  }
   if ([changedProps containsObject:@"zoomToken"]) {
     [_zoomDisplayLink invalidate]; _zoomDisplayLink = nil;
     _zoomAnchor = {};
@@ -273,6 +281,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
     else if (!_seeking) _player.rate = _rate;
   }
   if ([changedProps containsObject:@"presentedSceneKey"]) [_overlay displayIfNeeded];
+  [self emitCaptureIfReady];
   // Publish only after the whole prop batch, including its seek token, is applied.
   if ([changedProps containsObject:@"paused"]) [self emitTime:NO];
 }
@@ -284,7 +293,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)performSeek {
   if (!_seeking && _paused && _duration > 0 && [self timeUs] == llround(_seekUs)) {
     _finished = NO; _settlingReviewStop = NO;
-    [_overlay setNeedsDisplay:YES]; [self emitTime:NO]; return;
+    [self emitCaptureIfReady]; [_overlay setNeedsDisplay:YES]; [self emitTime:NO]; return;
   }
   [self seekToUs:_seekUs reviewStop:NO];
 }
@@ -293,7 +302,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
   _seeking = YES; _settlingReviewStop = reviewStop; _finished = reviewStop; NSInteger generation = ++_seekGeneration; [_player pause];
   __weak GPPlayer *weakSelf = self;
   [_player seekToTime:CMTimeMake((int64_t)fmax(0, target), 1000000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL complete) {
-    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; self->_settlingReviewStop = NO; if (!self.paused && complete && !self->_pendingStrokeFlushToken) self->_player.rate = self.rate; [self applyFrameSteps]; [self emitStrokeFlushIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:reviewStop && complete]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ GPPlayer *self = weakSelf; if (!self || generation != self->_seekGeneration) return; self->_seeking = NO; self->_settlingReviewStop = NO; if (!self.paused && complete && !self->_pendingStrokeFlushToken) self->_player.rate = self.rate; [self applyFrameSteps]; [self emitStrokeFlushIfReady]; [self emitCaptureIfReady]; [self->_overlay setNeedsDisplay:YES]; [self emitTime:reviewStop && complete]; });
   }];
 }
 - (void)setPresentedSceneKey:(NSString *)key {
@@ -305,6 +314,7 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (int64_t)timeUs { double seconds = CMTimeGetSeconds(_player.currentTime); return isfinite(seconds) ? llround(seconds * 1000000) : 0; }
 - (void)tick {
   if (_seeking) return;
+  [self emitCaptureIfReady];
   int64_t us = [self timeUs];
   if (!_paused && !_finished && _reviewEndUs >= 0 && (_rate < 0 ? us <= _reviewEndUs : us >= _reviewEndUs)) {
     _paused = YES; [self seekToUs:_reviewEndUs reviewStop:YES]; [_overlay setNeedsDisplay:YES]; return;
@@ -321,7 +331,14 @@ RCT_EXPORT_VIEW_PROPERTY(cornerRadius, double)
 - (void)emitTime:(BOOL)ended {
   if (_seeking) return;
   _lastEvent = NSDate.timeIntervalSinceReferenceDate;
-  if (self.onTime) self.onTime(@{@"time_us":@([self timeUs]), @"duration_us":@(isfinite(_duration) ? llround(_duration*1000000):0), @"width":@(_videoSize.width), @"height":@(_videoSize.height), @"seekToken":@(_seekToken), @"playing":@(_player.rate != 0), @"ended":@(ended)});
+  if (self.onTime) self.onTime(@{@"time_us":@([self timeUs]), @"duration_us":@(isfinite(_duration) ? llround(_duration*1000000):0), @"width":@(_videoSize.width), @"height":@(_videoSize.height), @"seekToken":@(_seekToken), @"captureToken":@(_capturedToken), @"playing":@(_player.rate != 0), @"ended":@(ended)});
+}
+- (void)emitCaptureIfReady {
+  if (!_pendingCaptureToken || _seeking || _duration <= 0) return;
+  // Snapshot the stopped media clock without seeking or waiting for a UI tick.
+  [_player pause]; _paused = YES;
+  _capturedToken = _pendingCaptureToken; _pendingCaptureToken = 0;
+  if (self.onCaptureReady) self.onCaptureReady(@{@"captureToken":@(_capturedToken), @"seekToken":@(_seekToken), @"time_us":@([self timeUs])});
 }
 - (NSRect)contentRect {
   CGSize size = _videoSize; if (size.width <= 0 || size.height <= 0) return self.bounds;
@@ -519,6 +536,7 @@ RCT_EXPORT_VIEW_PROPERTY(zoomToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(seekUs, double)
 RCT_EXPORT_VIEW_PROPERTY(seekToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(flushToken, NSInteger)
+RCT_EXPORT_VIEW_PROPERTY(captureToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(stepToken, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(stepFrames, NSInteger)
 RCT_EXPORT_VIEW_PROPERTY(reviewEndUs, double)
@@ -533,4 +551,5 @@ RCT_EXPORT_VIEW_PROPERTY(onZoom, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onSceneReady, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onActivity, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onStrokeFlushFinished, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onCaptureReady, RCTDirectEventBlock)
 @end

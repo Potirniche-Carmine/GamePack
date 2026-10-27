@@ -57,6 +57,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
   event_token activityToken{};
   hstring tool{L"pointer"}, source;
   int64_t seekToken{-1}, seekUs{}, reviewEnd{-1}, flushToken{}, flushRequest{};
+  int64_t captureToken{}, captureRequest{}, capturedToken{};
   std::string flushDrawing;
   bool paused{true}, ended{}, capturing{}, disposed{}, seeking{}, seekInFlight{}, applyingProps{}, settlingReviewStop{};
   uint64_t sourceGeneration{}, seekGeneration{}, activeSeekGeneration{};
@@ -133,13 +134,13 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     seeking=false; settlingReviewStop=false;
     if (flushRequest) StrokeFlush();
     else if (!paused && !reverseSeek) player.Play();
-    Render(); Emit(true);
+    CaptureReady(); Render(); Emit(true);
   }
   void StartSeek() {
     if (disposed || seekInFlight || Duration()<=0) return;
     auto target=std::clamp<int64_t>(pendingSeekTarget,0,Duration());
     auto generation=seekGeneration;
-    if (Time()==target) { seeking=false; settlingReviewStop=false; if (flushRequest) StrokeFlush(); else if (!paused && !reverseSeek) player.Play(); Render(); Emit(true); return; }
+    if (Time()==target) { seeking=false; settlingReviewStop=false; if (flushRequest) StrokeFlush(); else if (!paused && !reverseSeek) player.Play(); CaptureReady(); Render(); Emit(true); return; }
     seekInFlight=true; activeSeekGeneration=generation;
     auto weak=weak_from_this();
     seekCompletedToken=player.PlaybackSession().SeekCompleted([weak,generation](auto const&,auto const&) {
@@ -177,9 +178,17 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
       {"time_us", Time()}, {"duration_us", Duration()},
       {"width", static_cast<int64_t>(session.NaturalVideoWidth())},
       {"height", static_cast<int64_t>(session.NaturalVideoHeight())},
-      {"seekToken", seekToken},
+      {"seekToken", seekToken}, {"captureToken", capturedToken},
       {"playing", session.PlaybackState() == Windows::Media::Playback::MediaPlaybackState::Playing},
       {"ended", ended}, {"error", std::move(error)}});
+  }
+  void CaptureReady() {
+    if (!captureRequest || applyingProps || seeking || Duration()<=0) return;
+    player.Pause(); paused=true;
+    // MediaPlayer can acknowledge Pause asynchronously. Use its stopped clock.
+    if (player.PlaybackSession().PlaybackState()==Windows::Media::Playback::MediaPlaybackState::Playing) return;
+    capturedToken=captureRequest; captureRequest=0;
+    context.DispatchEvent(root,L"topCaptureReady",JSValueObject{{"captureToken",capturedToken},{"seekToken",seekToken},{"time_us",Time()}});
   }
   void Init() {
     auto weak = weak_from_this();
@@ -187,6 +196,7 @@ struct PlayerState : std::enable_shared_from_this<PlayerState> {
     timerToken = timer.Tick([weak](auto const&, auto const&) {
       if (auto self=weak.lock(); self && !self->disposed) self->AnimateZoom();
       if (auto self = weak.lock(); self && !self->disposed && !self->seeking) {
+        self->CaptureReady();
         // Reserve one dispatcher tick to settle the exact frame before crossing it.
         auto lead=static_cast<int64_t>(20000*std::abs(self->rate));
         if (self->reviewEnd >= 0 && !self->paused && (self->rate < 0 ? self->Time()-lead <= self->reviewEnd : self->Time()+lead >= self->reviewEnd)) {
@@ -426,7 +436,7 @@ FrameworkElement PlayerManager::CreateView() noexcept {
 }
 auto PlayerManager::NativeProps() noexcept -> Windows::Foundation::Collections::IMapView<hstring,ViewManagerPropertyType> {
   using T=ViewManagerPropertyType;
-  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"zoomToken",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"presentedSceneKey",T::String},{L"tool",T::String},{L"flushToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
+  return single_threaded_map<hstring,T>(std::map<hstring,T>{{L"source",T::String},{L"paused",T::Boolean},{L"rate",T::Number},{L"zoom",T::Number},{L"zoomToken",T::Number},{L"seekUs",T::Number},{L"seekToken",T::Number},{L"reviewEndUs",T::Number},{L"sceneJson",T::String},{L"presentedSceneKey",T::String},{L"tool",T::String},{L"flushToken",T::Number},{L"captureToken",T::Number},{L"stepToken",T::Number},{L"stepFrames",T::Number}}).GetView();
 }
 void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader const& reader) noexcept {
   auto it=players.find(ViewKey(view)); if (it==players.end()) return;
@@ -434,6 +444,10 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
   try {
     auto props=JSValueObject::ReadFrom(reader);
     p->applyingProps=true;
+    if (auto v=props.find("captureToken");v!=props.end() && v->second.AsInt64()!=p->captureToken) {
+      p->captureToken=v->second.AsInt64(); p->captureRequest=p->captureToken;
+      if (p->captureRequest>0) { p->paused=true; p->player.Pause(); }
+    }
     if (auto v=props.find("flushToken");v!=props.end() && v->second.AsInt64()>0 && v->second.AsInt64()!=p->flushToken) {
       p->flushToken=v->second.AsInt64(); p->flushRequest=p->flushToken; p->flushDrawing.clear();
       p->paused=true; p->player.Pause();
@@ -498,13 +512,13 @@ void PlayerManager::UpdateProperties(FrameworkElement const& view,IJSValueReader
       p->ended=false; p->Seek(p->seekUs);
     }
     if (auto v=props.find("paused");v!=props.end()) { p->paused=v->second.AsBoolean(); if (p->paused || p->flushRequest) p->player.Pause(); else { p->ended=false; if (!p->seeking && !p->reverseSeek) p->player.Play(); } }
-    p->applyingProps=false; p->StrokeFlush(); p->Render(); p->Emit(true);
+    p->applyingProps=false; p->StrokeFlush(); p->CaptureReady(); p->Render(); p->Emit(true);
   } catch (hresult_error const& error) { p->applyingProps=false; p->Emit(true,to_string(error.message())); }
   catch (std::exception const& error) { p->applyingProps=false; p->Emit(true,error.what()); }
 }
 ConstantProviderDelegate PlayerManager::ExportedCustomDirectEventTypeConstants() noexcept {
   return [](IJSValueWriter const& writer) noexcept {
-    WriteValue(writer,JSValueObject{{"topSceneReady",JSValueObject{{"registrationName","onSceneReady"}}},{"topActivity",JSValueObject{{"registrationName","onActivity"}}},{"topDrawingStart",JSValueObject{{"registrationName","onDrawingStart"}}},{"topPointer",JSValueObject{{"registrationName","onPointer"}}},{"topZoom",JSValueObject{{"registrationName","onZoom"}}},{"topTime",JSValueObject{{"registrationName","onTime"}}},{"topDrawing",JSValueObject{{"registrationName","onDrawing"}}},{"topStrokeFlushFinished",JSValueObject{{"registrationName","onStrokeFlushFinished"}}}});
+    WriteValue(writer,JSValueObject{{"topSceneReady",JSValueObject{{"registrationName","onSceneReady"}}},{"topActivity",JSValueObject{{"registrationName","onActivity"}}},{"topDrawingStart",JSValueObject{{"registrationName","onDrawingStart"}}},{"topPointer",JSValueObject{{"registrationName","onPointer"}}},{"topZoom",JSValueObject{{"registrationName","onZoom"}}},{"topTime",JSValueObject{{"registrationName","onTime"}}},{"topDrawing",JSValueObject{{"registrationName","onDrawing"}}},{"topStrokeFlushFinished",JSValueObject{{"registrationName","onStrokeFlushFinished"}}},{"topCaptureReady",JSValueObject{{"registrationName","onCaptureReady"}}}});
   };
 }
 void PlayerManager::OnDropViewInstance(FrameworkElement const& view) noexcept {

@@ -31,7 +31,8 @@ export type Bootstrap = {
   storage: {root: string; managed_bytes: number; database_bytes: number};
 };
 export type StrokeFlushFinished = {flushToken: number; time_us: number; drawingJson?: string};
+export type CaptureReady = {captureToken: number; seekToken: number; time_us: number};
 export type PlayerTime = {
   time_us: number; duration_us: number; width: number; height: number;
-  seekToken: number; playing: boolean; ended?: boolean; error?: string;
+  seekToken: number; captureToken: number; playing: boolean; ended?: boolean; error?: string;
 };

@@ -21,9 +21,9 @@ Press **R** to switch modes. Use **← / →** to step frames, **Shift + ← / �
 
 ## Draw and post
 
-In Review, choose **Pen**, **Arrow**, or **Ellipse** to start a comment on a frozen frame. **Moment** is the default. All marks use the same blue ink.
+In Review, choose **Pen**, **Arrow**, or **Ellipse** to start a comment on a frozen frame. Selecting a drawing tool pauses at the current video frame. **Moment** is the default; its framed pause icon sits below the pointer. All marks use the same blue ink.
 
-For one conversation over several seconds, switch **Moment** to **Play**, choose a drawing tool, and press **Space** or the playback button. Switching modes alone does not start the video. Draw as the video progresses; pause to add details or text, then resume to continue the same play. The speed control offers **0.5×** for slower capture. Your previous speed returns when you leave the draft. The timestamp and blue filmstrip range show the covered time.
+For one conversation over several seconds, click the Moment icon to switch to **Play**, shown with a framed play icon. Choose a drawing tool and press **Space** or the playback button. Switching modes alone does not start the video. Draw as the video progresses; pause to add details or text, then resume to continue the same play. **Settings → Moments → Default Play speed** sets the starting speed for new plays, from **0.25×** to **4×**. Your previous speed returns when you leave the draft. The timestamp and blue filmstrip range show the covered time.
 
 Play drawings replay in source time, including strokes drawn while paused. Scrub backward within the draft to revisit an earlier frame without losing later marks. The play retains its furthest captured endpoint; seeking earlier or undoing a stroke does not shorten it. A reply stays inside its original conversation's window.
 
