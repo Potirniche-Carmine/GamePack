@@ -84,9 +84,18 @@ test('play conversations span a window, hold at their end, and preserve interven
   assert.deepEqual(notesAtTime(records, 2 * second).map(note => note.comment_id), ['play']);
   assert.deepEqual(notesAtTime(records, 3 * second).map(note => note.comment_id), ['play', 'point']);
   assert.equal(notesAtTime(records, 6 * second).length, 0);
-  assert.equal(conversationTarget(records, play, 10 * second).time, 5 * second);
+  assert.equal(conversationTarget(records, play, 10 * second).time, second);
   assert.deepEqual(nextReviewStop(records, second, 10 * second, 1, true), {time: 3 * second, commentIds: ['point']});
   assert.deepEqual(nextReviewStop(records, 3 * second, 10 * second, 1, true), {time: 5 * second, commentIds: ['play']});
   assert.deepEqual(nextReviewStop(records, 5 * second, 10 * second, -1, true), {time: 3 * second, commentIds: ['point']});
   assert.deepEqual(nextReviewStop(records, 3 * second, 10 * second, -1, true), {time: second, commentIds: ['play']});
+});
+
+test('selecting a play range or any reply starts at the beginning of the conversation', () => {
+  for (const start of [0, second, 9 * second]) {
+    const root = {...comment('play'), anchor: {kind: 'play', at_us: start, end_us: 10 * second}};
+    const reply = comment('reply', 7, 'play'), nested = comment('nested', 8, 'reply');
+    const records = [root, reply, nested];
+    for (const item of records) assert.deepEqual(conversationTarget(records, item, 10 * second), {comment: root, time: start});
+  }
 });
