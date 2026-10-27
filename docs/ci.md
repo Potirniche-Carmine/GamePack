@@ -6,7 +6,7 @@ Pull requests target `main`. Keep feature and fix branches focused; agent branch
 
 The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It checks TypeScript, UI behavior, matching package versions, Rust formatting/tests/Clippy on Linux and Windows, Windows PowerShell transport and updater rollback fixtures, release/version and installer regression tests, native geometry/update contracts, and workflow syntax with actionlint.
 
-After shared checks pass, `main` builds macOS ARM64/Intel and Windows ARM64/x64 in parallel. Each platform validates its packaged app against the updater. macOS also runs its Rust tests, updater archive/installation failure tests, and installs/reinstalls each packaged app into an isolated library without launching it. Documentation/test-only pushes skip native packages. Manually dispatch `CI` on `main` to build all four packages regardless of changed paths. CI runs finish independently so delayed events and retries cannot cancel a newer commit's running or pending checks. Several commits can therefore build at once. PRs never run packaging or release jobs.
+On `main`, a small change-selection job starts macOS ARM64/Intel and Windows ARM64/x64 in parallel with shared checks. Release preparation still requires the entire source CI run to succeed, including every shared and native job. Each platform validates its packaged app against the updater. macOS runs updater failure/rollback tests before compiling, then verifies the final package, mounts the DMG, compares its signed app with the update archive, and installs/reinstalls it into an isolated library without launching it. Documentation/test-only pushes skip native packages. Manually dispatch `CI` on `main` to build all four packages regardless of changed paths. CI runs finish independently so delayed events and retries cannot cancel a newer commit's running or pending checks. Several commits can therefore build at once. PRs never run packaging or release jobs.
 
 ## Caches
 
@@ -17,9 +17,10 @@ After shared checks pass, `main` builds macOS ARM64/Intel and Windows ARM64/x64 
 | Ruby gems | setup-ruby Bundler cache with `Gemfile.lock`, Ruby version, OS and architecture. |
 | CocoaPods and downloaded pod sources | OS/architecture, Xcode, npm lockfile, Gemfile lockfile and Podfile/lock; `pod install` always reconciles the restored cache and verifies the dependency graph. |
 | macOS C/C++ compilation | ccache through Xcode's C/C++ compiler launchers; 500 MB per architecture, keyed by Xcode/dependencies/commit with dependency-matched fallback. Statistics appear in each build. |
+| Xcode intermediates and module cache | Architecture, Xcode, dependency fingerprint, build script and commit, with a matching-dependency fallback; Xcode reconciles source changes on every build. |
 | Windows NuGet packages | OS, target architecture, npm lockfile, native projects, props and NuGet configuration; MSBuild always restores and resolves dependencies. |
 
-Caches are disposable accelerators; a cold run must still build successfully. Native outputs, signed applications, and JavaScript installations are rebuilt. npm/Rust use their checked-in locks. Rust is pinned in `rust-toolchain.toml`, Node in `.node-version`, and CocoaPods in `Gemfile.lock`. CI selects Xcode 26.3 for the macOS 26 SDK needed by the existing glass views while retaining the macOS 14 deployment target. Third-party workflow actions use immutable commit revisions. Update the pins and their version comments together.
+Caches are disposable accelerators; a cold run must still build successfully. Xcode reuses valid intermediate outputs; final apps are staged, signed and verified on every run, and `npm ci` recreates JavaScript installations. The Mac dependency fingerprint includes the complete npm dependency graph, Gemfile lock, Podfile and Podfile lock, omitting only the app's own npm version so patch releases retain their dependency caches. npm/Rust use their checked-in locks. Rust is pinned in `rust-toolchain.toml`, Node in `.node-version`, and CocoaPods in `Gemfile.lock`. CI selects Xcode 26.3 for the macOS 26 SDK needed by the existing glass views while retaining the macOS 14 deployment target. Third-party workflow actions use immutable commit revisions. Update the pins and their version comments together.
 
 Packages are retained for 14 days. Compressed archives upload without redundant compression. Compiler diagnostics upload on failure and expire after 7 days. The first run populates caches; compare later runs before claiming a speed improvement.
 
@@ -29,7 +30,7 @@ Packages are retained for 14 days. Compressed archives upload without redundant 
 2. Add `docs/releases/<version>.md` with the release notes and installation requirements.
 3. Merge into `main` and wait for a successful `CI` run containing all four native packages. Exercise the native app on the platforms being released; CI package checks do not verify interactive playback or visual behavior.
 4. On the Mac containing the Developer ID certificate and notarization profile, run the signed preparation command below with that exact commit's CI run.
-5. Review the draft's notes and eight assets (four archives and four checksums). Publishing remains a separate, explicit maintainer action. A draft is not offered by the app's update checker.
+5. Review the draft's notes and six assets: two Mac DMGs, two Mac app-only archives for existing automatic updaters, and two Windows ZIPs. Checksums stay in CI/local staging; GitHub's asset digests verify published downloads. Publishing remains a separate, explicit maintainer action. A draft is not offered by the app's update checker.
 
 ```bash
 npm run release:prepare -- --ci-run 123456789 \
@@ -41,7 +42,7 @@ The command verifies the CI workflow identity, event, branch, commit, success, v
 
 The checkout must be clean and match current `main`. Preparation can refresh a draft for the same commit, but refuses to replace a published release or a draft targeting another commit. If artifacts have expired or `main` moved, obtain a successful complete CI run for the new commit. Publishing remains a separate action.
 
-The **Prepare draft release** GitHub workflow is also available for inspecting unnotarized CI packages. It verifies and copies the eight CI assets into a draft without local signing. It must not overwrite a locally signed draft. Use the local command for the signed release intended for users.
+The **Prepare draft release** GitHub workflow is also available for inspecting unnotarized CI packages. It verifies all six payloads and their checksums, then copies only the six payloads into a draft without local signing. It must not overwrite a locally signed draft. Use the local command for the signed release intended for users. Main CI creates packages but never automatically creates or publishes a release; a failed native job prevents release preparation.
 
 ### Signing setup
 
@@ -57,13 +58,15 @@ The Windows updater runs only the trusted helper bundled with the installed app.
 
 ## Validate an update
 
-The release names are part of the updater contract: `GamePack-macos-{arm64,x64}.tar.gz` and `GamePack-windows-{arm64,x64}.zip`, each accompanied by `.sha256`. Keep them stable. The packaged app version must match `package.json`; packaging rejects a different app version.
+Mac users install `GamePack-macos-{arm64,x64}.dmg` by dragging GamePack into Applications. The disk image contains only the app and an Applications shortcut. Automatic updates support writable `/Applications/GamePack.app`, `~/Applications/GamePack.app`, and the existing `GAMEPACK_HOME/app/GamePack.app` location. App data and configuration remain in `GAMEPACK_HOME` or `~/.gamepack`.
+
+The update payload names remain `GamePack-macos-{arm64,x64}.tar.gz` and `GamePack-windows-{arm64,x64}.zip` for compatibility with installed releases. Mac update archives contain only the app. Each CI payload has a `.sha256` file for pipeline verification, but release preparation uploads only the payloads. Existing update checkers already accept GitHub's asset digest without a checksum attachment. The packaged app version must match `package.json`; packaging rejects a different app version.
 
 Before preparing a draft:
 
 1. Confirm the exact `main` commit has a successful complete `CI` run with all four native jobs and `release-*` artifacts. A successful documentation-only run is insufficient. If needed, dispatch `CI` on `main` manually.
 2. Download the matching artifact and verify its SHA-256 checksum. Use a temporary absolute `GAMEPACK_HOME` for native checks. Install an older supported version there, import a small clip, create a project/comment/drawing/draft, and change a setting. Quit the app and copy the library before testing the upgrade.
-3. Extract the new package and run its installer with the same `GAMEPACK_HOME`. Confirm the new version, existing project/media/comments/drawings/drafts/settings, and playback. Inspect both themes. Reinstall the same version and check the library again. Do not run an older app against the upgraded library; restore the backup for another older-version test.
+3. On Mac, mount the DMG and drag the app into Applications. For an isolated managed-installation check, run `GAMEPACK_HOME=/absolute/test/root bash scripts/macos/install-app.sh /Volumes/GamePack/GamePack.app --no-launch` from the source checkout. On Windows, extract the ZIP and run its installer with the same `GAMEPACK_HOME`. Confirm the new version, existing project/media/comments/drawings/drafts/settings, and playback. Inspect both themes. Reinstall the same version and check the library again. Do not run an older app against the upgraded library; restore the backup for another older-version test.
 4. Exercise Settings with newer, equal, and older release cases. The checker must select the operating system and hardware architecture and ignore drafts/prereleases. **Update** must verify and stage the package without interrupting review; **Restart to update** must save pending work before handing installation to the bundled helper. Verify library preservation, failure recovery, reopening Settings during preparation, and installation from the normal managed location. Use isolated fixtures before publishing; never publish a test release just to exercise the updater.
 
 `npm run test:release` covers version synchronization and macOS installer replacement/rollback/data preservation using isolated filesystem fixtures. Shared UI and native contract tests cover release selection and URL construction. These checks supplement installation and playback on real macOS/Windows hosts; report the tested OS and architecture.
