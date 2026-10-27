@@ -8,6 +8,8 @@ import {checkVersion, repositoryRoot} from './version.mjs';
 export const repository = 'Potirniche-Carmine/GamePack';
 export const targets = ['macos-arm64', 'macos-x64', 'windows-arm64', 'windows-x64'];
 export const archiveName = target => `GamePack-${target}.${target.startsWith('macos-') ? 'tar.gz' : 'zip'}`;
+export const packageNames = target => target.startsWith('macos-') ? [archiveName(target), `GamePack-${target}.dmg`] : [archiveName(target)];
+export const releaseAssetNames = targets.flatMap(packageNames);
 const sha = /^[a-f0-9]{40}$/;
 const endpoint = suffix => `repos/${repository}/${suffix}`;
 const validText = value => typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 256 && !/[\x00-\x1f\x7f]/.test(value);
@@ -59,14 +61,17 @@ export function verifyDraft(release, {tag, commit}) {
   assert.equal(release.draft, true, 'A published release cannot be replaced.');
   assert.equal(release.target_commitish, commit, 'The existing draft targets a different commit.');
   assert.equal(release.prerelease, false, 'The existing draft is marked as a prerelease.');
-  const expected = new Set(targets.flatMap(target => [archiveName(target), `${archiveName(target)}.sha256`]));
+  // Accept old checksum assets only so a same-commit draft can be migrated;
+  // they are removed before the completed draft is verified.
+  const expected = new Set(releaseAssetNames.flatMap(name => [name, `${name}.sha256`]));
   const names = (release.assets ?? []).map(asset => asset.name);
   assert.ok(names.every(name => expected.has(name)) && new Set(names).size === names.length, 'The existing draft contains unexpected or duplicate assets; review it before replacing anything.');
   return release;
 }
 
-export function verifySigningReport(report, {version, architecture, identity, source, archive, sha256}) {
-  assert.ok(report && report.version === version && report.architecture === architecture && report.source === source && report.archive === archive && report.sha256 === sha256,
+export function verifySigningReport(report, {version, architecture, identity, source, archive, sha256, diskImage, diskImageSha256}) {
+  assert.ok(report && report.version === version && report.architecture === architecture && report.source === source && report.archive === archive && report.sha256 === sha256 &&
+    report.diskImage?.path === diskImage && report.diskImage?.sha256 === diskImageSha256,
     'The signed package report does not match the prepared archive.');
   const signing = report.signing, notarization = report.notarization;
   assert.ok(signing?.identity === identity && /^Developer ID Application: .+ \([A-Z0-9]{10}\)$/.test(signing.name ?? '') && /^[A-Z0-9]{10}$/.test(signing.team ?? '') && signing.name.endsWith(`(${signing.team})`) && signing.developerID === true && signing.hardenedRuntime === true && signing.secureTimestamp === true,
@@ -86,8 +91,8 @@ function regular(file, maximum = 512 * 1024 * 1024) {
   assert.ok(stat.isFile() && stat.size > 0 && stat.size <= maximum, `Missing or invalid release file: ${file}`);
   return stat.size;
 }
-async function verifyPair(directory, target) {
-  const name = archiveName(target), file = join(directory, name);
+async function verifyPair(directory, target, name = archiveName(target)) {
+  const file = join(directory, name);
   const size = regular(file); regular(`${file}.sha256`, 4096);
   const sha256 = await hashFile(file);
   assert.equal(readFileSync(`${file}.sha256`, 'utf8'), `${sha256}  ${name}\n`, `Checksum mismatch for ${name}.`);
@@ -106,12 +111,9 @@ function execute(program, args, {cwd, env, stream = false} = {}) {
 }
 
 export function releaseNotes(notes, provenance) {
-  const lines = [notes.trimEnd(), '', `Built from commit ${provenance.commit} in [CI run ${provenance.ciRun}](https://github.com/${repository}/actions/runs/${provenance.ciRun}) (attempt ${provenance.ciAttempt}).`, '',
-    `The source Mac builds came from CI. Both release archives were signed locally with ${provenance.signer.name} (Team ID \`${provenance.signer.team}\`, certificate SHA-1 \`${provenance.signer.identity}\`), notarized by Apple, stapled, and accepted by Gatekeeper.`, '',
-    '| Mac package | Source CI SHA-256 | Signed SHA-256 | Apple submission |', '| --- | --- | --- | --- |'];
-  for (const item of provenance.macos) lines.push(`| ${item.architecture} | \`${item.sourceSha256}\` | \`${item.sha256}\` | \`${item.notarizationId}\` |`);
-  lines.push('', 'Windows packages and checksums are unchanged from the source CI artifacts.', '', '<!-- gamepack-draft-source: signed-local -->', `<!-- gamepack-release-provenance ${JSON.stringify(provenance)} -->`, '');
-  return lines.join('\n');
+  return [notes.trimEnd(), '', 'Mac downloads are signed and notarized by Apple.', '',
+    `[Build verification](https://github.com/${repository}/actions/runs/${provenance.ciRun})`, '',
+    '<!-- gamepack-draft-source: signed-local -->', `<!-- gamepack-release-provenance ${JSON.stringify(provenance)} -->`, ''].join('\n');
 }
 
 export async function prepareRelease(options, dependencies = {}) {
@@ -165,10 +167,11 @@ export async function prepareRelease(options, dependencies = {}) {
   for (const artifact of artifacts) {
     const target = artifact.name.slice('release-'.length), directory = join(downloads, target);
     await command('gh', ['run', 'download', options.ciRun, '--repo', `github.com/${repository}`, '--name', artifact.name, '--dir', directory]);
-    assert.deepEqual(readdirSync(directory).sort(), [archiveName(target), `${archiveName(target)}.sha256`].sort(), `Unexpected files in ${artifact.name}.`);
+    assert.deepEqual(readdirSync(directory).sort(), packageNames(target).flatMap(name => [name, `${name}.sha256`]).sort(), `Unexpected files in ${artifact.name}.`);
+    for (const name of packageNames(target)) await verifyPair(directory, target, name);
     sources.set(target, {...await verifyPair(directory, target), artifactId: artifact.id, directory});
   }
-  log('All four CI archives and checksums verified. Validating package identities…');
+  log('All six CI payloads and checksums verified. Validating package identities…');
   for (const architecture of ['arm64', 'x64']) {
     const target = `windows-${architecture}`, source = sources.get(target);
     await command(options.powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', join(root, 'scripts/release/validate-windows-artifact.ps1'),
@@ -196,20 +199,26 @@ export async function prepareRelease(options, dependencies = {}) {
     }});
     const target = `macos-${architecture}`, directory = join(root, 'dist/packages'), signed = await verifyPair(directory, target), archive = join(directory, signed.name);
     regular(reportPath, 1024 * 1024);
-    const report = verifySigningReport(JSON.parse(readFileSync(reportPath, 'utf8')), {version, architecture, identity: options.identity, source: apps.get(architecture), archive, sha256: signed.sha256});
+    const image = await verifyPair(directory, target, `GamePack-${target}.dmg`);
+    const report = verifySigningReport(JSON.parse(readFileSync(reportPath, 'utf8')), {version, architecture, identity: options.identity, source: apps.get(architecture), archive, sha256: signed.sha256,
+      diskImage: join(directory, image.name), diskImageSha256: image.sha256});
     if (reports.length) assert.deepEqual(report.signing, reports[0].signing, 'Both Mac packages must use the same Developer ID identity.');
     reports.push(report);
-    for (const name of [signed.name, `${signed.name}.sha256`]) copyFileSync(join(directory, name), join(upload, name));
+    await command('bash', ['scripts/ci/verify-macos-install.sh', join(directory, image.name), archive, join(staging, `verify-signed-${target}`)], {stream: true});
+    for (const name of packageNames(target).flatMap(name => [name, `${name}.sha256`])) copyFileSync(join(directory, name), join(upload, name));
   }
   const expectedAssets = new Map();
   for (const target of targets) {
     const checked = await verifyPair(upload, target), source = sources.get(target);
     if (target.startsWith('windows-')) assert.equal(checked.sha256, source.sha256, 'A Windows archive changed during signing.');
-    for (const name of [checked.name, `${checked.name}.sha256`]) expectedAssets.set(name, {size: regular(join(upload, name)), sha256: await hashFile(join(upload, name))});
+    for (const name of packageNames(target)) {
+      const file = await verifyPair(upload, target, name);
+      expectedAssets.set(name, {size: file.size, sha256: file.sha256});
+    }
   }
   const provenance = {schema: 1, repository, commit, ciRun: options.ciRun, ciAttempt: ci.run_attempt, version,
     artifacts: artifacts.map(artifact => ({id: artifact.id, name: artifact.name})), signer: reports[0].signing,
-    macos: reports.map(report => ({architecture: report.architecture, sourceSha256: sources.get(`macos-${report.architecture}`).sha256, sha256: report.sha256, notarizationId: report.notarization.id})),
+    macos: reports.map(report => ({architecture: report.architecture, sourceSha256: sources.get(`macos-${report.architecture}`).sha256, sha256: report.sha256, diskImageSha256: report.diskImage.sha256, notarizationId: report.notarization.id})),
     windows: ['arm64', 'x64'].map(architecture => ({architecture, sha256: sources.get(`windows-${architecture}`).sha256})),
   };
   writeFileSync(join(staging, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`, {flag: 'wx'});
@@ -256,6 +265,11 @@ export async function prepareRelease(options, dependencies = {}) {
     assert.ok(expected && asset.name === name && asset.state === 'uploaded' && asset.size === expected.size && asset.digest === `sha256:${expected.sha256}`, `The uploaded asset ${name} could not be verified.`);
   };
   log(`Uploading verified assets to draft ${tag}…`);
+  for (const asset of (await currentDraft()).assets.filter(asset => asset.name.endsWith('.sha256'))) {
+    assert.ok(Number.isSafeInteger(asset.id) && asset.id > 0, 'The existing checksum asset ID is invalid.');
+    await currentDraft();
+    await command('gh', ['api', '--hostname', 'github.com', endpoint(`releases/assets/${asset.id}`), '--method', 'DELETE', '--silent']);
+  }
   for (const name of expectedAssets.keys()) {
     const current = await currentDraft(), existing = current.assets.find(asset => asset.name === name);
     if (existing) {
@@ -272,7 +286,7 @@ export async function prepareRelease(options, dependencies = {}) {
   }
   await recheckSource();
   draft = await currentDraft();
-  assert.equal(draft.assets.length, 8, 'The draft does not contain exactly eight assets.');
+  assert.equal(draft.assets.length, releaseAssetNames.length, 'The draft does not contain exactly the expected installer and update assets.');
   for (const asset of draft.assets) verifyAsset(asset, asset.name);
   const body = releaseNotes(notes, provenance);
   draft = await patchDraft(draftId, 'complete-draft.json', {name: `GamePack ${tag}`, body});

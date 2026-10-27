@@ -4,6 +4,7 @@
 #import <CoreServices/CoreServices.h>
 #include "../shared/UpdateVersion.h"
 #include "../shared/UpdateArchiveLimits.h"
+#include "../shared/UpdateInstallation.h"
 #include <CommonCrypto/CommonDigest.h>
 #include <libproc.h>
 #include <sys/sysctl.h>
@@ -51,9 +52,9 @@ NSString *GPUpdateVersion(NSString *tag) {
 }
 void GPRequireManagedInstallation(NSString *root, NSString *app) {
   Require(root.isAbsolutePath && [Canonical(root) isEqual:root], "The GamePack data folder is not supported for automatic updates.");
-  NSString *expected = Join(root, @"app/GamePack.app");
-  Require([Canonical(app) isEqual:expected], "Install GamePack in its data folder before updating here. Use the release installer first.");
-  Require([NSFileManager.defaultManager isWritableFileAtPath:Join(root, @"app")], "The GamePack app folder is not writable. Check its permissions and try again.");
+  Require([Canonical(app) isEqual:app] && gamepack::updates::supportedMacInstallation(root.UTF8String,Canonical(NSHomeDirectory()).UTF8String,app.UTF8String),
+    "Move GamePack to Applications before updating here.");
+  Require([NSFileManager.defaultManager isWritableFileAtPath:app.stringByDeletingLastPathComponent], "The GamePack app folder is not writable. Check its permissions and try again.");
 }
 void GPCreatePrivateDirectory(NSString *path) {
   Require([NSFileManager.defaultManager createDirectoryAtPath:path withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:nil], "Could not create the update folder. Check available space and permissions.");
@@ -210,17 +211,28 @@ static NSDictionary *SigningInformation(NSString *app) {
   return CFBridgingRelease(info);
 }
 NSString *GPManagedUpdateApp(NSString *root,NSString *runningApp) {
-  NSString *managed=Join(root,@"app/GamePack.app");
-  GPRequireManagedInstallation(root,managed);
-  if(![Canonical(runningApp) isEqual:managed]) {
-    // Gatekeeper may run a read-only copy at a randomized location. Do not
-    // discover that location or disable translocation: the target is always
-    // the known managed app, and both signed CodeDirectories must match.
-    NSDictionary *running=SigningInformation(runningApp),*installed=SigningInformation(managed);
-    id runningHash=running[(__bridge NSString *)kSecCodeInfoUnique],installedHash=installed[(__bridge NSString *)kSecCodeInfoUnique];
-    Require([runningHash isKindOfClass:NSData.class] && [runningHash isEqual:installedHash],"Open the installed GamePack from its data folder before updating. The running copy does not match it.");
+  NSArray<NSString *> *locations=@[Join(root,@"app/GamePack.app"),Join(Canonical(NSHomeDirectory()),@"Applications/GamePack.app"),@"/Applications/GamePack.app"];
+  NSString *runningPath=Canonical(runningApp);
+  if([locations containsObject:runningPath]) {
+    GPRequireManagedInstallation(root,runningPath);
+    return runningPath;
   }
-  return managed;
+  // A disk-image copy must first be dragged to Applications. For Gatekeeper's
+  // randomized launch copy, find exactly one installed, identically signed app.
+  NSDictionary *running=SigningInformation(runningApp);
+  id runningHash=running[(__bridge NSString *)kSecCodeInfoUnique];
+  NSString *match=nil;
+  for(NSString *location in locations) {
+    if(![NSFileManager.defaultManager fileExistsAtPath:location] || ![Canonical(location) isEqual:location]) continue;
+    NSDictionary *installed=nil;
+    try { installed=SigningInformation(location); } catch(std::exception const&) { continue; }
+    if(![runningHash isKindOfClass:NSData.class] || ![runningHash isEqual:installed[(__bridge NSString *)kSecCodeInfoUnique]]) continue;
+    Require(!match,"More than one installed GamePack matches this copy. Open the app from Applications to update it.");
+    match=location;
+  }
+  Require(match,"Move GamePack to Applications and open the installed app before updating.");
+  GPRequireManagedInstallation(root,match);
+  return match;
 }
 void GPValidateUpdateApp(NSString *app, NSString *version, NSString *architecture, NSString *currentApp) {
   NSBundle *bundle=[NSBundle bundleWithPath:app]; NSDictionary *info=[NSDictionary dictionaryWithContentsOfFile:Join(app,@"Contents/Info.plist")];
@@ -315,7 +327,7 @@ int GPRunUpdateInstallJob(NSString *jobPath) {
     pid_t pid=[process[@"pid"] intValue];
     NSString *runningApp=job[@"runningApp"]?:destination;
     Require([runningApp isKindOfClass:NSString.class] && [process[@"path"] isEqual:Join(Canonical(runningApp),@"Contents/MacOS/GamePack")] && GPUpdateProcessMatches(pid,process),"The running GamePack process changed. Check for updates again.");
-    GPManagedUpdateApp(root,runningApp);
+    Require([GPManagedUpdateApp(root,runningApp) isEqual:destination],"The running app does not match the update destination. Check for updates again.");
     RequireNoOtherInstances(root,destination,pid);
     Require(![NSFileManager.defaultManager fileExistsAtPath:backup],"A previous update is still pending. Restart GamePack and try again.");
     NSDictionary *helper=GPUpdateProcessIdentity(getpid());

@@ -28,7 +28,7 @@ export function notarizeApp(appPath, {profile = process.env.GAMEPACK_NOTARY_PROF
     }
     throw new Error(`Notarization was not accepted${id ? ` (submission ${id})` : ''}. ${submission?.status || result.error?.message || result.stderr?.trim() || 'Check the keychain profile and Apple account access.'} Diagnostics: ${receipt}. An upload may still be processing; check its status before submitting again.`);
   }
-  // Staple before creating the distributable tarball so offline Macs receive
+  // Staple before creating the disk image and update archive so offline Macs receive
   // Apple's ticket. Never re-sign or mutate app resources after this point.
   run('/usr/bin/xcrun', ['stapler', 'staple', app]);
   run('/usr/bin/xcrun', ['stapler', 'validate', app]);

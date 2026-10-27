@@ -46,6 +46,7 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]]
           npm run check:version
+          test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-run.json"
           jq -e --arg sha "$GITHUB_SHA" '
             .head_sha == $sha and .head_branch == "main" and
@@ -64,11 +65,11 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: release-packages
-      - name: Verify all four packages and checksums
+      - name: Verify all six payloads and pipeline checksums
         working-directory: release-packages
         run: |
-          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 8
-          for package in GamePack-macos-arm64.tar.gz GamePack-macos-x64.tar.gz GamePack-windows-x64.zip GamePack-windows-arm64.zip; do
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 12
+          for package in GamePack-macos-arm64.dmg GamePack-macos-x64.dmg GamePack-macos-arm64.tar.gz GamePack-macos-x64.tar.gz GamePack-windows-x64.zip GamePack-windows-arm64.zip; do
             test -s "$package"
             test -s "$package.sha256"
             sha256sum "$package" > "$RUNNER_TEMP/expected.sha256"
@@ -77,16 +78,22 @@ jobs:
       - name: Create or refresh the draft release
         run: |
           cp "docs/releases/${RELEASE_TAG#v}.md" "$RUNNER_TEMP/release-notes.md"
-          printf '\nBuilt from commit %s in [CI run %s](%s/%s/actions/runs/%s).\n' \
-            "$GITHUB_SHA" "$CI_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$CI_RUN_ID" >> "$RUNNER_TEMP/release-notes.md"
+          printf '\n[Build verification](%s/%s/actions/runs/%s)\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$CI_RUN_ID" >> "$RUNNER_TEMP/release-notes.md"
           printf '\nmacOS: development ad-hoc signatures; not notarized. Windows: unsigned.\n<!-- gamepack-draft-source: ci -->\n' >> "$RUNNER_TEMP/release-notes.md"
-          if gh release view "$RELEASE_TAG" --json isDraft,targetCommitish,body > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+          packages=(release-packages/*.dmg release-packages/*.tar.gz release-packages/*.zip)
+          if gh release view "$RELEASE_TAG" --json databaseId,isDraft,targetCommitish,body > "$RUNNER_TEMP/release.json" 2>/dev/null; then
             # Only refresh drafts created by this workflow. In particular, never
             # replace locally signed and notarized packages with CI artifacts.
             jq -e --arg sha "$GITHUB_SHA" '.isDraft == true and .targetCommitish == $sha and (.body | contains("<!-- gamepack-draft-source: ci -->"))' "$RUNNER_TEMP/release.json"
-            gh release upload "$RELEASE_TAG" release-packages/* --clobber
-            gh release edit "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+            release_id=$(jq -r .databaseId "$RUNNER_TEMP/release.json")
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --paginate --jq '.[] | select(.name | endswith(".sha256")) | .id' > "$RUNNER_TEMP/checksum-assets.txt"
+            while read -r asset_id; do
+              gh api "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" --method DELETE
+            done < "$RUNNER_TEMP/checksum-assets.txt"
+            gh release upload "$RELEASE_TAG" "${packages[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --tag "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --notes-file "$RUNNER_TEMP/release-notes.md"
           else
-            gh release create "$RELEASE_TAG" release-packages/* --draft --target "$GITHUB_SHA" \
+            gh release create "$RELEASE_TAG" "${packages[@]}" --draft --target "$GITHUB_SHA" \
               --title "GamePack $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi

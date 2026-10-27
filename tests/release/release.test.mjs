@@ -4,7 +4,7 @@ import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:
 import {tmpdir} from 'node:os';
 import {basename, dirname, join} from 'node:path';
 import test from 'node:test';
-import {archiveName, parseReleaseArgs, prepareRelease, repository, targets, verifyArtifacts, verifyDraft, verifyRun} from '../../scripts/release/release.mjs';
+import {archiveName, packageNames, releaseAssetNames, parseReleaseArgs, prepareRelease, repository, targets, verifyArtifacts, verifyDraft, verifyRun} from '../../scripts/release/release.mjs';
 import {checkVersion, repositoryRoot} from '../../scripts/release/version.mjs';
 
 const commit = 'a'.repeat(40), identity = 'B'.repeat(40), ciRun = '12345';
@@ -31,9 +31,11 @@ function fixture(t) {
   state.draft = () => ({id: 99, tag_name: tag, target_commitish: commit, draft: true, prerelease: false, assets: [], body: '<!-- gamepack-draft-source: ci -->', html_url: 'https://github.com/example/draft'});
   const pair = (directory, target, content) => {
     mkdirSync(directory, {recursive: true});
-    const file = join(directory, archiveName(target));
-    writeFileSync(file, content);
-    writeFileSync(`${file}.sha256`, `${sha256(content)}  ${basename(file)}\n`);
+    for (const name of packageNames(target)) {
+      const file = join(directory, name);
+      writeFileSync(file, content);
+      writeFileSync(`${file}.sha256`, `${sha256(content)}  ${basename(file)}\n`);
+    }
   };
   state.command = async (program, args, settings) => {
     const call = {program, args, settings}; state.calls.push(call); await state.before(call);
@@ -113,6 +115,11 @@ function fixture(t) {
       return '';
     }
     if (program === 'bash') {
+      if (args[0] === 'scripts/ci/verify-macos-install.sh') {
+        assert.ok(args[1].endsWith('.dmg') && args[2].endsWith('.tar.gz'));
+        await state.verifyInstaller?.(args);
+        return '';
+      }
       assert.deepEqual(args, ['scripts/package-macos.sh']);
       assert.deepEqual(new Set(state.validations), new Set(targets), 'Every CI identity must be validated before signing either Mac package.');
       const env = settings.env, architecture = env.GAMEPACK_PACKAGE_ARCH, directory = join(root, 'dist/packages');
@@ -121,6 +128,7 @@ function fixture(t) {
       const content = `notarized macos-${architecture}`;
       pair(directory, `macos-${architecture}`, content);
       const report = {version, architecture, source: env.GAMEPACK_MACOS_APP_SOURCE, archive: join(directory, archiveName(`macos-${architecture}`)), sha256: sha256(content),
+        diskImage: {path: join(directory, `GamePack-macos-${architecture}.dmg`), sha256: sha256(content)},
         signing: {identity, name: 'Developer ID Application: Fixture (TEAM123456)', team: 'TEAM123456', developerID: true, hardenedRuntime: true, secureTimestamp: true},
         notarization: {id: architecture === 'arm64' ? '11111111-1111-4111-8111-111111111111' : '22222222-2222-4222-8222-222222222222', status: 'Accepted', stapled: true, assessment: 'accepted', receipt: '/local/receipt.json'}};
       await state.report?.(report); writeFileSync(env.GAMEPACK_MACOS_PACKAGE_REPORT, JSON.stringify(report)); return '';
@@ -164,14 +172,17 @@ test('draft guards never accept published, mismatched, prerelease or unrelated a
 
 test('complete preparation signs both Mac artifacts, preserves Windows bytes, and creates only an unpublished draft with provenance', async t => {
   const state = fixture(t), result = await state.prepare();
-  assert.deepEqual(state.packages, ['arm64', 'x64']); assert.equal(state.uploads.length, 8);
+  assert.deepEqual(state.packages, ['arm64', 'x64']); assert.equal(state.uploads.length, 6);
+  assert.deepEqual(state.uploads.map(asset => asset.name).sort(), [...releaseAssetNames].sort());
+  assert.ok(state.uploads.every(asset => !asset.name.endsWith('.sha256')));
   for (const upload of state.uploads.filter(item => item.name.endsWith('.zip'))) assert.equal(upload.contents.toString(), `original CI ${upload.name.slice('GamePack-'.length, -'.zip'.length)}`);
   assert.deepEqual(state.writes.map(item => [item.endpoint, item.method]), [['releases', 'POST'], ['releases/99', 'PATCH']]);
   assert.equal(state.writes[0].request.draft, true);
   assert.match(state.writes[0].request.body, /incomplete/);
   assert.equal(state.releases[0].draft, true); assert.equal(state.releases[0].target_commitish, commit);
   assert.match(state.releases[0].body, /<!-- gamepack-draft-source: signed-local -->/);
-  assert.match(state.releases[0].body, /Source CI SHA-256/); assert.match(state.releases[0].body, /Signed SHA-256/);
+  const visibleNotes = state.releases[0].body.replace(/<!--[\s\S]*?-->/g, '');
+  assert.ok(!/SHA-256|SHA-1|Source CI|Signed SHA|[a-fA-F0-9]{40}/.test(visibleNotes));
   assert.match(state.releases[0].body, new RegExp(state.notes.trim()));
   assert.ok(!state.releases[0].body.includes(options.profile));
   assert.deepEqual(JSON.parse(readFileSync(join(result.staging, 'provenance.json'), 'utf8')), result.provenance);
@@ -204,6 +215,8 @@ for (const [name, mutate, error] of [
 
 for (const [name, mutate, error] of [
   ['bad checksum', s => { s.afterDownload = (directory, target) => writeFileSync(join(directory, `${archiveName(target)}.sha256`), `${'0'.repeat(64)}  ${archiveName(target)}\n`); }, /Checksum mismatch/],
+  ['bad disk image checksum', s => { s.afterDownload = (directory, target) => { if (target === 'macos-arm64') writeFileSync(join(directory, `GamePack-${target}.dmg`), 'tampered'); }; }, /Checksum mismatch/],
+  ['missing disk image', s => { s.afterDownload = (directory, target) => { if (target === 'macos-arm64') rmSync(join(directory, `GamePack-${target}.dmg`)); }; }, /Unexpected files/],
   ['unexpected downloaded file', s => { s.afterDownload = directory => writeFileSync(join(directory, 'extra.txt'), 'bad'); }, /Unexpected files/],
   ['wrong Windows architecture or version', s => { s.validate = target => { if (target === 'windows-x64') throw new Error('Package identity mismatch'); }; }, /identity mismatch/],
   ['wrong Mac architecture or version', s => { s.validate = target => { if (target === 'macos-x64') throw new Error('Package identity mismatch'); }; }, /identity mismatch/],
@@ -219,6 +232,8 @@ for (const [name, mutate, error] of [
   ['wrong signed version', s => { s.report = report => { report.version = '0.1.3'; }; }, /report does not match/],
   ['wrong signing identity', s => { s.report = report => { report.signing.identity = 'C'.repeat(40); }; }, /Developer ID/],
   ['mismatched signed hash', s => { s.report = report => { report.sha256 = '0'.repeat(64); }; }, /report does not match/],
+  ['mismatched signed disk image', s => { s.report = report => { report.diskImage.sha256 = '0'.repeat(64); }; }, /report does not match/],
+  ['invalid signed installer', s => { s.verifyInstaller = () => { throw new Error('Disk image validation failed'); }; }, /Disk image validation failed/],
   ['changed main', s => { s.report = () => { s.main = 'c'.repeat(40); }; }, /Main changed/],
   ['retried CI', s => { s.report = () => { s.ci.run_attempt = 2; }; }, /CI run was retried/],
   ['replaced artifacts', s => { s.report = () => { s.artifacts[0].id = 999; }; }, /CI artifacts changed/],
@@ -250,7 +265,15 @@ test('refresh deletes only assets belonging to the verified draft ID', async t =
   const state = fixture(t); state.releases = [state.draft()];
   state.releases[0].assets = [{id: 777, name: archiveName(targets[0]), state: 'uploaded', size: 1, digest: `sha256:${'0'.repeat(64)}`}];
   await state.prepare();
-  assert.deepEqual(state.deletes, [777]); assert.equal(state.uploads.length, 8); assert.equal(state.releases[0].draft, true);
+  assert.deepEqual(state.deletes, [777]); assert.equal(state.uploads.length, 6); assert.equal(state.releases[0].draft, true);
+});
+
+test('refresh removes legacy checksum assets while retaining verification inside the pipeline', async t => {
+  const state = fixture(t); state.releases = [state.draft()];
+  state.releases[0].assets = [{id: 778, name: `${archiveName(targets[0])}.sha256`}];
+  await state.prepare();
+  assert.deepEqual(state.deletes, [778]);
+  assert.deepEqual(state.releases[0].assets.map(asset => asset.name).sort(), [...releaseAssetNames].sort());
 });
 
 test('a replacement published release under the same tag never receives uploads', async t => {
@@ -290,7 +313,7 @@ for (const existing of [false, true]) test(`${existing ? 'existing draft refresh
   }
   assert.equal(state.releases[0].id, 99); assert.equal(state.releases[0].tag_name, state.tag);
   assert.equal(state.releases[0].target_commitish, commit); assert.equal(state.releases[0].draft, true);
-  assert.equal(state.releases[0].assets.length, 8); assert.deepEqual(state.refs, []);
+  assert.equal(state.releases[0].assets.length, 6); assert.deepEqual(state.refs, []);
 });
 
 for (const [name, change, error] of [

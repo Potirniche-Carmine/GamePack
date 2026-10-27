@@ -18,16 +18,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  javascript:
-    name: Shared interface and versions
+  changes:
+    name: Select native builds
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 2
     outputs:
       native: ${{ steps.changes.outputs.native }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+      - name: Select native builds
+        id: changes
+        run: node scripts/ci/native-changes.mjs
+
+  javascript:
+    name: Shared interface and versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -45,9 +57,6 @@ jobs:
             c++ -std=c++17 -Wall -Wextra -Werror "$source" -o "$executable"
             "$executable"
           done
-      - name: Select native builds
-        id: changes
-        run: node scripts/ci/native-changes.mjs
 
   rust:
     name: Rust (${{ matrix.os }})
@@ -107,7 +116,7 @@ jobs:
   required:
     name: CI required
     if: always()
-    needs: [javascript, rust, workflows]
+    needs: [changes, javascript, rust, workflows]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -117,11 +126,11 @@ jobs:
         run: jq -e 'all(. == "success")' <<< "$RESULTS"
 
   macos:
-    needs: [javascript, required]
-    if: github.ref == 'refs/heads/main' && needs.javascript.outputs.native == 'true'
+    needs: [changes]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.native == 'true'
     uses: ./.github/workflows/macos.yml
 
   windows:
-    needs: [javascript, required]
-    if: github.ref == 'refs/heads/main' && needs.javascript.outputs.native == 'true'
+    needs: [changes]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.native == 'true'
     uses: ./.github/workflows/windows.yml
