@@ -6,7 +6,7 @@ import {conversationRoot} from './discussion';
  * not reached the current React state snapshot yet. */
 export function conversationTarget(comments: readonly Comment[], item: Comment, _duration: number): {comment: Comment; time: number} {
   const root = item.parent_comment_id ? conversationRoot(comments, item.parent_comment_id) ?? item : item;
-  return {comment: root, time: root.anchor.kind === 'play' ? root.anchor.end_us : root.anchor.at_us};
+  return {comment: root, time: root.anchor.at_us};
 }
 
 export function notesAtTime(comments: readonly Comment[], time: number): Comment[] {

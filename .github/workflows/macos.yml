@@ -45,6 +45,8 @@ jobs:
           cache: npm
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
+      - name: Verify updater failure and rollback contracts before compiling the app
+        run: bash scripts/ci/test-macos-updater.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: macos-${{ matrix.arch }}
@@ -63,8 +65,11 @@ jobs:
           ccache --set-config compression=true
           ccache --set-config depend_mode=true
           ccache --set-config sloppiness=clang_index_store,ivfsoverlay,pch_defines,modules,time_macros
-          echo "ccache=$(ccache --get-config cache_dir)" >> "$GITHUB_OUTPUT"
-          echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          {
+            echo "ccache=$(ccache --get-config cache_dir)"
+            echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)"
+            echo "dependencies=$(node scripts/ci/macos-cache-key.mjs)"
+          } >> "$GITHUB_OUTPUT"
       - name: Cache CocoaPods dependencies
         id: pods-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -72,15 +77,22 @@ jobs:
           path: |
             macos/Pods
             ~/Library/Caches/CocoaPods
-          key: pods-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('Gemfile.lock', 'macos/Podfile', 'macos/Podfile.lock', 'package-lock.json') }}
-          restore-keys: pods-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-
+          key: pods-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ steps.tools.outputs.dependencies }}
+          restore-keys: pods-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-
       - name: Cache native compilation
         id: compiler-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.tools.outputs.ccache }}
-          key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('macos/Podfile.lock', 'package-lock.json') }}-${{ github.sha }}
-          restore-keys: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ hashFiles('macos/Podfile.lock', 'package-lock.json') }}-
+          key: ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ steps.tools.outputs.dependencies }}-${{ github.sha }}
+          restore-keys: ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ steps.tools.outputs.dependencies }}-
+      - name: Restore Xcode build intermediates
+        id: xcode-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/macos
+          key: xcode-v1-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ steps.tools.outputs.dependencies }}-${{ hashFiles('scripts/build-macos.sh') }}-${{ github.sha }}
+          restore-keys: xcode-v1-${{ runner.arch }}-${{ steps.tools.outputs.xcode }}-${{ steps.tools.outputs.dependencies }}-${{ hashFiles('scripts/build-macos.sh') }}-
       - name: Install locked JavaScript and CocoaPods dependencies
         run: |
           ccache --zero-stats
@@ -104,6 +116,12 @@ jobs:
       - name: Report compiler cache statistics
         if: always()
         run: ccache --show-stats
+      - name: Save Xcode build intermediates
+        if: ${{ !cancelled() && steps.xcode-cache.outcome == 'success' && steps.xcode-cache.outputs.cache-hit != 'true' && success() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/macos
+          key: ${{ steps.xcode-cache.outputs.cache-primary-key }}
       - name: Save compiler cache for the next build
         if: ${{ !cancelled() && steps.compiler-cache.outcome == 'success' && steps.compiler-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -122,7 +140,7 @@ jobs:
       - name: Verify update validation and the packaged archive
         run: bash scripts/ci/test-macos-updater.sh "dist/packages/GamePack-macos-$GAMEPACK_PACKAGE_ARCH.tar.gz" dist/GamePack.app
       - name: Verify packaged installation and replacement
-        run: bash scripts/ci/verify-macos-install.sh "dist/packages/GamePack-macos-$GAMEPACK_PACKAGE_ARCH.tar.gz" "$RUNNER_TEMP/gamepack-install-verification"
+        run: bash scripts/ci/verify-macos-install.sh "dist/packages/GamePack-macos-$GAMEPACK_PACKAGE_ARCH.dmg" "dist/packages/GamePack-macos-$GAMEPACK_PACKAGE_ARCH.tar.gz" "$RUNNER_TEMP/gamepack-install-verification"
       - name: Upload macOS desktop package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

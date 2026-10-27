@@ -40,7 +40,6 @@ JAVASCRIPT
 else
   node scripts/collect-notices.mjs "$stage/GamePack.app/Contents/Resources/Notices"
 fi
-cp scripts/macos/install-app.sh "$stage/Install.command"
 # Notices are part of the installed app, so verify the final signed bundle.
 node scripts/macos/sign-app.mjs "$stage/GamePack.app" --json > "$stage/signing.json"
 if [[ -n "${GAMEPACK_NOTARY_PROFILE:-}" ]]; then
@@ -48,30 +47,16 @@ if [[ -n "${GAMEPACK_NOTARY_PROFILE:-}" ]]; then
 else
   printf '{"status":"Not requested","stapled":false,"assessment":"not checked"}\n' > "$stage/notarization.json"
 fi
-chmod +x "$stage/Install.command"
-cat > "$stage/README.txt" <<'NOTICE'
-GamePack — native offline video review
-
-Requires macOS 14 or later and the matching CPU architecture.
-Quit GamePack if it is running, then double-click Install.command to put the app and library together in ~/.gamepack.
-Open ~/.gamepack/Launch GamePack.command to launch it later.
-To choose another location: GAMEPACK_HOME=/absolute/folder ./Install.command
-
-No Node, Rust, CocoaPods, Metro, or server is needed to run this release.
-ZIP library exchange is not included in this version.
-Removing the application does not remove your video library or comments.
-
-Source and verification: https://github.com/Potirniche-Carmine/GamePack
-NOTICE
-if [[ -n "${GAMEPACK_NOTARY_PROFILE:-}" ]]; then
-  printf '\nSigned with Developer ID and notarized by Apple.\n' >> "$stage/README.txt"
-elif [[ -n "${GAMEPACK_MACOS_SIGN_IDENTITY:-}" && "${GAMEPACK_MACOS_SIGN_IDENTITY}" != - ]]; then
-  printf '\nSigned with Developer ID; this package has not been notarized. macOS may require approval in System Settings > Privacy & Security.\n' >> "$stage/README.txt"
-else
-  printf '\nThis development build is ad-hoc signed, not Apple-notarized. macOS may require approval in System Settings > Privacy & Security.\n' >> "$stage/README.txt"
-fi
-COPYFILE_DISABLE=1 tar -czf "dist/packages/GamePack-macos-$arch.tar.gz" -C "$stage" GamePack.app Install.command README.txt
-(cd dist/packages && shasum -a 256 "GamePack-macos-$arch.tar.gz" > "GamePack-macos-$arch.tar.gz.sha256")
+# Keep the app-only archive for the automatic updater in existing releases.
+COPYFILE_DISABLE=1 tar -czf "dist/packages/GamePack-macos-$arch.tar.gz" -C "$stage" GamePack.app
+mkdir -p "$stage/disk-image"
+/usr/bin/ditto "$stage/GamePack.app" "$stage/disk-image/GamePack.app"
+ln -s /Applications "$stage/disk-image/Applications"
+hdiutil create -quiet -ov -format UDZO -fs HFS+ -volname GamePack \
+  -srcfolder "$stage/disk-image" "dist/packages/GamePack-macos-$arch.dmg"
+for extension in tar.gz dmg; do
+  (cd dist/packages && shasum -a 256 "GamePack-macos-$arch.$extension" > "GamePack-macos-$arch.$extension.sha256")
+done
 node --input-type=module - "$version" "$arch" "$app_source" "$PWD/dist/packages/GamePack-macos-$arch.tar.gz" "$stage" "${GAMEPACK_MACOS_PACKAGE_REPORT:-}" <<'JAVASCRIPT'
 import fs from 'node:fs';
 import path from 'node:path';
@@ -79,6 +64,8 @@ import {createHash} from 'node:crypto';
 const [version, architecture, source, archive, stage, output] = process.argv.slice(2);
 const report = {version, architecture, source, archive,
   sha256: createHash('sha256').update(fs.readFileSync(archive)).digest('hex'),
+  diskImage: {path: archive.replace(/\.tar\.gz$/, '.dmg'),
+    sha256: createHash('sha256').update(fs.readFileSync(archive.replace(/\.tar\.gz$/, '.dmg'))).digest('hex')},
   signing: JSON.parse(fs.readFileSync(path.join(stage, 'signing.json'), 'utf8')),
   notarization: JSON.parse(fs.readFileSync(path.join(stage, 'notarization.json'), 'utf8'))};
 if (output) {
@@ -88,4 +75,5 @@ if (output) {
 }
 console.log(report.signing.developerID ? `Signed with ${report.signing.name}. Notarization: ${report.notarization.status}.` : 'Development package (ad-hoc signature).');
 JAVASCRIPT
-printf 'Package: dist/packages/GamePack-macos-%s.tar.gz\n' "$arch"
+printf 'Installer: dist/packages/GamePack-macos-%s.dmg\n' "$arch"
+printf 'Automatic update: dist/packages/GamePack-macos-%s.tar.gz\n' "$arch"

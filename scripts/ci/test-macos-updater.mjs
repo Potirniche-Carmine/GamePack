@@ -132,6 +132,14 @@ run('/usr/bin/tar', ['-czf', fixtureArchive, '-C', path.dirname(candidate), 'Gam
 const fixtureDigest = createHash('sha256').update(fs.readFileSync(fixtureArchive)).digest('hex');
 const jobDirectory = check(['stage', fixtureArchive, fixtureDigest, root, 'v1.0.1']);
 const readPlist = file => JSON.parse(run('/usr/bin/plutil', ['-convert', 'json', '-o', '-', file]));
+// The helper polls these paths. Publish a complete plist with one rename,
+// matching GPWriteUpdatePlist, so it never observes JSON or a partial write.
+function writePlist(file, value) {
+  const temporary = `${file}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(value));
+  run('/usr/bin/plutil', ['-convert', 'binary1', temporary]);
+  fs.renameSync(temporary, file);
+}
 assert.equal(readPlist(path.join(root, 'updates/state.plist')).status, 'ready');
 assert.equal(readPlist(path.join(jobDirectory, 'prepared.plist')).sha256, fixtureDigest);
 check(['stage', fixtureArchive, fixtureDigest, root, 'v1.0.0'], false);
@@ -143,7 +151,7 @@ try {
   const identity = JSON.parse(check(['identity', String(child.pid)]));
   const job = {root, destination: current, staged: path.join(jobDirectory, 'payload/GamePack.app'), version: '1.0.1', process: identity};
   const jobPath = path.join(jobDirectory, 'job.plist');
-  const saveJob = value => { fs.writeFileSync(jobPath, JSON.stringify(value)); run('/usr/bin/plutil', ['-convert', 'binary1', jobPath]); };
+  const saveJob = value => writePlist(jobPath, value);
   saveJob({...job, process: {...identity, seconds: identity.seconds + 1}}); check(['install-job', jobPath], false);
   saveJob({...job, destination: candidate}); check(['install-job', jobPath], false);
   saveJob({...job, version: '1.0.0'}); check(['install-job', jobPath], false);
@@ -164,8 +172,7 @@ try {
   assert.ok(fs.existsSync(path.join(jobDirectory, 'helper-ready.plist')), 'helper handshake');
   const helperIdentity = readPlist(path.join(jobDirectory, 'helper-ready.plist')).process;
   const permit = path.join(jobDirectory, 'install-permitted.plist');
-  fs.writeFileSync(permit, JSON.stringify({helper: helperIdentity, parent: identity}));
-  run('/usr/bin/plutil', ['-convert', 'binary1', permit]);
+  writePlist(permit, {helper: helperIdentity, parent: identity});
   // A manual upgrade while the helper waits must never be overwritten.
   fs.writeFileSync(path.join(current, 'Contents/Info.plist'), plist('2.0.0'));
   child.kill(); assert.equal(await done, 1); checks++;
@@ -184,8 +191,7 @@ try {
   const identity = JSON.parse(check(['identity', String(uncommitted.pid)]));
   for (const name of ['helper-ready.plist', 'install-permitted.plist']) fs.rmSync(path.join(jobDirectory, name), {force: true});
   const jobPath = path.join(jobDirectory, 'job.plist');
-  fs.writeFileSync(jobPath, JSON.stringify({root, destination: current, runningApp: runningCopy, staged: path.join(jobDirectory, 'payload/GamePack.app'), version: '1.0.1', process: identity}));
-  run('/usr/bin/plutil', ['-convert', 'binary1', jobPath]);
+  writePlist(jobPath, {root, destination: current, runningApp: runningCopy, staged: path.join(jobDirectory, 'payload/GamePack.app'), version: '1.0.1', process: identity});
   const helper = spawn(harness, ['install-job', jobPath], {stdio: 'ignore'});
   const done = new Promise(resolve => helper.once('exit', resolve));
   for (let n = 0; n < 100 && !fs.existsSync(path.join(jobDirectory, 'helper-ready.plist')); n++) await delay(50);
@@ -202,15 +208,13 @@ for (const mode of ['fail-launch', 'early-exit']) {
     const identity = JSON.parse(check(['identity', String(process.pid)]));
     for (const name of ['helper-ready.plist', 'install-permitted.plist']) fs.rmSync(path.join(jobDirectory, name), {force: true});
     const jobPath = path.join(jobDirectory, 'job.plist');
-    fs.writeFileSync(jobPath, JSON.stringify({root, destination: current, staged: path.join(jobDirectory, 'payload/GamePack.app'), version: '1.0.1', process: identity}));
-    run('/usr/bin/plutil', ['-convert', 'binary1', jobPath]);
+    writePlist(jobPath, {root, destination: current, staged: path.join(jobDirectory, 'payload/GamePack.app'), version: '1.0.1', process: identity});
     const helper = spawn(harness, [`install-job-${mode}`, jobPath], {stdio: 'ignore'});
     const done = new Promise(resolve => helper.once('exit', resolve));
     for (let n = 0; n < 100 && !fs.existsSync(path.join(jobDirectory, 'helper-ready.plist')); n++) await delay(50);
     const helperIdentity = readPlist(path.join(jobDirectory, 'helper-ready.plist')).process;
     const permit = path.join(jobDirectory, 'install-permitted.plist');
-    fs.writeFileSync(permit, JSON.stringify({helper: helperIdentity, parent: identity}));
-    run('/usr/bin/plutil', ['-convert', 'binary1', permit]);
+    writePlist(permit, {helper: helperIdentity, parent: identity});
     process.kill(); assert.equal(await done, 1); checks++;
     if (mode === 'fail-launch') {
       assert.equal(readPlist(path.join(current, 'Contents/Info.plist')).CFBundleShortVersionString, '1.0.0');
