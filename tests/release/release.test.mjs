@@ -83,7 +83,14 @@ function fixture(t) {
       if (endpoint === 'releases/99') {
         assert.equal(state.releases.length, 1);
         if (method === 'PATCH') {
-          assert.notEqual(request.draft, false);
+          if (request.draft === false) {
+            assert.equal(state.allowPublish, true, 'Publication requires explicit opt-in.');
+            assert.equal(state.releases[0].draft, true);
+            assert.equal(state.uploads.length, 6);
+            assert.equal(request.tag_name, tag);
+            assert.equal(request.target_commitish, commit);
+            assert.equal(request.make_latest, 'true');
+          }
           Object.assign(state.releases[0], request);
           if (state.resetOmittedTag && !Object.hasOwn(request, 'tag_name')) state.releases[0].tag_name = 'untagged-fixture';
           await state.afterPatch?.(state.releases[0], request);
@@ -135,20 +142,45 @@ function fixture(t) {
     }
     throw new Error(`Unexpected command: ${program} ${JSON.stringify(args)}`);
   };
-  state.prepare = () => prepareRelease(options, {root, platform: 'darwin', run: state.command, log: () => {}});
+  state.prepare = (extra = {}) => prepareRelease({...options, ...extra}, {root, platform: 'darwin', run: state.command, log: () => {}});
   return state;
 }
 
 const context = {ciRun, commit, tag: 'v1.0.1'};
 const noRemoteChanges = state => { assert.deepEqual(state.writes, []); assert.deepEqual(state.uploads, []); };
 
-test('arguments accept the existing Keychain profile and certificate hash without accepting publication options', () => {
+test('arguments accept signing credentials and require an explicit standalone publication flag', () => {
   assert.deepEqual(parseReleaseArgs(['--ci-run', ciRun, '--sign-identity', identity.toLowerCase(), '--notary-profile', 'GamePack-DeveloperID']), {...options, powershell: 'pwsh'});
   assert.equal(parseReleaseArgs(['--ci-run', ciRun, '--sign-identity', identity, '--notary-profile', 'Local Profile', '--powershell', '/local tools/pwsh']).profile, 'Local Profile');
+  assert.equal(parseReleaseArgs(['--publish', '--ci-run', ciRun, '--sign-identity', identity, '--notary-profile', 'Profile']).publish, true);
   for (const extra of [['--publish', 'true'], ['--ci-run', '99'], ['--powershell'], ['--notary-profile', 'bad\nprofile']]) {
     assert.throws(() => parseReleaseArgs(['--ci-run', ciRun, '--sign-identity', identity, '--notary-profile', 'Profile', ...extra]));
   }
   for (const args of [[], ['--ci-run', '0', '--sign-identity', identity, '--notary-profile', 'Profile'], ['--ci-run', ciRun, '--sign-identity', 'Developer ID', '--notary-profile', 'Profile']]) assert.throws(() => parseReleaseArgs(args));
+});
+
+test('explicit publication happens only after signed packages and all uploaded digests are verified', async t => {
+  const state = fixture(t); state.allowPublish = true;
+  const result = await state.prepare({publish: true});
+  assert.equal(result.published, true);
+  assert.equal(state.releases[0].draft, false);
+  assert.deepEqual(state.releases[0].assets.map(asset => asset.name).sort(), [...releaseAssetNames].sort());
+  assert.equal(state.writes.at(-1).request.draft, false);
+  assert.equal(state.writes.filter(write => write.request?.draft === false).length, 1);
+});
+
+test('publication never proceeds after a failed uploaded digest check', async t => {
+  const state = fixture(t); state.allowPublish = true;
+  state.asset = asset => { asset.digest = `sha256:${'0'.repeat(64)}`; };
+  await assert.rejects(state.prepare({publish: true}), /could not be verified/);
+  assert.ok(state.writes.every(write => write.request?.draft !== false));
+});
+
+test('publication rechecks that main still matches the verified release', async t => {
+  const state = fixture(t); state.allowPublish = true;
+  state.afterPatch = (_draft, request) => { if (request.name) state.main = 'c'.repeat(40); };
+  await assert.rejects(state.prepare({publish: true}), /Main changed/);
+  assert.ok(state.writes.every(write => write.request?.draft !== false));
 });
 
 test('source run requires the exact main commit, trusted repository, CI workflow and completed success', () => {

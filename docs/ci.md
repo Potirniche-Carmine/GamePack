@@ -6,7 +6,7 @@ Pull requests target `main`. Keep feature and fix branches focused; agent branch
 
 The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It checks TypeScript, UI behavior, matching package versions, Rust formatting/tests/Clippy on Linux and Windows, Windows PowerShell transport and updater rollback fixtures, release/version and installer regression tests, native geometry/update contracts, and workflow syntax with actionlint.
 
-On `main`, a small change-selection job starts macOS ARM64/Intel and Windows ARM64/x64 in parallel with shared checks. Release preparation still requires the entire source CI run to succeed, including every shared and native job. Each platform validates its packaged app against the updater. macOS runs updater failure/rollback tests before compiling, then verifies the final package, mounts the DMG, compares its signed app with the update archive, and installs/reinstalls it into an isolated library without launching it. Documentation/test-only pushes skip native packages. Manually dispatch `CI` on `main` to build all four packages regardless of changed paths. CI runs finish independently so delayed events and retries cannot cancel a newer commit's running or pending checks. Several commits can therefore build at once. PRs never run packaging or release jobs.
+On `main`, a small change-selection job starts macOS ARM64/Intel and Windows ARM64/x64 in parallel with shared checks. Release preparation requires the entire source CI run to succeed, including every shared and native job. Each platform validates its packaged app against the updater. macOS runs updater failure/rollback tests before compiling, then verifies the final package, mounts the DMG, compares its signed app with the update archive, and installs/reinstalls it into an isolated library without launching it. Documentation/test-only pushes skip native packages. Manually dispatch `CI` on `main` to build all four packages regardless of changed paths. CI runs finish independently so delayed events and retries cannot cancel a newer commit's running or pending checks. Several commits can therefore build at once. PRs never run packaging or release jobs.
 
 ## Caches
 
@@ -24,13 +24,34 @@ Caches are disposable accelerators; a cold run must still build successfully. Xc
 
 Packages are retained for 14 days. Compressed archives upload without redundant compression. Compiler diagnostics upload on failure and expire after 7 days. The first run populates caches; compare later runs before claiming a speed improvement.
 
-## Prepare a release
+## Automatic releases
 
 1. Run `npm run version:prepare -- 1.2.3` with the intended stable version. It updates npm, Rust, macOS, and Windows versions together, including the compiled Windows version used by update checks. It does not commit, tag, or publish. Run `npm run check:version` and `npm run test:release`.
 2. Add `docs/releases/<version>.md` with the release notes and installation requirements. Add a matching entry at the top of `CHANGELOG.md`, with concise patch notes and a link to the detailed version notes.
-3. Merge into `main` and wait for a successful `CI` run containing all four native packages. Exercise the native app on the platforms being released; CI package checks do not verify interactive playback or visual behavior.
-4. On the Mac containing the Developer ID certificate and notarization profile, run the signed preparation command below with that exact commit's CI run.
-5. Review the draft's notes and six assets: two Mac DMGs, two Mac app-only archives for existing automatic updaters, and two Windows ZIPs. Checksums stay in CI/local staging; GitHub's asset digests verify published downloads. Publishing remains a separate, explicit maintainer action. A draft is not offered by the app's update checker.
+3. Exercise the native app on the platforms being released before merging; CI package checks do not verify interactive playback or visual behavior. Merge into `main` and wait for a successful complete `CI` run containing all four native packages.
+4. The **Release** workflow starts automatically after CI completes. It validates the repository, source workflow/event, current main commit, app version, and all four native artifacts. Failed, cancelled, superseded, fork/PR, and documentation-only runs cannot publish a release. Already-published versions are skipped; they are never overwritten.
+5. An ephemeral Mac runner signs and notarizes both Mac architectures, staples their Apple tickets, validates both Windows packages, and verifies every uploaded digest. It builds the version's patch notes from `docs/releases/<version>.md`. Only after all checks succeed does it publish the release and make it available to the in-app updater.
+
+The six published assets are two Mac DMGs, two Mac app-only archives for existing automatic updaters, and two Windows ZIPs. Checksums stay in CI/local staging; GitHub's asset digests verify published downloads. A failure during signing, notarization, or uploading leaves the release unpublished.
+
+### Signing configuration
+
+Configure these encrypted repository Actions secrets once:
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | Base64-encoded PKCS#12 containing the distribution certificate and its private key. |
+| `MACOS_CERTIFICATE_PASSWORD` | The PKCS#12 export password. |
+| `APPLE_NOTARY_APPLE_ID` | The Apple account used for notarization. |
+| `APPLE_NOTARY_PASSWORD` | Its app-specific notarization password. |
+
+The optional repository variables `MACOS_SIGN_IDENTITY` and `APPLE_TEAM_ID` override the current distribution certificate fingerprint and team. Update the identity variable when renewing the certificate. The runner imports the certificate into a temporary keychain, signs a probe to verify access, validates the Apple credentials, and removes the keychain and certificate file on success or failure. Credential setup refuses to run outside ephemeral GitHub-hosted Mac runners. Missing credentials stop the workflow before any release changes.
+
+After configuring or renewing credentials, manually dispatch **Release** on `main` with `verify_signing=true` to check signing and notarization access without preparing or publishing a version. The source fields are ignored for this check. A normal manual dispatch needs `version_tag` and `ci_run_id` from a successful current-main build; set `publish=false` to prepare a signed draft for review.
+
+### Local preparation
+
+Local signed preparation remains available on the Mac containing the Developer ID certificate and notarization profile:
 
 ```bash
 npm run release:prepare -- --ci-run 123456789 \
@@ -38,13 +59,13 @@ npm run release:prepare -- --ci-run 123456789 \
   --notary-profile GamePack-DeveloperID
 ```
 
-The command verifies the CI workflow identity, event, branch, commit, success, versions and checksums. It downloads all four CI packages, signs both Mac architectures locally, submits them to Apple, staples their notarization tickets, and verifies Gatekeeper acceptance before creating the draft. Windows archives remain byte-for-byte identical to CI. It does not rebuild the native apps, export your private key, or put credentials in GitHub. Install PowerShell 7 on the release Mac for Windows package validation; use `--powershell /absolute/path/to/pwsh` if needed.
+The command verifies the CI workflow identity, event, branch, commit, success, versions and checksums. It downloads all four CI packages, signs both Mac architectures locally, submits them to Apple, staples their notarization tickets, and verifies Gatekeeper acceptance before creating the draft. Windows archives remain byte-for-byte identical to CI. It does not rebuild the native apps or export your private key. Install PowerShell 7 on the release Mac for Windows package validation; use `--powershell /absolute/path/to/pwsh` if needed. Add `--publish` to publish only after the completed draft, source run, notes and uploaded digests are rechecked; omitting the flag keeps the local command draft-only.
 
-The checkout must be clean and match current `main`. Preparation can refresh a draft for the same commit, but refuses to replace a published release or a draft targeting another commit. If artifacts have expired or `main` moved, obtain a successful complete CI run for the new commit. Publishing remains a separate action.
+The checkout must be clean and match current `main`. Preparation can refresh a draft for the same commit, but refuses to replace a published release or a draft targeting another commit. Automatic selection preserves different-commit drafts for review. If artifacts have expired or `main` moved, obtain a successful complete CI run for the new commit.
 
-The **Prepare draft release** GitHub workflow is also available for inspecting unnotarized CI packages. It verifies all six payloads and their checksums, then copies only the six payloads into a draft without local signing. It must not overwrite a locally signed draft. Use the local command for the signed release intended for users. Main CI creates packages but never automatically creates or publishes a release; a failed native job prevents release preparation.
+The release workflow consumes the already-verified CI artifacts and never builds its own native apps. A successful **CI required** aggregate alone is insufficient: every native job and the overall source CI run must have succeeded. Publication uses the pinned numeric release ID and retains the complete tag/commit identity. Signed drafts and published assets cannot be replaced by unsigned CI output.
 
-### Signing setup
+### Local signing setup
 
 Use a valid **Developer ID Application** certificate with its private key in the Mac's Keychain. An existing certificate and Apple notarization credentials for the same developer team can serve multiple apps. `security find-identity -v -p codesigning` lists available identities. Create a local profile with `xcrun notarytool store-credentials GamePack-DeveloperID` and follow its secure prompts, or use its API-key options. Keep passwords, private keys, and credential files out of the repository.
 

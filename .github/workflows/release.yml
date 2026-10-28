@@ -1,38 +1,55 @@
-name: Prepare draft release
+name: Release
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       version_tag:
-        description: Version to prepare (for example v1.0.0)
-        required: true
+        description: Version to release (for example v1.0.4)
+        required: false
         type: string
       ci_run_id:
-        description: Successful CI run for the current main commit, containing all four packages
-        required: true
+        description: Successful CI run for current main with all four native artifacts
+        required: false
         type: string
+      publish:
+        description: Publish after signing, notarization and verification
+        required: true
+        type: boolean
+        default: true
+      verify_signing:
+        description: Check signing credentials without preparing or publishing a release
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   actions: read
 
-concurrency:
-  group: draft-release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  draft:
-    if: github.ref == 'refs/heads/main'
-    name: Prepare verified draft
+  source:
+    name: Select verified release source
+    if: >-
+      github.ref == 'refs/heads/main' && !inputs.verify_signing &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        contains(fromJSON('["push","workflow_dispatch"]'), github.event.workflow_run.event) &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      actions: read
+    timeout-minutes: 5
+    outputs:
+      prepare: ${{ steps.source.outputs.prepare }}
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
+      ci_run: ${{ steps.source.outputs.ci_run }}
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.version_tag }}
-      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      CI_RUN_ID: ${{ inputs.ci_run_id || github.event.workflow_run.id }}
+      REQUESTED_RELEASE_TAG: ${{ inputs.version_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,59 +58,61 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Verify version and source CI run
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]]
-          npm run check:version
-          test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-run.json"
-          jq -e --arg sha "$GITHUB_SHA" '
-            .head_sha == $sha and .head_branch == "main" and
-            .path == ".github/workflows/ci.yml" and
-            (.event == "push" or .event == "workflow_dispatch") and
-            .status == "completed" and .conclusion == "success"
-          ' "$RUNNER_TEMP/source-run.json"
-          if tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha 2>/dev/null); then
-            test "$tag_sha" = "$GITHUB_SHA"
-          fi
-      - name: Download the already verified packages
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Verify source, version, artifacts and release identity
+        id: source
+        run: node scripts/release/select-release.mjs
+
+  release:
+    name: Sign, verify and publish
+    needs: source
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      (needs.source.outputs.prepare == 'true' ||
+       (github.event_name == 'workflow_dispatch' && inputs.verify_signing))
+    runs-on: macos-15
+    timeout-minutes: 75
+    concurrency:
+      group: release-${{ needs.source.outputs.tag }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI_RUN_ID: ${{ needs.source.outputs.ci_run }}
+      RELEASE_TAG: ${{ needs.source.outputs.tag }}
+      PUBLISH_RELEASE: ${{ github.event_name == 'workflow_run' || inputs.publish }}
+      MACOS_SIGN_IDENTITY: ${{ vars.MACOS_SIGN_IDENTITY || 'FB6753A6FCBE197440100A34EB795D25C2F259AC' }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || 'P3UF4Y6ASK' }}
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.ci_run_id }}
-          pattern: release-*
-          merge-multiple: true
-          path: release-packages
-      - name: Verify all six payloads and pipeline checksums
-        working-directory: release-packages
+          ref: ${{ needs.source.outputs.commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Configure temporary signing and notarization credentials
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+        run: bash scripts/ci/configure-release-signing.sh
+      - name: Ensure PowerShell is available for Windows artifact validation
+        if: needs.source.outputs.prepare == 'true'
+        run: bash scripts/ci/install-release-powershell.sh
+      - name: Prepare signed packages and publish verified release
+        if: needs.source.outputs.prepare == 'true'
         run: |
-          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 12
-          for package in GamePack-macos-arm64.dmg GamePack-macos-x64.dmg GamePack-macos-arm64.tar.gz GamePack-macos-x64.tar.gz GamePack-windows-x64.zip GamePack-windows-arm64.zip; do
-            test -s "$package"
-            test -s "$package.sha256"
-            sha256sum "$package" > "$RUNNER_TEMP/expected.sha256"
-            diff -u "$RUNNER_TEMP/expected.sha256" "$package.sha256"
-          done
-      - name: Create or refresh the draft release
+          options=(--ci-run "$CI_RUN_ID" --sign-identity "$GAMEPACK_MACOS_SIGN_IDENTITY" --notary-profile "$GAMEPACK_NOTARY_PROFILE")
+          if [[ "$PUBLISH_RELEASE" == true ]]; then options+=(--publish); fi
+          npm run release:prepare -- "${options[@]}"
+      - name: Remove temporary signing credentials
+        if: always()
         run: |
-          cp "docs/releases/${RELEASE_TAG#v}.md" "$RUNNER_TEMP/release-notes.md"
-          printf '\n[Build verification](%s/%s/actions/runs/%s)\n' \
-            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$CI_RUN_ID" >> "$RUNNER_TEMP/release-notes.md"
-          printf '\nmacOS: development ad-hoc signatures; not notarized. Windows: unsigned.\n<!-- gamepack-draft-source: ci -->\n' >> "$RUNNER_TEMP/release-notes.md"
-          packages=(release-packages/*.dmg release-packages/*.tar.gz release-packages/*.zip)
-          if gh release view "$RELEASE_TAG" --json databaseId,isDraft,targetCommitish,body > "$RUNNER_TEMP/release.json" 2>/dev/null; then
-            # Only refresh drafts created by this workflow. In particular, never
-            # replace locally signed and notarized packages with CI artifacts.
-            jq -e --arg sha "$GITHUB_SHA" '.isDraft == true and .targetCommitish == $sha and (.body | contains("<!-- gamepack-draft-source: ci -->"))' "$RUNNER_TEMP/release.json"
-            release_id=$(jq -r .databaseId "$RUNNER_TEMP/release.json")
-            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --paginate --jq '.[] | select(.name | endswith(".sha256")) | .id' > "$RUNNER_TEMP/checksum-assets.txt"
-            while read -r asset_id; do
-              gh api "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" --method DELETE
-            done < "$RUNNER_TEMP/checksum-assets.txt"
-            gh release upload "$RELEASE_TAG" "${packages[@]}" --clobber
-            gh release edit "$RELEASE_TAG" --tag "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --notes-file "$RUNNER_TEMP/release-notes.md"
-          else
-            gh release create "$RELEASE_TAG" "${packages[@]}" --draft --target "$GITHUB_SHA" \
-              --title "GamePack $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
-          fi
+          keychain="$RUNNER_TEMP/gamepack-release.keychain-db"
+          if [[ -f "$keychain" ]]; then security delete-keychain "$keychain"; fi
+          rm -f "$RUNNER_TEMP/gamepack-signing.p12"

@@ -40,7 +40,7 @@ Documentation-only changes need accurate commands, working links, and a readable
 - Preserve the single-frame drawing model and the immutable posted-comment contract.
 - Do not commit footage, databases, build output, credentials, or local verification screenshots.
 
-GitHub Actions runs shared interface, version, Rust, Windows transport, and workflow checks on pull requests. Require the `CI required` check before merging. Native packages are built after changes reach `main`; release preparation reuses those artifacts and creates a draft. Publication requires an explicit maintainer request. See [CI and releases](docs/ci.md).
+GitHub Actions runs shared interface, version, Rust, Windows transport, and workflow checks on pull requests. Require the `CI required` check before merging. After changes reach `main`, successful native builds trigger release automation for new versions. Mac packages are signed and notarized, all downloads are verified, and the completed release is published automatically. Published versions are never replaced. See [CI and releases](docs/ci.md).
 
 ## License
 

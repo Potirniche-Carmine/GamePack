@@ -18,8 +18,13 @@ export function parseReleaseArgs(args) {
   const options = {powershell: 'pwsh'};
   const names = {'--ci-run': 'ciRun', '--sign-identity': 'identity', '--notary-profile': 'profile', '--powershell': 'powershell'};
   const seen = new Set();
-  for (let index = 0; index < args.length; index += 2) {
-    const flag = args[index], value = args[index + 1];
+  for (let index = 0; index < args.length; index++) {
+    const flag = args[index];
+    if (flag === '--publish') {
+      assert.ok(!seen.has(flag), 'Repeated option: --publish');
+      seen.add(flag); options.publish = true; continue;
+    }
+    const value = args[++index];
     assert.ok(names[flag] && !seen.has(flag), `Unknown or repeated option: ${flag}`);
     assert.ok(validText(value) && !value.startsWith('--'), `Missing or invalid value for ${flag}.`);
     seen.add(flag); options[names[flag]] = value;
@@ -292,6 +297,25 @@ export async function prepareRelease(options, dependencies = {}) {
   draft = await patchDraft(draftId, 'complete-draft.json', {name: `GamePack ${tag}`, body});
   assert.equal(draft.body, body, 'The final draft notes could not be verified.');
   assert.equal(await tagIdentity(), initialTag, 'The version tag changed unexpectedly. Review the draft before publishing.');
+  if (options.publish === true) {
+    await recheckSource();
+    draft = await currentDraft();
+    assert.equal(draft.body, body, 'The completed release notes changed before publication.');
+    assert.equal(draft.assets.length, expectedAssets.size, 'The release assets changed before publication.');
+    for (const asset of draft.assets) verifyAsset(asset, asset.name);
+    // Publish only this verified numeric release ID. Always retain its tag and
+    // exact commit; publication is opt-in for the local command.
+    const published = await api(`releases/${draftId}`, ['--method', 'PATCH', '--input', jsonRequest('publish-release.json', {
+      tag_name: tag, target_commitish: commit, name: `GamePack ${tag}`, body,
+      draft: false, prerelease: false, make_latest: 'true',
+    })]);
+    assert.ok(published.id === draftId && published.tag_name === tag && published.target_commitish === commit && published.draft === false && published.prerelease === false,
+      'The published release identity could not be verified.');
+    assert.equal(published.assets.length, expectedAssets.size, 'The published assets could not be verified.');
+    for (const asset of published.assets) verifyAsset(asset, asset.name);
+    log(`Published ${tag}: ${published.html_url}`);
+    return {tag, commit, staging, url: published.html_url, provenance, published: true};
+  }
   log(`Draft ${tag} is ready for review: ${draft.html_url}. Nothing was published. Local provenance: ${join(staging, 'provenance.json')}`);
   return {tag, commit, staging, url: draft.html_url, provenance};
 }
